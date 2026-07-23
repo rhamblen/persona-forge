@@ -2,6 +2,20 @@
 
 Repo: https://github.com/rhamblen/persona-forge
 
+## Why
+
+Sometimes when using SillyTavern you want to create your own characters with your
+own images — but you don't want a static image, you want expressions. Live2D and VRM
+are complicated to build, and facial expressions alone are easy to misread or simply
+not notice, especially across 28 of them. Using **posture** as well makes the
+character far more readable.
+
+Persona Forge builds both **face and posture** expression sets using ComfyUI, behind
+a custom interface that walks you through the steps — with **Ollama** on hand to
+customise prompts in natural language wherever you need it.
+
+## What it does
+
 Self-hosted web app for building consistent 2D anime characters end to end:
 
 **Prompt Studio → Dataset Builder → per-character LoRA → Pose / Expression sets**
@@ -27,7 +41,7 @@ Versioning is `0.<phase>.<iteration>` — see `VERSION`.
 
 Prerequisites on the ComfyUI container (already done):
 - Unraid → container edit → **Add another Path**: host
-  `/mnt/user/data-and-backups/blender-and-comfyui-output/comfyui-builds` → container
+  `/mnt/user/data-and-backups/blender-and-comfy-ui-output/comfyui-builds` → container
   `/builds`, Read/Write.
 - `05-comfy-ui/parameters.txt` contains `--output-directory /builds`.
 

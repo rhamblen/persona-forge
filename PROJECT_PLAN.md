@@ -14,10 +14,25 @@ Created 2026-07-23. Sibling to the VRM/Live2D avatar work in the parent repo's
 
 ## 1. Goal
 
-Type a character description, refine it visually, and come out the other end with
-a **trained per-character LoRA** plus a **full expression/pose sprite set** ready
-for SillyTavern — without hand-driving ComfyUI. Everything runs on the LAN
+**The problem.** Sometimes when using SillyTavern you want to create your own
+characters with your own images — but you don't want a static image, you want
+expressions. Live2D and VRM are complicated to build, and facial expressions alone
+are easy to misread or simply not notice, especially across 28 of them. Adding
+**posture** makes the character far more readable.
+
+**The tool.** Persona Forge builds expression sets covering **both face and
+posture** using ComfyUI, behind a custom interface that walks through the steps, with
+**Ollama** providing natural-language prompt customisation where needed.
+
+Concretely: type a character description, refine it visually, and come out the other
+end with a **trained per-character LoRA** plus a **full expression/pose sprite set**
+ready for SillyTavern — without hand-driving ComfyUI. Everything runs on the LAN
 (ComfyUI + Ollama on UR1); no Claude Code in the runtime loop.
+
+> **Why posture matters (design driver):** this is the reason the pipeline invests in
+> a per-character LoRA at all. Face-only sets are trivially consistent but hard to
+> read at a glance; varying posture needs the whole body re-generated, which only
+> stays on-model with a LoRA (IPAdapter alone proved too drifty — see §9).
 
 ## 2. The pipeline (core UX)
 
@@ -150,7 +165,7 @@ there, and (crucially) has to be able to **load the trained LoRA** from there.
 
 | | |
 |---|---|
-| Shared builds host path | `/mnt/user/data-and-backups/blender-and-comfyui-output/comfyui-builds` |
+| Shared builds host path | `/mnt/user/data-and-backups/blender-and-comfy-ui-output/comfyui-builds` |
 | Mapped into ComfyUI as | `/builds` (set in `parameters.txt`; confirmed via `/system_stats` → `argv`) |
 | Mapped into persona-forge as | `/builds` (same host path, via `BUILDS_HOST_PATH` in `.env`) |
 
