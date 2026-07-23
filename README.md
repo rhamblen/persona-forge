@@ -41,17 +41,22 @@ Versioning is `0.<phase>.<iteration>` — see `VERSION`.
 
 Prerequisites on the ComfyUI container (already done):
 - Unraid → container edit → **Add another Path**: host
-  `/mnt/user/data-and-backups/blender-and-comfy-ui-output/comfyui-builds` → container
+  `/mnt/user/data-and-backups/blender-and-comfyui-output/comfyui-builds` → container
   `/builds`, Read/Write.
 - `05-comfy-ui/parameters.txt` contains `--output-directory /builds`.
 
 Then:
 
-1. Copy this whole folder to `/mnt/user/appdata/persona-forge/` on UR1.
-2. `cp .env.example .env` and check the values — especially `BUILDS_HOST_PATH`
-   (must be the **same host path** mapped into ComfyUI) and `COMFYUI_URL`.
-3. In the Unraid **Docker Compose Manager** addon, add the stack pointing at that
-   folder and **Compose Up** (builds the image).
+1. Copy **this whole project folder** to `/mnt/user/appdata/persona-forge/` on UR1.
+   (The whole folder is needed for now because the stack **builds from source** —
+   the compose build context is the repo root. Once we publish an image to GHCR,
+   only `docker/` + `appdata/` will be needed; see the note in
+   `docker/docker-compose.yml`.)
+2. `cd docker && cp .env.example .env`, then check the values — especially
+   `BUILDS_HOST_PATH` (must be the **same host path** mapped into ComfyUI) and
+   `COMFYUI_URL`.
+3. In the Unraid **Docker Compose Manager** addon, add a stack pointing at
+   `/mnt/user/appdata/persona-forge/docker/docker-compose.yml` and **Compose Up**.
 4. Open `http://192.168.1.33:8890`.
 
 **Expected result:** both dots in the sidebar green — *ComfyUI* showing latency and

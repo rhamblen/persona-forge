@@ -165,7 +165,7 @@ there, and (crucially) has to be able to **load the trained LoRA** from there.
 
 | | |
 |---|---|
-| Shared builds host path | `/mnt/user/data-and-backups/blender-and-comfy-ui-output/comfyui-builds` |
+| Shared builds host path | `/mnt/user/data-and-backups/blender-and-comfyui-output/comfyui-builds` |
 | Mapped into ComfyUI as | `/builds` (set in `parameters.txt`; confirmed via `/system_stats` → `argv`) |
 | Mapped into persona-forge as | `/builds` (same host path, via `BUILDS_HOST_PATH` in `.env`) |
 
@@ -245,8 +245,11 @@ the Docker Compose Manager addon; Claude never builds/deploys, only verifies.**
 persona-forge/                    # GitHub repo
 ├── README.md
 ├── PROJECT_PLAN.md               # this file
-├── docker-compose.yml            # webui (+ optional ollama); ComfyUI is external
-├── .env.example                  # COMFYUI_URL, OLLAMA_URL, ports, paths
+├── VERSION                       # 0.<phase>.<iteration>
+├── docker/                       # <── the stack (matches blender-mcp / comfyui-mcp)
+│   ├── docker-compose.yml        #     ComfyUI is external, not bundled
+│   └── .env.example              #     COMFYUI_URL, BUILDS_HOST_PATH, ports
+├── workflows/                    # API-format templates + parameter manifests
 ├── backend/                      # FastAPI app  (Claude edits)
 │   ├── app/ …
 │   ├── requirements.txt
