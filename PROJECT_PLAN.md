@@ -146,6 +146,63 @@ there, and (crucially) has to be able to **load the trained LoRA** from there.
   **never** auto-copied to the ST appdata. The move into a character's ST
   `expressions/` folder is a deliberate manual step once the build is signed off.
 
+**Settled 2026-07-23:** ComfyUI's output is relocated via its CLI-args file
+`05-comfy-ui/parameters.txt` (`--output-directory <container path>`) — this image
+uses that file, **not** env vars. The builds share is mounted into the ComfyUI
+container with an Unraid **Add Path** mapping; the same host path is mounted into the
+persona-forge container, with the path supplied via **`.env`**. (Docker-level flags
+like `--runtime=nvidia` live in Unraid's *Extra Parameters*, a different field —
+don't mix them.)
+
+### 5.2 ComfyUI integration — direct HTTP API + workflow manifests
+
+**Decision: the backend talks to ComfyUI over its native HTTP API. Not MCP.**
+MCP is a wrapper for LLM tool-calling; routing an ordinary app through it just adds
+a JSON-RPC hop to the same endpoints. (MCP remains useful for Claude-driven
+development, not app runtime.)
+
+Endpoints used (all verified in use 2026-07-22/23):
+
+| Endpoint | Purpose |
+|---|---|
+| `POST /prompt` | Submit an API-format workflow; returns `prompt_id` |
+| `GET /history/<prompt_id>` | Status + produced filenames |
+| `GET /view?filename=&subfolder=&type=output` | Fetch a generated image |
+| `GET /object_info` (or `/object_info/<Node>`) | Node schemas — powers **live dropdowns** for checkpoints, LoRAs, samplers, and validation |
+| `GET /queue` | Queue depth / running state |
+| `WS /ws?clientId=` | **Live progress events** (`progress`, `executing`, `executed`) — drives progress bars instead of polling |
+| `GET/POST /userdata/workflows%2F<name>.json` | Read/write workflows in ComfyUI's own library |
+
+**Selecting a workflow and changing values.** Workflows are stored as **API-format
+JSON templates** in the repo; at runtime the backend loads a template, **patches
+specific node inputs**, and POSTs it. To avoid hardcoding node IDs (brittle — IDs
+shift when a workflow is edited), every template ships with a **parameter manifest**
+mapping friendly names → node + input:
+
+```jsonc
+{
+  "id": "expressions-28",
+  "name": "28 Expression Sheet",
+  "file": "workflows/28-expressions.json",
+  "params": {
+    "character":   { "node": "2",  "input": "value",       "type": "text" },
+    "style":       { "node": "3",  "input": "value",       "type": "text" },
+    "negative":    { "node": "4",  "input": "value",       "type": "text" },
+    "checkpoint":  { "node": "1",  "input": "ckpt_name",   "type": "model", "model_type": "checkpoints" },
+    "lora":        { "node": "40", "input": "lora_name",   "type": "model", "model_type": "loras" },
+    "seed":        { "node": "11", "input": "seed",        "type": "int" },
+    "denoise":     { "node": "20", "input": "denoise",     "type": "float", "min": 0.3, "max": 0.8 },
+    "output_path": { "node": "22", "input": "output_path", "type": "path" }
+  },
+  "output_node": "22"
+}
+```
+
+Benefits: the **UI auto-generates its controls from the manifest** (no per-workflow
+frontend code), `/object_info` fills the model/LoRA dropdowns from live server state,
+and adding a capability = dropping in a new template + manifest. The existing
+workflows (28-expression, single re-roll, IPAdapter pose) become the first templates.
+
 ## 6. Repo & deploy structure
 
 Follows the firm UR1 convention (memory `feedback-ur1-docker-deploy-convention`):
