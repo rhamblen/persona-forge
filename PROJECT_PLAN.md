@@ -146,6 +146,23 @@ there, and (crucially) has to be able to **load the trained LoRA** from there.
   **never** auto-copied to the ST appdata. The move into a character's ST
   `expressions/` folder is a deliberate manual step once the build is signed off.
 
+**Settled paths (verified 2026-07-23):**
+
+| | |
+|---|---|
+| Shared builds host path | `/mnt/user/data-and-backups/blender-and-comfyui-output/comfyui-builds` |
+| Mapped into ComfyUI as | `/builds` (set in `parameters.txt`; confirmed via `/system_stats` → `argv`) |
+| Mapped into persona-forge as | `/builds` (same host path, via `BUILDS_HOST_PATH` in `.env`) |
+
+The path is deliberately **space-free** (it was originally `…/blender and comfy ui
+output/comfyui builds`; spaces break compose's short `a:b` bind syntax and quoting in
+`.env`). Compose still uses **long-form bind mounts** for robustness. Don't quote the
+value in `.env`.
+
+⚠️ That share tree **rejects SMB writes from Windows** (root-owned), so Claude cannot
+stage files into it directly — the containers themselves write fine. Verification of
+build contents is done by reading over SMB or via ComfyUI's `/view`.
+
 **Settled 2026-07-23:** ComfyUI's output is relocated via its CLI-args file
 `05-comfy-ui/parameters.txt` (`--output-directory <container path>`) — this image
 uses that file, **not** env vars. The builds share is mounted into the ComfyUI

@@ -1,0 +1,27 @@
+services:
+  persona-forge:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    image: persona-forge:local
+    container_name: persona-forge
+    restart: unless-stopped
+    ports:
+      - "${PF_PORT:-8890}:8000"
+    environment:
+      COMFYUI_URL: "${COMFYUI_URL:-http://192.168.1.33:9000}"
+      BUILDS_ROOT: "/builds"
+      APPDATA_ROOT: "/appdata"
+      TZ: "${TZ:-Europe/London}"
+    volumes:
+      # Persistent app data (sqlite db, config).
+      - type: bind
+        source: ${APPDATA_HOST_PATH:-./appdata}
+        target: /appdata
+
+      # SHARED builds folder — MUST be the same host path mapped into the
+      # ComfyUI container as /builds. Long-form bind syntax is used because the
+      # host path contains spaces, which the short "a:b" form mangles.
+      - type: bind
+        source: ${BUILDS_HOST_PATH:?set BUILDS_HOST_PATH in .env}
+        target: /builds

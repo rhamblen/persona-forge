@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Persona Forge</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <div class="app">
+    <!-- LEFT SIDEBAR — connection status pinned at the top -->
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark">PF</span>
+        <div>
+          <div class="brand-name">Persona&nbsp;Forge</div>
+          <div class="brand-version" id="app-version">—</div>
+        </div>
+      </div>
+
+      <!-- Pinned status block -->
+      <div class="status-block" id="status-block">
+        <div class="status-row">
+          <span class="dot dot-unknown" id="comfy-dot"></span>
+          <span class="status-label">ComfyUI</span>
+          <span class="status-value" id="comfy-value">checking…</span>
+        </div>
+        <div class="status-meta" id="comfy-meta"></div>
+        <div class="status-row">
+          <span class="dot dot-unknown" id="storage-dot"></span>
+          <span class="status-label">Builds</span>
+          <span class="status-value" id="storage-value">checking…</span>
+        </div>
+        <div class="status-meta" id="storage-meta"></div>
+      </div>
+
+      <nav class="nav">
+        <div class="nav-section">Phases</div>
+        <a class="nav-item is-active" href="#">Overview</a>
+        <a class="nav-item is-disabled" href="#">1 · Prompt Studio</a>
+        <a class="nav-item is-disabled" href="#">2 · Dataset</a>
+        <a class="nav-item is-disabled" href="#">3 · LoRA</a>
+        <a class="nav-item is-disabled" href="#">4 · Poses</a>
+        <div class="nav-section">System</div>
+        <a class="nav-item is-disabled" href="#">Settings</a>
+      </nav>
+    </aside>
+
+    <!-- MAIN -->
+    <main class="main">
+      <header class="main-head">
+        <h1>Overview</h1>
+        <p class="subtitle">Skeleton build — verifying infrastructure before Phase&nbsp;2.</p>
+      </header>
+
+      <section class="cards">
+        <article class="card">
+          <h2>ComfyUI connection</h2>
+          <dl id="comfy-detail"><dd class="muted">checking…</dd></dl>
+        </article>
+
+        <article class="card">
+          <h2>Shared builds folder</h2>
+          <dl id="storage-detail"><dd class="muted">checking…</dd></dl>
+          <p class="note">
+            Must be the same host share mapped into the ComfyUI container, so both
+            can read/write LoRAs and finished images.
+          </p>
+        </article>
+
+        <article class="card card-wide">
+          <h2>Builds</h2>
+          <div id="builds-list"><p class="muted">checking…</p></div>
+        </article>
+      </section>
+
+      <footer class="foot">
+        Styling is provisional — the palette, shape and version-view come once the
+        UI references land.
+      </footer>
+    </main>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
