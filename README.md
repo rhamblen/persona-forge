@@ -45,18 +45,41 @@ Prerequisites on the ComfyUI container (already done):
   `/builds`, Read/Write.
 - `05-comfy-ui/parameters.txt` contains `--output-directory /builds`.
 
-Then:
+### What to copy
 
-1. Copy **this whole project folder** to `/mnt/user/appdata/persona-forge/` on UR1.
-   (The whole folder is needed for now because the stack **builds from source** —
-   the compose build context is the repo root. Once we publish an image to GHCR,
-   only `docker/` + `appdata/` will be needed; see the note in
-   `docker/docker-compose.yml`.)
+**Copy the WHOLE project folder** — not just `docker/`, not just `appdata/`.
+
+This differs from `comfyui-mcp` / `blender-mcp`, where only `docker/` is copied.
+Those pull a **prebuilt** image; Persona Forge currently **builds from source**, so
+the compose build context (the repo root) must be present. `appdata/` is a
+*subfolder* of the project — it is not copied anywhere separately.
+
+Resulting layout on UR1:
+
+```
+/mnt/user/appdata/persona-forge/     <- copy the whole repo folder here
+├── docker/
+│   ├── docker-compose.yml           <- point Docker Compose Manager at THIS file
+│   └── .env                         <- you create this from .env.example
+├── backend/                         <- required (build context)
+├── frontend/                        <- required (build context)
+├── workflows/                       <- required (build context)
+├── VERSION
+└── appdata/                         <- persistent data, mounted into the container
+                                        as /appdata (sqlite db + prompt history)
+```
+
+(Once we publish an image to GHCR, only `docker/` + `appdata/` will be needed —
+see the note at the top of `docker/docker-compose.yml`.)
+
+### Steps
+
+1. Copy the whole `persona-forge` folder to `/mnt/user/appdata/persona-forge/`.
 2. `cd docker && cp .env.example .env`, then check the values — especially
-   `BUILDS_HOST_PATH` (must be the **same host path** mapped into ComfyUI) and
-   `COMFYUI_URL`.
+   `BUILDS_HOST_PATH` (must be the **same host path** mapped into ComfyUI as
+   `/builds`) and `COMFYUI_URL`.
 3. In the Unraid **Docker Compose Manager** addon, add a stack pointing at
-   `/mnt/user/appdata/persona-forge/docker/docker-compose.yml` and **Compose Up**.
+   `/mnt/user/appdata/persona-forge/docker/docker-compose.yml` → **Compose Up**.
 4. Open `http://192.168.1.33:8890`.
 
 **Expected result:** both dots in the sidebar green — *ComfyUI* showing latency and
