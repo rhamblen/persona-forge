@@ -1,0 +1,77 @@
+{
+  "1": {
+    "class_type": "CheckpointLoaderSimple",
+    "inputs": { "ckpt_name": "animi/NoobAI-XL-v1.1.safetensors" },
+    "_meta": { "title": "Checkpoint" }
+  },
+  "2": {
+    "class_type": "PrimitiveStringMultiline",
+    "inputs": { "value": "1girl, solo, mature woman, shoulder-length wavy blonde hair, blue eyes, freckles" },
+    "_meta": { "title": "CHARACTER" }
+  },
+  "3": {
+    "class_type": "PrimitiveStringMultiline",
+    "inputs": { "value": "retro anime style, cel-shading, clean lineart, full body, standing, looking at viewer, plain white background, simple background" },
+    "_meta": { "title": "STYLE + FRAMING" }
+  },
+  "4": {
+    "class_type": "PrimitiveStringMultiline",
+    "inputs": { "value": "lowres, bad anatomy, bad hands, bad feet, worst quality, low quality, blurry, signature, watermark, text, out of frame, cropped, 2girls, multiple views, duplicate" },
+    "_meta": { "title": "NEGATIVE" }
+  },
+  "5": {
+    "class_type": "PrimitiveStringMultiline",
+    "inputs": { "value": "neutral expression, closed mouth" },
+    "_meta": { "title": "Expression suffix" }
+  },
+  "6": {
+    "class_type": "Text Concatenate",
+    "inputs": {
+      "delimiter": ", ",
+      "clean_whitespace": "true",
+      "text_a": ["3", 0],
+      "text_b": ["2", 0],
+      "text_c": ["5", 0]
+    },
+    "_meta": { "title": "Positive prompt" }
+  },
+  "7": {
+    "class_type": "CLIPTextEncode",
+    "inputs": { "text": ["6", 0], "clip": ["1", 1] },
+    "_meta": { "title": "Positive" }
+  },
+  "8": {
+    "class_type": "CLIPTextEncode",
+    "inputs": { "text": ["4", 0], "clip": ["1", 1] },
+    "_meta": { "title": "Negative" }
+  },
+  "9": {
+    "class_type": "EmptyLatentImage",
+    "inputs": { "width": 832, "height": 1216, "batch_size": 1 }
+  },
+  "10": {
+    "class_type": "KSampler",
+    "inputs": {
+      "seed": 123456789,
+      "steps": 28,
+      "cfg": 5.0,
+      "sampler_name": "euler_ancestral",
+      "scheduler": "normal",
+      "denoise": 1.0,
+      "model": ["1", 0],
+      "positive": ["7", 0],
+      "negative": ["8", 0],
+      "latent_image": ["9", 0]
+    },
+    "_meta": { "title": "Sampler" }
+  },
+  "11": {
+    "class_type": "VAEDecode",
+    "inputs": { "samples": ["10", 0], "vae": ["1", 2] }
+  },
+  "12": {
+    "class_type": "SaveImage",
+    "inputs": { "images": ["11", 0], "filename_prefix": "persona-forge/preview" },
+    "_meta": { "title": "Save preview" }
+  }
+}

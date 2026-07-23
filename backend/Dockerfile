@@ -10,6 +10,7 @@ RUN pip install --no-cache-dir -r /app/requirements.txt
 
 COPY backend/app /app/app
 COPY frontend /app/frontend
+COPY workflows /app/workflows
 COPY VERSION /app/VERSION
 
 EXPOSE 8000
