@@ -235,23 +235,29 @@ persona-forge/                    # GitHub repo
   is the fast-iteration fallback.
 - **ComfyUI stays external** — the stack points at UR1:9000, it does not bundle it.
 
-## 7. Build roadmap (incremental, each milestone demoable)
+## 7. Build roadmap
 
-- **M0 — Skeleton & deploy loop.** Repo scaffold, `docker-compose.yml`, a hello
-  FastAPI + static React, `appdata/` layout. Prove the copy→compose→verify loop
-  end to end with an empty app.
-- **M1 — Prompt Studio (Phase A).** Model picker, single-image generate against
-  ComfyUI, prompt editor, **version store + sign-off + rollback**. (No Ollama yet.)
-- **M2 — Ollama NL editing.** Stand up Ollama; wire "instruction → revised prompt +
-  diff → accept/reject → new version." Prose↔tag helper.
-- **M3 — Dataset Builder (Phase B).** Batch-30 gallery, multi-select, +10 top-up
+**Versioning: `0.<phase>.<iteration>`** — the middle digit is the phase below; the
+last digit bumps on each update/experiment within that phase. `1.0.0` = first
+complete release. A `VERSION` file at the repo root tracks the current build.
+
+- **0.1.x — Skeleton & deploy loop.** Repo scaffold, `docker-compose.yml`, `.env`,
+  a hello FastAPI + minimal frontend showing the **left sidebar + ComfyUI connection
+  status**, `appdata/` layout, shared builds mount. Proves the
+  copy→compose→verify loop end to end.
+- **0.2.x — Prompt Studio (Phase A).** Project naming → build folder, model picker,
+  single-image generate against ComfyUI, prompt editor, **version store + sign-off +
+  rollback** (VCS-style version view). No Ollama yet.
+- **0.3.x — Ollama NL editing.** Stand up Ollama; wire "instruction → revised prompt
+  + diff → accept/reject → new version." Prose↔tag helper.
+- **0.4.x — Dataset Builder (Phase B).** Batch-30 gallery, multi-select, +10 top-up
   loop, persist the selected dataset. **Decide the training backend here.**
-- **M4 — LoRA Trainer (Phase C).** Auto-caption, train, monitor, register the LoRA.
-  First run = recipe calibration (dataset size, steps, LR).
-- **M5 — Pose/Expression Studio (Phase D).** LoRA-driven expression/pose set, grid,
-  per-sprite tweak (pose OR face) with NL + rollback, **SillyTavern export**.
-- **M6 — Hardening.** GHCR image + Action, backups of `appdata/db`, README/run docs,
-  polish.
+- **0.5.x — LoRA Trainer (Phase C).** Auto-caption, train, monitor, register the
+  LoRA into the build's `lora/` folder. First run = recipe calibration.
+- **0.6.x — Pose/Expression Studio (Phase D).** LoRA-driven expression/pose set,
+  grid, per-sprite tweak (pose OR face) with NL + rollback, **SillyTavern staging**.
+- **0.7.x — Hardening.** GHCR image + Action, `appdata/db` backups, run docs, polish.
+- **1.0.0 — Release.**
 
 ## 8. Open decisions (need your call)
 
