@@ -24,6 +24,9 @@ for SillyTavern — without hand-driving ComfyUI. Everything runs on the LAN
 Four phases, each gating the next. The user's spec, formalised:
 
 ### Phase A — Prompt Studio
+- **Name the project first** → this creates the build folder
+  `<builds-root>/<name>/` (with `lora/` + `images/` subfolders, see §5.1) and starts
+  the session. Everything downstream writes under that folder.
 - Enter a prompt (prose or tags); **pick the checkpoint/model**.
 - Fire a single image; **refine the prompt** and re-fire until happy.
 - **Natural-language edits** (via Ollama): "make her hair shorter, add glasses" →
@@ -61,8 +64,17 @@ Four phases, each gating the next. The user's spec, formalised:
   is enough.
 - **Model + LoRA selection** — checkpoint picker in Phase A; LoRA picker in Phase D.
 - **Export to SillyTavern** — write the set into a `<Character>/` folder with exact
-  expression filenames (staged for the user to copy to the ST appdata — same
-  copy-in gotcha as the VRM assets).
+  expression filenames. **Staged only — never auto-copied into the ST appdata.**
+  Moving it into a character's ST `expressions/` folder is a deliberate **manual**
+  step after the build is approved (same copy-in / permission gotcha as the VRM
+  assets).
+- **Settings** — a settings area holds:
+  - **ComfyUI URL** (default `http://192.168.1.33:9000`) plus a **live connection
+    status** indicator. The status is **pinned at the top of the left sidebar**
+    (always visible, green/red), not buried in a settings page.
+  - **Folder paths:** the **ComfyUI output** location, and the **builds root** where
+    each project's `lora/` and `images/` subfolders are created. These paths must be
+    on storage **shared with ComfyUI** (see §5.1). Explicitly **not** the ST folder.
 
 ## 4. Rollback / prompt versioning (hard requirement)
 
@@ -108,7 +120,31 @@ Four phases, each gating the next. The user's spec, formalised:
 - **Ollama — new container.** Watch VRAM: it shares the GPUs with ComfyUI, so
   load/unload around generation or pin it to the 3060.
 - **Storage — SQLite** (state, prompt history) + **filesystem** (images, datasets,
-  LoRAs, exports), all under `appdata/`.
+  LoRAs, exports). App state lives under `appdata/`; **build artefacts live under a
+  shared builds root — see §5.1.**
+
+### 5.1 Shared storage & build folders (critical constraint)
+
+Persona Forge and ComfyUI run as **separate containers** on UR1, but they **must
+share a filesystem view of the build data** — ComfyUI writes the generated images
+there, and (crucially) has to be able to **load the trained LoRA** from there.
+
+- **Builds root** — a single host share (its path is a Setting) mounted **read-write
+  into BOTH** the persona-forge container and the ComfyUI container.
+- **Per-build layout** — naming a project creates `<builds-root>/<name>/` with two
+  subfolders:
+  - `<name>/lora/` — the trained LoRA(s) for this character
+  - `<name>/images/` — the finished 28 expression / pose sprites
+- **ComfyUI must find the LoRA** — the builds root is added to ComfyUI's LoRA search
+  path via `extra_model_paths.yaml` (it scans subfolders), so a freshly trained
+  `<name>/lora/x.safetensors` becomes loadable immediately (a rescan/refresh may be
+  needed right after training).
+- **ComfyUI output** — either point ComfyUI's output at the build's `images/` folder,
+  or have Persona Forge fetch results over HTTP `/view` and write them into the build
+  folder itself. Decide at M0.
+- **SillyTavern stays manual** — finished sprites remain in `<name>/images/`; they are
+  **never** auto-copied to the ST appdata. The move into a character's ST
+  `expressions/` folder is a deliberate manual step once the build is signed off.
 
 ## 6. Repo & deploy structure
 
@@ -172,6 +208,12 @@ persona-forge/                    # GitHub repo
   coexists with ComfyUI on the GPUs (candidate: a Qwen/Llama instruct variant).
 - **GHCR now or later** — publish images from the start, or source-build on UR1
   until the app stabilises.
+- **Builds root host path & LoRA wiring** (§5.1) — pick the exact UR1 share for the
+  builds root, mount it into **both** containers, and decide how ComfyUI is pointed
+  at it for LoRA loading (`extra_model_paths.yaml` pointing at the builds root, vs.
+  mounting each build's `lora/` into ComfyUI's `models/loras`). Recommendation:
+  `extra_model_paths.yaml` → builds root (handles new per-build folders
+  automatically). Decide at M0/M3.
 
 ## 9. Risks & honest realities
 

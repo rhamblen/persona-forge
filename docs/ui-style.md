@@ -5,16 +5,37 @@ user's preferred references rather than a generic default.
 
 ## References provided by the user
 
-- **Shutter Hub** — _(to be detailed: what specifically to borrow — layout,
-  colour, density, component style, typography?)_
+- **Shutter Hub** (and the code editor / VCS tool the user works in) — cited for
+  the overall template feel.
 
-<!-- Add screenshots to docs/ui-refs/ and link them here, plus notes on what to
-     take from each: e.g. "sidebar nav like X", "card grid density like Y",
-     "muted palette", "large hero preview + thin controls rail". -->
+## Design spine (user directives, 2026-07-23)
 
-## Notes / decisions
+Three things to borrow, in priority order:
 
-- _(captured as we discuss)_
+1. **Version view like a VCS / code-history panel.** The user specifically likes
+   the "version view of the code I'm using." This is the model for Persona Forge's
+   **prompt rollback UI** — present prompt history the way a version-control tool
+   shows commits/diffs: a timeline of versions, the signed-off baseline pinned, and
+   a clear diff between versions (what an Ollama/manual edit changed). This is a
+   headline feature, not a side panel.
+2. **Left-hand menu.** Primary navigation is a **left sidebar** (phase/section nav),
+   not a top nav bar. Main content area to the right.
+3. **General template style — colour, UI shape, and feel to match the reference.**
+   _Exact palette / corner-radius / density still to be pinned from a screenshot —
+   see below._
+
+<!-- Add screenshots to docs/ui-refs/ and link them here. Especially need one that
+     shows the reference's colour palette, card/panel shape (radius, borders,
+     shadows), and the version/history view the user likes. -->
+
+## Still to pin (need a screenshot of the reference)
+
+- Palette + light/dark (the "colour" in directive 3).
+- Corner radius / borders / shadow — the "UI shape" (rounded & soft vs. crisp &
+  square).
+- Density — roomy/editorial vs. compact/tool-dense.
+- The exact version-view layout to emulate (side-by-side diff? inline? timeline
+  rail?).
 
 ## What we need to pin down before building the frontend (M1)
 
