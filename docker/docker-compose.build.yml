@@ -1,0 +1,16 @@
+# Local source build — for development only, NOT used on UR1.
+#
+# Builds the image from the repo instead of pulling from GHCR. Requires the full
+# repo checkout (the build context is the repo root).
+#
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+#
+# On UR1 you only ever use docker-compose.yml, which pulls the published image.
+
+services:
+  persona-forge:
+    image: persona-forge:local
+    pull_policy: build
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile

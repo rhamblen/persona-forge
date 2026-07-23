@@ -1,27 +1,17 @@
 # Persona Forge stack.
 #
-# TWO WAYS TO RUN THIS:
+# This folder is ALL that needs to live on UR1 (/mnt/user/appdata/persona-forge/docker/).
+# The image is pulled from GHCR — no source and no build on the server.
 #
-#  A) Source build (current default).  Requires the WHOLE repo on UR1, because the
-#     build context is the repo root. Copy the whole project folder to
-#     /mnt/user/appdata/persona-forge/ and point Docker Compose Manager at
-#     .../persona-forge/docker/docker-compose.yml
-#
-#  B) Prebuilt image (preferred once we publish to GHCR).  Set PF_IMAGE in .env to
-#     e.g. ghcr.io/rhamblen/persona-forge:0.2.0, comment out the `build:` block
-#     below, and then only this docker/ folder + appdata/ need to be copied —
-#     matching the blender-mcp / comfyui-mcp pattern.
+# Update to a new version:  docker compose pull && docker compose up -d
+# For local source builds instead, see docker-compose.build.yml
 
 services:
   persona-forge:
-    image: ${PF_IMAGE:-persona-forge:local}
-    # --- comment out this build block when using a prebuilt PF_IMAGE ---
-    build:
-      context: ..
-      dockerfile: backend/Dockerfile
-    # -------------------------------------------------------------------
+    image: ${PF_IMAGE:-ghcr.io/rhamblen/persona-forge:latest}
     container_name: persona-forge
     restart: unless-stopped
+    pull_policy: always
     ports:
       - "${PF_PORT:-8890}:8000"
     environment:
@@ -30,15 +20,17 @@ services:
       APPDATA_ROOT: "/appdata"
       TZ: "${TZ:-Europe/London}"
     volumes:
-      # Persistent app data (sqlite db, config).
-      # Relative paths resolve against THIS file's folder (docker/).
+      # Persistent app data (sqlite db, prompt history).
+      # Relative paths resolve against THIS file's folder, so this becomes
+      # /mnt/user/appdata/persona-forge/appdata — created automatically.
       - type: bind
         source: ${APPDATA_HOST_PATH:-../appdata}
         target: /appdata
+        bind:
+          create_host_path: true
 
       # SHARED builds folder — MUST be the same host path mapped into the ComfyUI
-      # container as /builds. Long-form bind syntax avoids the short "a:b" form's
-      # problems with awkward paths.
+      # container as /builds.
       - type: bind
         source: ${BUILDS_HOST_PATH:?set BUILDS_HOST_PATH in docker/.env}
         target: /builds

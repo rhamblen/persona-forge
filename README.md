@@ -47,40 +47,47 @@ Prerequisites on the ComfyUI container (already done):
 
 ### What to copy
 
-**Copy the WHOLE project folder** — not just `docker/`, not just `appdata/`.
+**Only the `docker/` folder.** Nothing else goes on the server — the image is
+pulled from GHCR, so there is no source and no build on UR1. Same pattern as
+`comfyui-mcp` / `blender-mcp`.
 
-This differs from `comfyui-mcp` / `blender-mcp`, where only `docker/` is copied.
-Those pull a **prebuilt** image; Persona Forge currently **builds from source**, so
-the compose build context (the repo root) must be present. `appdata/` is a
-*subfolder* of the project — it is not copied anywhere separately.
-
-Resulting layout on UR1:
+Layout on UR1:
 
 ```
-/mnt/user/appdata/persona-forge/     <- copy the whole repo folder here
+/mnt/user/appdata/persona-forge/
 ├── docker/
-│   ├── docker-compose.yml           <- point Docker Compose Manager at THIS file
-│   └── .env                         <- you create this from .env.example
-├── backend/                         <- required (build context)
-├── frontend/                        <- required (build context)
-├── workflows/                       <- required (build context)
-├── VERSION
-└── appdata/                         <- persistent data, mounted into the container
-                                        as /appdata (sqlite db + prompt history)
+│   ├── docker-compose.yml   <- point Docker Compose Manager at THIS file
+│   └── .env                 <- you create this from .env.example
+└── appdata/                 <- created automatically by the bind mount
+                                (sqlite db + prompt history; survives updates)
 ```
-
-(Once we publish an image to GHCR, only `docker/` + `appdata/` will be needed —
-see the note at the top of `docker/docker-compose.yml`.)
 
 ### Steps
 
-1. Copy the whole `persona-forge` folder to `/mnt/user/appdata/persona-forge/`.
+1. Copy **`docker/`** to `/mnt/user/appdata/persona-forge/docker/`.
 2. `cd docker && cp .env.example .env`, then check the values — especially
    `BUILDS_HOST_PATH` (must be the **same host path** mapped into ComfyUI as
    `/builds`) and `COMFYUI_URL`.
 3. In the Unraid **Docker Compose Manager** addon, add a stack pointing at
    `/mnt/user/appdata/persona-forge/docker/docker-compose.yml` → **Compose Up**.
 4. Open `http://192.168.1.33:8890`.
+
+**Updating later:** `docker compose pull && docker compose up -d` (or Compose
+Manager's update action). No rebuild, no re-copying source.
+
+> **First time only:** the GHCR package is private until published. Run the
+> **"Publish image to GHCR"** GitHub Action (or push a `v*` tag), then set the
+> package visibility to **public** on GitHub — the same step you did for
+> `blender-mcp`. Otherwise the pull will 401.
+
+### Developing locally
+
+Source builds are for the dev box only:
+
+```bash
+cd docker
+docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+```
 
 **Expected result:** both dots in the sidebar green — *ComfyUI* showing latency and
 GPU, *Builds* showing `read/write`. If Builds shows red, the bind mount or its

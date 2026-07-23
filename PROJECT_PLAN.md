@@ -246,7 +246,7 @@ persona-forge/                    # GitHub repo
 ├── README.md
 ├── PROJECT_PLAN.md               # this file
 ├── VERSION                       # 0.<phase>.<iteration>
-├── docker/                       # <── the stack (matches blender-mcp / comfyui-mcp)
+├── docker/                       # <── ONLY this folder is copied to UR1
 │   ├── docker-compose.yml        #     ComfyUI is external, not bundled
 │   └── .env.example              #     COMFYUI_URL, BUILDS_HOST_PATH, ports
 ├── workflows/                    # API-format templates + parameter manifests
