@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# Node / frontend
+node_modules/
+dist/
+.vite/
+*.log
+
+# Env / secrets
+.env
+.env.local
+
+# Runtime data under appdata/ (keep structure + config, ignore generated content)
+appdata/db/*
+!appdata/db/.gitkeep
+appdata/datasets/*
+!appdata/datasets/.gitkeep
+appdata/loras/*
+!appdata/loras/.gitkeep
+appdata/output/*
+!appdata/output/.gitkeep
+
+# OS
+.DS_Store
+Thumbs.db
