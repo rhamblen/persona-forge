@@ -15,15 +15,7 @@ dist/
 .env
 .env.local
 
-# Runtime data under appdata/ (keep structure + config, ignore generated content)
-appdata/db/*
-!appdata/db/.gitkeep
-appdata/datasets/*
-!appdata/datasets/.gitkeep
-appdata/loras/*
-!appdata/loras/.gitkeep
-appdata/output/*
-!appdata/output/.gitkeep
+# Runtime state lives on the server (db/ and logs/ beside docker/), not here.
 
 # OS
 .DS_Store

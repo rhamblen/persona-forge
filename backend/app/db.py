@@ -10,8 +10,8 @@ import os
 import sqlite3
 from pathlib import Path
 
-APPDATA_ROOT = Path(os.getenv("APPDATA_ROOT", "/appdata"))
-DB_PATH = APPDATA_ROOT / "db" / "persona_forge.sqlite3"
+DB_DIR = Path(os.getenv("DB_DIR", "/data/db"))
+DB_PATH = DB_DIR / "persona_forge.sqlite3"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS projects (

@@ -33,7 +33,8 @@ BUILDS_ROOT = Path(os.getenv("BUILDS_ROOT", "/builds"))
 # nobody:users = 99:100.
 BUILD_UID = int(os.getenv("PUID", "99"))
 BUILD_GID = int(os.getenv("PGID", "100"))
-APPDATA_ROOT = Path(os.getenv("APPDATA_ROOT", "/appdata"))
+DB_DIR = Path(os.getenv("DB_DIR", "/data/db"))
+LOG_DIR = Path(os.getenv("LOG_DIR", "/data/logs"))
 def _resolve(name: str, must_be_dir: bool = True) -> Path:
     """Resolve a sibling asset in both layouts.
 
@@ -59,7 +60,7 @@ app = FastAPI(title="Persona Forge", version=VERSION)
 def _startup() -> None:
     logs.info("boot", f"Persona Forge {VERSION} starting")
     logs.info("boot", "config", comfyui_url=COMFYUI_URL, builds_root=str(BUILDS_ROOT),
-              appdata_root=str(APPDATA_ROOT), frontend=str(FRONTEND_DIR))
+              db_dir=str(DB_DIR), log_dir=str(LOG_DIR), frontend=str(FRONTEND_DIR))
     try:
         db.init_db()
         logs.info("boot", "database ready", path=str(db.DB_PATH))
@@ -70,8 +71,9 @@ def _startup() -> None:
     writable, err = (False, "not mounted") if not mounted else _probe_writable(BUILDS_ROOT)
     (logs.info if (mounted and writable) else logs.error)(
         "boot", "builds mount check", path=str(BUILDS_ROOT), mounted=mounted, writable=writable, error=err)
-    if not APPDATA_ROOT.is_dir():
-        logs.warn("boot", "appdata not mounted", path=str(APPDATA_ROOT))
+    for label, d in (("db", DB_DIR), ("logs", LOG_DIR)):
+        if not d.is_dir():
+            logs.warn("boot", f"{label} directory not mounted", path=str(d))
     wf = workflows.list_manifests()
     logs.info("boot", f"{len(wf)} workflow template(s) loaded",
               ids=[m.get("id") for m in wf], dir=str(workflows.WORKFLOW_DIR))
@@ -197,8 +199,10 @@ async def storage_status() -> dict:
         "mounted": exists,
         "writable": writable,
         "error": error,
-        "appdata_root": str(APPDATA_ROOT),
-        "appdata_mounted": APPDATA_ROOT.is_dir(),
+        "db_dir": str(DB_DIR),
+        "db_mounted": DB_DIR.is_dir(),
+        "log_dir": str(LOG_DIR),
+        "log_mounted": LOG_DIR.is_dir(),
     }
 
 

@@ -9,7 +9,7 @@ Every version below is a **published GitHub Release** with a matching
 
 ---
 
-## [0.2.5] — 2026-07-24
+## [0.2.6] — 2026-07-24
 
 **Consistency pass: docs, UI language, and self-describing builds.**
 
@@ -34,6 +34,26 @@ Every version below is a **published GitHub Release** with a matching
   Repo layout → Status → Documentation → Related projects → License.
 - **`## Status` no longer duplicates the changelog** — it is now a short statement
   of the current phase, pointing at `CHANGELOG.md` and `PROJECT_PLAN.md`.
+
+### Fixed
+- **Persistent state was created *inside* `docker/` instead of beside it, and was
+  confusingly called `appdata`** (nested under `/mnt/user/appdata/` already). The
+  compose file used a relative bind source, which docker compose resolves against
+  its *project directory* — Unraid's Compose Manager does not reliably set that to
+  the compose file's folder.
+
+  Replaced with two explicit, **absolute, required** paths that sit as **peers of
+  `docker/`**:
+
+  ```
+  /mnt/user/appdata/persona-forge/
+  ├── docker/   compose + .env  (the only folder copied to the server)
+  ├── db/       sqlite: personas, prompt history
+  └── logs/     rolling log file
+  ```
+
+  Compose now fails fast with a clear message if `DB_HOST_PATH` or `LOGS_HOST_PATH`
+  is unset. The `APPDATA_ROOT` / `APPDATA_HOST_PATH` concept is gone.
 
 ---
 
@@ -162,7 +182,7 @@ Every version below is a **published GitHub Release** with a matching
 - `docker-compose` stack, `.env.example`, and the `appdata/` layout.
 - MIT licence.
 
-[0.2.5]: https://github.com/rhamblen/persona-forge/releases/tag/v0.2.5
+[0.2.6]: https://github.com/rhamblen/persona-forge/releases/tag/v0.2.6
 [0.2.4]: https://github.com/rhamblen/persona-forge/releases/tag/v0.2.4
 [0.2.3]: https://github.com/rhamblen/persona-forge/releases/tag/v0.2.3
 [0.2.2]: https://github.com/rhamblen/persona-forge/releases/tag/v0.2.2

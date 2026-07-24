@@ -23,19 +23,28 @@ services:
     environment:
       COMFYUI_URL: "${COMFYUI_URL:-http://192.168.1.33:9000}"
       BUILDS_ROOT: "/builds"
-      APPDATA_ROOT: "/appdata"
+      DB_DIR: "/data/db"
+      LOG_DIR: "/data/logs"
       # Ownership applied to build folders we create, so the ComfyUI container
       # (a different user) can write into them. Unraid default is nobody:users.
       PUID: "${PUID:-99}"
       PGID: "${PGID:-100}"
       TZ: "${TZ:-Europe/London}"
     volumes:
-      # Persistent app data (sqlite db, prompt history).
-      # Relative paths resolve against THIS file's folder, so this becomes
-      # /mnt/user/appdata/persona-forge/appdata — created automatically.
+      # Persistent state, kept as PEERS of docker/ on the host:
+      #   /mnt/user/appdata/persona-forge/{docker,db,logs}
+      # Absolute paths only — a relative source is resolved against compose's
+      # project directory, which Unraid's Compose Manager does not reliably set
+      # to this folder (that nested them inside docker/ before 0.2.6).
       - type: bind
-        source: ${APPDATA_HOST_PATH:-../appdata}
-        target: /appdata
+        source: ${DB_HOST_PATH:?set DB_HOST_PATH to an absolute path in docker/.env}
+        target: /data/db
+        bind:
+          create_host_path: true
+
+      - type: bind
+        source: ${LOGS_HOST_PATH:?set LOGS_HOST_PATH to an absolute path in docker/.env}
+        target: /data/logs
         bind:
           create_host_path: true
 

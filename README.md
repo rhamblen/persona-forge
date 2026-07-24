@@ -53,7 +53,8 @@ shot to shot.)
 **Install** — only the `docker/` folder goes on the server:
 
 1. Copy **`docker/`** to `/mnt/user/appdata/persona-forge/docker/`.
-2. `cp .env.example .env` and set `COMFYUI_URL` and `BUILDS_HOST_PATH`.
+2. `cp .env.example .env` and set `COMFYUI_URL`, `BUILDS_HOST_PATH`,
+   `DB_HOST_PATH` and `LOGS_HOST_PATH` (all paths **absolute**).
 3. Unraid **Docker Compose Manager** → point at
    `/mnt/user/appdata/persona-forge/docker/docker-compose.yml` → **Compose Up**.
 4. Open `http://<server>:8890`.
@@ -62,6 +63,15 @@ The image is pulled from GHCR — no source and no build on the server. To updat
 
 ```bash
 docker compose pull && docker compose up -d
+```
+
+On the server you end up with `db/` and `logs/` sitting alongside `docker/`:
+
+```
+/mnt/user/appdata/persona-forge/
+├── docker/   compose + .env  (the only folder you copy)
+├── db/       sqlite: personas, prompt history
+└── logs/     rolling log file
 ```
 
 **Check it worked:** both dots in the sidebar should be green — *ComfyUI* showing
@@ -76,7 +86,8 @@ All settings live in `docker/.env`:
 |---|---|---|
 | `COMFYUI_URL` | `http://192.168.1.33:9000` | Where ComfyUI lives |
 | `BUILDS_HOST_PATH` | — | **Required.** Host path of the shared builds folder. Must be the same path mapped into ComfyUI as `/builds`. |
-| `APPDATA_HOST_PATH` | `../appdata` | Persistent data (sqlite db, prompt history, logs) |
+| `DB_HOST_PATH` | — | **Required, absolute.** Where the sqlite db + prompt history live, e.g. `/mnt/user/appdata/persona-forge/db` |
+| `LOGS_HOST_PATH` | — | **Required, absolute.** Rolling log file, e.g. `/mnt/user/appdata/persona-forge/logs` |
 | `PF_PORT` | `8890` | Published port |
 | `PUID` / `PGID` | `99` / `100` | Ownership applied to build folders, so the ComfyUI container can write into them |
 | `TZ` | `Europe/London` | Timezone |
@@ -100,7 +111,6 @@ character's `expressions/` folder stays a deliberate manual step.
 | `backend/` | FastAPI app: orchestration, state, prompt versioning |
 | `frontend/` | Web UI |
 | `workflows/` | ComfyUI API-format templates + parameter manifests |
-| `appdata/` | Persistent data mount (db, logs) |
 | `docs/` | Design notes and UI references |
 | `PROJECT_PLAN.md` | Architecture, phases and open decisions |
 | `CHANGELOG.md` | What changed in each release |

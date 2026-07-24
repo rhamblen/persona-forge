@@ -54,7 +54,9 @@ async function refreshStatus() {
       ["Path", s.builds_root],
       ["Mounted", s.mounted ? '<span class="ok">yes</span>' : '<span class="bad">no</span>'],
       ["Writable", s.writable ? '<span class="ok">yes</span>' : '<span class="bad">no</span>'],
-      ["Error", s.error]]);
+      ["Error", s.error],
+      ["DB dir", s.db_mounted ? `${s.db_dir} (ok)` : `${s.db_dir} (missing)`],
+      ["Log dir", s.log_mounted ? `${s.log_dir} (ok)` : `${s.log_dir} (missing)`]]);
   } catch (e) { setDot($("storage-dot"), false); $("storage-value").textContent = "error"; }
 
   if ($("builds-list")) {

@@ -3,7 +3,7 @@
 Every record goes three places:
   1. stdout            — so `docker logs persona-forge` works normally
   2. an in-memory ring — what the Logs tab reads (fast, no disk hit per poll)
-  3. a rolling JSONL   — appdata/logs/, so BOOT history survives a restart and a
+  3. a rolling JSONL   — the logs/ folder, so BOOT history survives a restart and a
                          crash loop can actually be diagnosed after the fact
 
 Categories (see PROJECT_PLAN 3):
@@ -32,8 +32,7 @@ LEVELS = ("debug", "info", "warn", "error")
 
 _RING_MAX = int(os.getenv("LOG_RING_SIZE", "2000"))
 _FILE_MAX_BYTES = int(os.getenv("LOG_FILE_MAX_BYTES", str(2 * 1024 * 1024)))
-_APPDATA = Path(os.getenv("APPDATA_ROOT", "/appdata"))
-_LOG_DIR = _APPDATA / "logs"
+_LOG_DIR = Path(os.getenv("LOG_DIR", "/data/logs"))
 _LOG_FILE = _LOG_DIR / "persona-forge.jsonl"
 
 _ring: Deque[dict[str, Any]] = deque(maxlen=_RING_MAX)
