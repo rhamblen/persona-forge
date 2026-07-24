@@ -9,6 +9,73 @@ Every version below is a **published GitHub Release** with a matching
 
 ---
 
+## [0.3.0] — 2026-07-24
+
+**Phase 3 opens: the AI prompt assistant.**
+
+### Added
+- **AI prompt assistant (Ollama).** A new card sits *above* the three manual prompt
+  fields. Type a plain-language description or instruction, choose **Replace**
+  (author all three fields fresh) or **Modify** (edit the current prompt), and hit
+  **Suggest** — it fills character / style / negative in one shot. Nothing is saved
+  automatically: the suggestion lands in the editable fields with a **reject-and-undo**
+  link, and only becomes a version when you Save as usual.
+  - Talks to Ollama over its native HTTP API (`/api/generate`, `format:json`), same
+    "no JSON-RPC hop" reasoning as the ComfyUI client.
+  - The system prompt enforces the project's settled rules: **prose, not Danbooru
+    tags**, and **no expression/emotion/pose words in the character field** (a baked-in
+    smile leaks into anger/grief). Verified live: "cheerful catgirl…" produced a clean
+    identity with the mood kept out of `character`.
+  - **Modify never destroys** a field the instruction didn't touch — if the model
+    returns an empty field, the current value is kept.
+  - Endpoints: `GET /api/ai/status` (reachability + model list, shown as a chip),
+    `POST /api/ai/suggest-prompt`. Configurable via `OLLAMA_URL` / `OLLAMA_MODEL`
+    (default `http://192.168.1.32:11434`, `llama3.1:latest`).
+- **Ollama in the sidebar, with Connect / Unload.** The pinned connection block now
+  shows Ollama alongside ComfyUI and Builds — `offline` / `idle` (reachable, model not
+  in VRAM) / `loaded`. **Connect** preloads the model so the first suggestion is instant
+  instead of a ~60s cold load; **Unload** frees VRAM immediately. Suggestions also carry
+  a `keep_alive` (`OLLAMA_KEEP_ALIVE`, default 30m) so the model auto-unloads after a
+  spell of no use rather than pinning VRAM on the shared, always-on box. Endpoints:
+  `POST /api/ai/warm`, `POST /api/ai/unload`; status now reports `loaded`.
+- **Start / restart ComfyUI and Ollama from the app.** Both run as containers on the
+  same host (UR1) as Persona Forge, so the sidebar now offers **Start** (when a
+  container is stopped) and **Restart** for each. A ComfyUI restart is refused while its
+  queue is busy unless forced, so an in-flight generation isn't killed by accident.
+  - Access goes through a **scoped `tecnativa/docker-socket-proxy` sidecar**, never the
+    raw Docker socket. The proxy is limited to `CONTAINERS` (list/inspect),
+    `ALLOW_START` and `ALLOW_RESTARTS` — it **cannot** create, remove or exec
+    containers, nor touch images / volumes / networks. The real socket is mounted
+    **read-only**, and the proxy sits on an `internal` network unreachable from the LAN.
+  - Disabled by default-safe: unset `DOCKER_PROXY_URL` and the feature (and its UI)
+    simply disappear. New endpoints: `GET /api/containers/status`,
+    `POST /api/containers/{key}/start`, `POST /api/containers/{key}/restart?force=`.
+  - Only recovers a *stopped container on a live host* — if UR1 is down, so is PF.
+- **Preview zoom.** The generated preview is now click-to-zoom into a full-screen
+  lightbox (click the backdrop or press Esc to collapse), plus an **open in new tab**
+  link on the image caption.
+
+### Fixed
+- **New personas defaulted to a photoreal checkpoint.** The checkpoint dropdown was
+  populated straight from ComfyUI, which returns models in folder order — so option
+  0 was `!first/consistentFactor_euclidCinematicV61`, a cinematic photoreal model,
+  and the first generate came out looking wrong for an anime persona. The default is
+  now *resolved* rather than positional: exact match on `DEFAULT_CHECKPOINT`
+  (`animi/NoobAI-XL-v1.1.safetensors`, the model the working 28-expression workflows
+  use), else the first model matching `PREFERRED_CHECKPOINTS`
+  (`NoobAI-XL`, `animi/`, `AnythingXL`), else position 0 with a warning logged.
+  Both are env-overridable in `docker/.env`.
+- `POST /api/projects` now resolves the default server-side when no checkpoint is
+  given, so the initial prompt version records a real model instead of `''`.
+- Projects created before this release stored an empty checkpoint and so inherited
+  the same wrong option in the UI; the form now falls back to the resolved default,
+  which fixes them without a db migration.
+
+### Changed
+- `GET /api/models` returns a `default` field alongside `models`.
+
+---
+
 ## [0.2.7] — 2026-07-24
 
 ### Changed

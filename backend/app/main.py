@@ -23,7 +23,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import comfy, db, logs, workflows
+from . import comfy, db, docker_ctl, logs, ollama, workflows
 
 COMFYUI_URL = comfy.COMFYUI_URL
 BUILDS_ROOT = Path(os.getenv("BUILDS_ROOT", "/builds"))
@@ -213,9 +213,11 @@ async def storage_status() -> dict:
 @app.get("/api/models")
 async def models(kind: str = "checkpoints") -> dict:
     try:
-        return {"kind": kind, "models": await comfy.list_models(kind)}
+        models = await comfy.list_models(kind)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(502, f"could not read models from ComfyUI: {exc}") from exc
+    default = comfy.pick_default_checkpoint(models) if kind == "checkpoints" else ""
+    return {"kind": kind, "models": models, "default": default}
 
 
 @app.get("/api/workflows")
@@ -233,6 +235,97 @@ async def get_workflow(workflow_id: str) -> dict:
         }
     except workflows.WorkflowError as exc:
         raise HTTPException(404, str(exc)) from exc
+
+
+# --------------------------------------------------------------------------- #
+# AI prompt assistant (Ollama)
+# --------------------------------------------------------------------------- #
+
+@app.get("/api/ai/status")
+async def ai_status() -> dict:
+    return await ollama.status()
+
+
+@app.post("/api/ai/warm")
+async def ai_warm() -> dict:
+    """Preload the model so the next suggestion is instant (sidebar Connect)."""
+    try:
+        return await ollama.warm()
+    except ollama.OllamaError as exc:
+        raise HTTPException(502, str(exc)) from exc
+
+
+@app.post("/api/ai/unload")
+async def ai_unload() -> dict:
+    """Free the model from VRAM now (sidebar Unload)."""
+    try:
+        return await ollama.unload()
+    except ollama.OllamaError as exc:
+        raise HTTPException(502, str(exc)) from exc
+
+
+class AiSuggestRequest(BaseModel):
+    instruction: str = Field(min_length=1, max_length=2000)
+    mode: str = "replace"  # 'replace' | 'modify'
+    character: str = ""
+    style: str = ""
+    negative: str = ""
+    model: str | None = None
+
+
+@app.post("/api/ai/suggest-prompt")
+async def ai_suggest_prompt(body: AiSuggestRequest) -> dict:
+    """Turn a plain-language description into suggested character/style/negative text.
+
+    Does NOT save anything — the UI shows the suggestion for accept/reject, and the
+    existing version system records it only if the user saves a new version.
+    """
+    if body.mode not in ("replace", "modify"):
+        raise HTTPException(422, "mode must be 'replace' or 'modify'")
+    current = {"character": body.character, "style": body.style, "negative": body.negative}
+    try:
+        suggestion = await ollama.suggest_prompt(body.instruction, body.mode, current, body.model)
+    except ollama.OllamaError as exc:
+        raise HTTPException(502, f"AI assistant error: {exc}") from exc
+    return {"mode": body.mode, "suggestion": suggestion}
+
+
+# --------------------------------------------------------------------------- #
+# container control (via the scoped docker-socket-proxy)
+# --------------------------------------------------------------------------- #
+
+@app.get("/api/containers/status")
+async def containers_status() -> dict:
+    return {
+        "enabled": docker_ctl.enabled(),
+        "containers": {key: await docker_ctl.state(key) for key in docker_ctl.CONTAINERS},
+    }
+
+
+@app.post("/api/containers/{key}/start")
+async def container_start(key: str) -> dict:
+    try:
+        return await docker_ctl.start(key)
+    except docker_ctl.DockerCtlError as exc:
+        raise HTTPException(400 if "unknown" in str(exc) or "disabled" in str(exc) else 502,
+                            str(exc)) from exc
+
+
+@app.post("/api/containers/{key}/restart")
+async def container_restart(key: str, force: bool = False) -> dict:
+    """Restart a container. For ComfyUI this refuses while its queue is busy unless
+    ?force=true, so we don't kill an in-flight generation by accident."""
+    if key not in docker_ctl.CONTAINERS:
+        raise HTTPException(400, f"unknown container key: {key}")
+    if key == "comfyui" and not force:
+        n = await comfy.queue_size()
+        if n > 0:
+            raise HTTPException(409, f"ComfyUI has {n} job(s) queued/running — "
+                                     f"pass force=true to restart anyway")
+    try:
+        return await docker_ctl.restart(key)
+    except docker_ctl.DockerCtlError as exc:
+        raise HTTPException(400 if "disabled" in str(exc) else 502, str(exc)) from exc
 
 
 # --------------------------------------------------------------------------- #
@@ -285,6 +378,10 @@ async def create_project(body: ProjectCreate) -> dict:
     """Naming a project creates its build folder with lora/ + images/ subfolders."""
     slug = slugify(body.name)
     build_dir = BUILDS_ROOT / slug
+    # An unset checkpoint used to be stored as '' and then shown as ComfyUI's
+    # first entry (photoreal), so the first generate looked wrong. Resolve it now
+    # so the initial version records a real, anime-first model.
+    checkpoint = body.checkpoint or await comfy.default_checkpoint()
 
     if not BUILDS_ROOT.is_dir():
         raise HTTPException(503, f"builds root not mounted at {BUILDS_ROOT}")
@@ -310,7 +407,7 @@ async def create_project(body: ProjectCreate) -> dict:
             """INSERT INTO prompt_versions
                (project_id, parent_id, character, style, negative, checkpoint, seed, source, note)
                VALUES (?, NULL, ?, ?, ?, ?, ?, 'initial', 'initial version')""",
-            (project_id, body.character, body.style, body.negative, body.checkpoint, body.seed),
+            (project_id, body.character, body.style, body.negative, checkpoint, body.seed),
         )
         conn.execute(
             "UPDATE projects SET current_version_id = ? WHERE id = ?", (cur.lastrowid, project_id)

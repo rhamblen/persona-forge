@@ -40,6 +40,11 @@ body { margin: 0; background: var(--bg); color: var(--text);
 .status-value { margin-left: auto; font-size: 12px; }
 .status-meta { color: var(--text-dim); font-size: 11px; padding-left: 18px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.status-actions { display: flex; gap: 6px; padding: 4px 0 2px 18px; }
+.mini-btn { font-size: 11px; padding: 3px 10px; background: var(--bg-raised);
+  color: var(--accent); border: 1px solid var(--line); border-radius: 8px; cursor: pointer; }
+.mini-btn:hover { border-color: var(--accent); }
+.mini-btn:disabled { opacity: .45; cursor: default; }
 .dot { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 9px; }
 .dot-ok { background: var(--ok); box-shadow: 0 0 0 3px rgba(74,222,128,.15); }
 .dot-bad { background: var(--bad); box-shadow: 0 0 0 3px rgba(248,113,113,.15); }
@@ -105,6 +110,36 @@ textarea:focus, input:focus, select:focus { outline: none; border-color: var(--a
   background: var(--bg-raised); border-radius: 8px; padding: 10px; }
 .preview img { max-width: 100%; max-height: 620px; border-radius: 6px; display: block; }
 .preview-meta { margin-top: 8px; text-align: center; word-break: break-all; }
+.preview-meta a { color: var(--accent); text-decoration: none; }
+.preview-meta a:hover { text-decoration: underline; }
+/* zoomable preview: the image sits in a borderless button so it is keyboard-focusable */
+.preview-frame { display: block; padding: 0; border: 0; background: none; cursor: zoom-in; width: 100%; }
+.preview-frame:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
+
+/* full-screen preview lightbox */
+body.no-scroll { overflow: hidden; }
+.lightbox { position: fixed; inset: 0; z-index: 60; background: rgba(0,0,0,.85);
+  display: grid; place-items: center; padding: 32px; cursor: zoom-out; }
+.lightbox img { max-width: 96vw; max-height: 92vh; border-radius: 8px;
+  box-shadow: 0 12px 48px rgba(0,0,0,.6); cursor: default; }
+.lightbox-close { position: absolute; top: 14px; right: 18px; width: 40px; height: 40px;
+  font-size: 26px; line-height: 1; color: var(--text); background: var(--bg-panel);
+  border: 1px solid var(--line); border-radius: var(--radius); cursor: pointer; }
+.lightbox-close:hover { border-color: var(--accent); color: var(--accent); }
+
+/* AI prompt assistant — a raised card above the manual prompt fields */
+.ai-assist { background: var(--bg-raised); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 12px 14px; margin-bottom: 16px; }
+.ai-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.ai-assist textarea { width: 100%; resize: vertical; background: var(--bg-panel);
+  color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px;
+  font: inherit; }
+.ai-assist textarea:focus { outline: none; border-color: var(--accent); }
+.ai-controls { display: flex; align-items: center; gap: 12px; margin-top: 8px; }
+.ai-controls .seg { flex: 0 0 auto; }
+.ai-controls .btn { margin-left: auto; }
+.ai-assist .hint { margin: 8px 0 0; }
+.ai-assist .hint a { color: var(--accent); }
 .spinner { width: 26px; height: 26px; border: 3px solid var(--line);
   border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
@@ -127,6 +162,7 @@ textarea:focus, input:focus, select:focus { outline: none; border-color: var(--a
 .chip { font-size: 11px; padding: 2px 8px; border-radius: 999px;
   background: var(--bg-raised); border: 1px solid var(--line); color: var(--text-dim); }
 .chip-good { color: var(--ok); border-color: var(--ok); }
+.chip-bad { color: var(--bad); border-color: var(--bad); }
 .chip-current { color: var(--accent); border-color: var(--accent); }
 .chip-src { text-transform: lowercase; }
 .tag { font-size: 11px; padding: 2px 7px; border-radius: 5px;

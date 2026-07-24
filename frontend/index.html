@@ -25,12 +25,30 @@
           <span class="status-value" id="comfy-value">checking…</span>
         </div>
         <div class="status-meta" id="comfy-meta"></div>
+        <div class="status-actions" id="comfy-actions" hidden>
+          <button class="mini-btn" id="comfy-start" hidden title="Start the ComfyUI container">Start</button>
+          <button class="mini-btn" id="comfy-restart" hidden title="Restart the ComfyUI container">Restart</button>
+        </div>
         <div class="status-row">
           <span class="dot dot-unknown" id="storage-dot"></span>
           <span class="status-label">Builds</span>
           <span class="status-value" id="storage-value">checking…</span>
         </div>
         <div class="status-meta" id="storage-meta"></div>
+        <div class="status-row">
+          <span class="dot dot-unknown" id="ollama-dot"></span>
+          <span class="status-label">Ollama</span>
+          <span class="status-value" id="ollama-value">checking…</span>
+        </div>
+        <div class="status-meta" id="ollama-meta"></div>
+        <div class="status-actions" id="ollama-actions" hidden>
+          <button class="mini-btn" id="ollama-connect" title="Preload the model so the first suggestion is instant">Connect</button>
+          <button class="mini-btn" id="ollama-unload" hidden title="Free the model from VRAM">Unload</button>
+        </div>
+        <div class="status-actions" id="ollama-container-actions" hidden>
+          <button class="mini-btn" id="ollama-start" hidden title="Start the Ollama container">Start</button>
+          <button class="mini-btn" id="ollama-restart" hidden title="Restart the Ollama container">Restart</button>
+        </div>
       </div>
 
       <nav class="nav">
@@ -94,6 +112,27 @@
               <div class="panel-head">
                 <h2>Prompt</h2>
                 <span class="chip" id="current-version-chip">—</span>
+              </div>
+
+              <!-- AI prompt assistant — sits ABOVE the manual fields and can author
+                   or edit all three at once via Ollama. -->
+              <div class="ai-assist" id="ai-assist">
+                <div class="ai-head">
+                  <span class="field-label">AI prompt assistant</span>
+                  <span class="chip small" id="ai-status" title="Ollama connection">checking…</span>
+                </div>
+                <textarea id="ai-instruction" rows="2" spellcheck="false"
+                  placeholder="Describe the character, or how to change it — e.g. “a cheerful catgirl with short pink hair, cyberpunk city at night” or “give her freckles and a longer coat”"></textarea>
+                <div class="ai-controls">
+                  <div class="seg" id="ai-mode" role="group" aria-label="AI mode">
+                    <button type="button" class="seg-tile sel" data-mode="replace"
+                      title="Author all three fields fresh from your description">Replace</button>
+                    <button type="button" class="seg-tile" data-mode="modify"
+                      title="Edit the current prompt to satisfy your instruction">Modify</button>
+                  </div>
+                  <button class="btn btn-primary" id="ai-suggest-btn">Suggest ✨</button>
+                </div>
+                <p class="hint" id="ai-msg"></p>
               </div>
 
               <label class="field">
@@ -224,6 +263,12 @@
         <button class="btn" id="np-cancel">Cancel</button>
       </div>
     </div>
+  </div>
+
+  <!-- preview lightbox (zoom) -->
+  <div class="lightbox" id="lightbox" hidden>
+    <button class="lightbox-close" id="lightbox-close" title="Close (Esc)" aria-label="Close">×</button>
+    <img id="lightbox-img" alt="zoomed preview" />
   </div>
 
   <script src="/static/app.js"></script>

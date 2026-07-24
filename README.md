@@ -25,8 +25,12 @@ shot to shot.)
 
 ## Features
 
-- **Prompt Studio** — pick a checkpoint, refine a prompt against live previews, then
-  **sign off a baseline** that can never be lost.
+- **Prompt Studio** — pick a checkpoint, refine a prompt against live previews (with
+  click-to-zoom), then **sign off a baseline** that can never be lost.
+- **AI prompt assistant** — describe a character in plain language and let Ollama author
+  the character / style / negative fields, or **Modify** an existing prompt ("give her
+  freckles and a longer coat"). Suggestions are editable with a one-click undo; prose,
+  not tags, and expression words are kept out of the identity field.
 - **Version history like a VCS** — every edit appends a new version with a diff of what
   changed; roll back to any point. Nothing is ever overwritten or deleted.
 - **Persona library** — personas persist and reload. **Clone** one to vary it: the same
@@ -37,7 +41,10 @@ shot to shot.)
 - **Per-character LoRA training** on your own GPU _(phase 5)_.
 - **Pose / expression sets** — the 28 SillyTavern expressions with posture variation,
   tweakable one sprite at a time _(phase 6)_.
-- **Ollama natural-language prompt editing** _(phase 3)_.
+- **Service control** — Ollama has Connect / Unload (preload the model or free VRAM),
+  and when ComfyUI or Ollama are down you can **Start / Restart** their containers from
+  the sidebar. Container control goes through a scoped `docker-socket-proxy` (start /
+  restart only, read-only socket) and is off unless `DOCKER_PROXY_URL` is set.
 - **Logs tab** — filter by level and by `boot` / `integration` / `process` / `local`;
   also on stdout and in a rolling file so boot history survives a restart.
 - Runs **entirely on your LAN**. ComfyUI stays external — this does not bundle it.
@@ -118,9 +125,9 @@ character's `expressions/` folder stays a deliberate manual step.
 
 ## Status
 
-**Phase 2 of 7** — Prompt Studio is usable; dataset, LoRA training and pose sets are
-still to come. See the roadmap in [PROJECT_PLAN.md](PROJECT_PLAN.md) and the release
-history in [CHANGELOG.md](CHANGELOG.md).
+**Phase 3 of 7** — Prompt Studio is usable and now has AI-assisted prompt authoring;
+dataset, LoRA training and pose sets are still to come. See the roadmap in
+[PROJECT_PLAN.md](PROJECT_PLAN.md) and the release history in [CHANGELOG.md](CHANGELOG.md).
 
 Versioning is `0.<phase>.<iteration>` — the middle digit is the phase, the last
 increments with each update inside it.

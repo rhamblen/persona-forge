@@ -6,7 +6,7 @@ const POLL_MS = 15000;
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
-let state = { projectId: null, versions: [], current: null, checkpoints: [] };
+let state = { projectId: null, versions: [], current: null, checkpoints: [], defaultCheckpoint: "" };
 
 async function api(path, opts) {
   const r = await fetch(path, { headers: { "Content-Type": "application/json" }, ...opts });
@@ -32,17 +32,22 @@ function rows(pairs) {
 }
 
 async function refreshStatus() {
+  await refreshContainers();
   try {
     const s = await api("/api/comfyui/status");
     setDot($("comfy-dot"), s.connected);
     $("comfy-value").textContent = s.connected ? `${s.latency_ms} ms` : "offline";
     $("comfy-meta").textContent = s.connected ? (s.gpu || "") : (s.url || "");
+    renderContainerCtl("comfy-actions", "comfy-start", "comfy-restart", "comfyui");
     if ($("comfy-detail")) $("comfy-detail").innerHTML = s.connected
       ? rows([["Status", '<span class="ok">connected</span>'], ["URL", s.url], ["Version", s.comfyui_version],
               ["Output dir", s.output_directory], ["GPU", s.gpu],
               ["VRAM", s.vram_total_mb ? `${s.vram_free_mb} / ${s.vram_total_mb} MB free` : null]])
       : rows([["Status", '<span class="bad">not connected</span>'], ["URL", s.url], ["Error", s.error]]);
-  } catch (e) { setDot($("comfy-dot"), false); $("comfy-value").textContent = "error"; }
+  } catch (e) {
+    setDot($("comfy-dot"), false); $("comfy-value").textContent = "error";
+    renderContainerCtl("comfy-actions", "comfy-start", "comfy-restart", "comfyui");
+  }
 
   try {
     const s = await api("/api/storage/status");
@@ -71,6 +76,9 @@ async function refreshStatus() {
             <td>${b.image_count}</td></tr>`).join("") + `</tbody></table>`;
     } catch { /* non-fatal */ }
   }
+
+  // Ollama shares the pinned sidebar block, so it rides the same poll.
+  await refreshAiStatus();
 }
 
 /* ---------------- projects ---------------- */
@@ -94,9 +102,12 @@ async function loadProjects(selectId) {
 
 async function loadCheckpoints() {
   try {
-    const { models } = await api("/api/models?kind=checkpoints");
+    const { models, default: def } = await api("/api/models?kind=checkpoints");
     state.checkpoints = models;
+    state.defaultCheckpoint = def || models[0] || "";
     $("f-checkpoint").innerHTML = models.map((m) => `<option value="${esc(m)}">${esc(m)}</option>`).join("");
+    // ComfyUI lists checkpoints in folder order, so option 0 is a photoreal model.
+    $("f-checkpoint").value = state.defaultCheckpoint;
   } catch {
     $("f-checkpoint").innerHTML = `<option value="">(ComfyUI unreachable)</option>`;
   }
@@ -119,7 +130,10 @@ function fillForm(v) {
   $("f-style").value = v.style || "";
   $("f-negative").value = v.negative || "";
   $("f-seed").value = v.seed ?? 0;
+  // Versions saved before 0.2.8 have an empty checkpoint — fall back to the
+  // resolved default rather than letting the browser show option 0 (photoreal).
   if (v.checkpoint && state.checkpoints.includes(v.checkpoint)) $("f-checkpoint").value = v.checkpoint;
+  else if (state.defaultCheckpoint) $("f-checkpoint").value = state.defaultCheckpoint;
   $("current-version-chip").textContent = `v${v.id}${v.signed_off ? " · signed off" : ""}`;
   $("current-version-chip").className = "chip" + (v.signed_off ? " chip-good" : "");
 }
@@ -212,10 +226,22 @@ async function generate() {
       body: JSON.stringify({ workflow: "base-character", params: formValues() }),
     });
     const img = res.images?.[0];
-    $("preview").innerHTML = img
-      ? `<img src="/api/image?filename=${encodeURIComponent(img.filename)}&subfolder=${encodeURIComponent(img.subfolder)}" alt="preview" />
-         <div class="preview-meta muted small">${esc(img.subfolder)}/${esc(img.filename)}</div>`
-      : '<p class="bad">No image returned.</p>';
+    if (img) {
+      const url = `/api/image?filename=${encodeURIComponent(img.filename)}&subfolder=${encodeURIComponent(img.subfolder)}`;
+      state.previewUrl = url;
+      $("preview").innerHTML =
+        `<button class="preview-frame" id="preview-zoom" title="Click to zoom">
+           <img src="${url}" alt="preview" />
+         </button>
+         <div class="preview-meta muted small">
+           ${esc(img.subfolder)}/${esc(img.filename)}
+           · <a href="${url}" target="_blank" rel="noopener">open in new tab ↗</a>
+         </div>`;
+      $("preview-zoom").addEventListener("click", () => openLightbox(url));
+    } else {
+      state.previewUrl = "";
+      $("preview").innerHTML = '<p class="bad">No image returned.</p>';
+    }
     msg($("studio-msg"), "Done.", "ok");
   } catch (e) {
     $("preview").innerHTML = `<p class="bad">${esc(e.message)}</p>`;
@@ -225,13 +251,183 @@ async function generate() {
   }
 }
 
+/* ---------------- AI prompt assistant (Ollama) ---------------- */
+
+let aiMode = "replace";
+let aiUndo = null; // previous field values, for reject
+
+async function refreshAiStatus() {
+  const chip = $("ai-status");
+  let s;
+  try {
+    s = await api("/api/ai/status");
+  } catch {
+    s = { reachable: false };
+  }
+  // Sidebar row
+  setDot($("ollama-dot"), s.reachable ? (s.loaded ? true : null) : false);
+  $("ollama-value").textContent = !s.reachable ? "offline" : s.loaded ? "loaded" : "idle";
+  $("ollama-meta").textContent = s.reachable ? (s.model || "") : (s.url || "");
+  $("ollama-actions").hidden = !s.reachable;
+  $("ollama-connect").hidden = !!s.loaded;   // Connect only when not loaded
+  $("ollama-unload").hidden = !s.loaded;     // Unload only when loaded
+  renderContainerCtl("ollama-container-actions", "ollama-start", "ollama-restart", "ollama");
+  // Studio chip
+  if (!s.reachable) {
+    chip.textContent = "Ollama offline";
+    chip.className = "chip small chip-bad";
+    chip.title = s.error || s.url || "";
+  } else {
+    chip.textContent = s.loaded ? "Ollama · loaded" : "Ollama · idle";
+    chip.className = "chip small " + (s.loaded ? "chip-good" : "");
+    chip.title = `${s.url} — ${(s.models || []).length} models`;
+  }
+}
+
+async function ollamaAction(path, label) {
+  const c = $("ollama-connect"), u = $("ollama-unload");
+  c.disabled = u.disabled = true;
+  msg($("ai-msg"), `${label}…`);
+  try {
+    await api(path, { method: "POST" });
+    msg($("ai-msg"), `${label} done.`, "ok");
+  } catch (e) {
+    msg($("ai-msg"), e.message, "bad");
+  } finally {
+    c.disabled = u.disabled = false;
+    refreshAiStatus();
+  }
+}
+
+$("ollama-connect").addEventListener("click", () => ollamaAction("/api/ai/warm", "Connecting Ollama"));
+$("ollama-unload").addEventListener("click", () => ollamaAction("/api/ai/unload", "Unloading model"));
+
+/* ---------------- container control (via socket proxy) ---------------- */
+
+async function refreshContainers() {
+  try {
+    state.containers = await api("/api/containers/status");
+  } catch {
+    state.containers = { enabled: false, containers: {} };
+  }
+}
+
+// Show Start only when definitively stopped, Restart only when running; hide the
+// group otherwise (disabled, unknown, or proxy unreachable).
+function renderContainerCtl(actionsId, startId, restartId, key) {
+  const wrap = $(actionsId), start = $(startId), restart = $(restartId);
+  const enabled = state.containers?.enabled;
+  const info = state.containers?.containers?.[key];
+  if (!enabled || !info) { wrap.hidden = true; return; }
+  start.hidden = info.running !== false;
+  restart.hidden = info.running !== true;
+  wrap.hidden = start.hidden && restart.hidden;
+}
+
+async function containerAction(key, action, label, force = false) {
+  const url = `/api/containers/${key}/${action}` + (force ? "?force=true" : "");
+  try {
+    await api(url, { method: "POST" });
+  } catch (e) {
+    // ComfyUI refuses a restart while its queue is busy — offer to force it.
+    if (/force=true/.test(e.message) && confirm(`${e.message}\n\nRestart anyway?`)) {
+      return containerAction(key, action, label, true);
+    }
+    alert(`${label} failed: ${e.message}`);
+    return;
+  }
+  await refreshStatus();
+}
+
+$("comfy-start").addEventListener("click", () => containerAction("comfyui", "start", "Start ComfyUI"));
+$("comfy-restart").addEventListener("click", () => {
+  if (confirm("Restart the ComfyUI container?")) containerAction("comfyui", "restart", "Restart ComfyUI");
+});
+$("ollama-start").addEventListener("click", () => containerAction("ollama", "start", "Start Ollama"));
+$("ollama-restart").addEventListener("click", () => {
+  if (confirm("Restart the Ollama container?")) containerAction("ollama", "restart", "Restart Ollama");
+});
+
+$("ai-mode").addEventListener("click", (e) => {
+  const t = e.target.closest(".seg-tile");
+  if (!t) return;
+  aiMode = t.dataset.mode;
+  [...$("ai-mode").children].forEach((c) => c.classList.toggle("sel", c === t));
+});
+
+async function aiSuggest() {
+  const instruction = $("ai-instruction").value.trim();
+  if (!instruction) return msg($("ai-msg"), "Describe what you want first.", "bad");
+  const btn = $("ai-suggest-btn");
+  btn.disabled = true;
+  msg($("ai-msg"), `Asking Ollama to ${aiMode === "modify" ? "edit the prompt" : "write a prompt"}… (the first call loads the model, up to ~60s)`);
+  try {
+    const { suggestion } = await api("/api/ai/suggest-prompt", {
+      method: "POST",
+      body: JSON.stringify({
+        instruction,
+        mode: aiMode,
+        character: $("f-character").value,
+        style: $("f-style").value,
+        negative: $("f-negative").value,
+      }),
+    });
+    aiUndo = { character: $("f-character").value, style: $("f-style").value, negative: $("f-negative").value };
+    $("f-character").value = suggestion.character || "";
+    $("f-style").value = suggestion.style || "";
+    $("f-negative").value = suggestion.negative || "";
+    $("ai-msg").innerHTML =
+      `<span class="ok">Applied to the three fields.</span> Edit freely, then Save as new version — or ` +
+      `<a href="#" id="ai-undo">reject and undo</a>.`;
+    $("ai-undo").addEventListener("click", (e) => { e.preventDefault(); aiRevert(); });
+  } catch (e) {
+    msg($("ai-msg"), e.message, "bad");
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function aiRevert() {
+  if (!aiUndo) return;
+  $("f-character").value = aiUndo.character;
+  $("f-style").value = aiUndo.style;
+  $("f-negative").value = aiUndo.negative;
+  aiUndo = null;
+  msg($("ai-msg"), "Reverted to the previous prompt.", "ok");
+}
+
+$("ai-suggest-btn").addEventListener("click", aiSuggest);
+
+/* ---------------- preview lightbox ---------------- */
+
+function openLightbox(url) {
+  const box = $("lightbox");
+  $("lightbox-img").src = url;
+  box.hidden = false;
+  document.body.classList.add("no-scroll");
+}
+function closeLightbox() {
+  $("lightbox").hidden = true;
+  $("lightbox-img").src = "";
+  document.body.classList.remove("no-scroll");
+}
+$("lightbox").addEventListener("click", (e) => {
+  // Click the backdrop or the close button collapses it; clicking the image itself does not.
+  if (e.target.id !== "lightbox-img") closeLightbox();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !$("lightbox").hidden) closeLightbox();
+});
+
 /* ---------------- logs ---------------- */
 
 let logTimer = null;
 let logFilters = { level: "info", category: "all", follow: true };
 
 function initSegments() {
-  document.querySelectorAll(".seg").forEach((seg) => {
+  // Only the log-filter segments; other .seg groups (e.g. the AI mode toggle) own
+  // their own handlers.
+  document.querySelectorAll("#log-level.seg, #log-category.seg").forEach((seg) => {
     seg.addEventListener("click", (e) => {
       const tile = e.target.closest(".seg-tile");
       if (!tile) return;

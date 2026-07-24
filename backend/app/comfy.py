@@ -17,6 +17,16 @@ from . import logs
 
 COMFYUI_URL = os.getenv("COMFYUI_URL", "http://192.168.1.33:9000").rstrip("/")
 
+# ComfyUI returns checkpoints in its own folder order, so the first entry is
+# whatever sorts first ("!first/...", a photoreal model) — not a sane default for
+# an anime persona. Rank the list instead: first exact match wins, then the first
+# model whose name contains one of the substrings below, then position 0.
+DEFAULT_CHECKPOINT = os.getenv("DEFAULT_CHECKPOINT", "animi/NoobAI-XL-v1.1.safetensors")
+PREFERRED_CHECKPOINTS = [
+    s.strip() for s in os.getenv("PREFERRED_CHECKPOINTS", "NoobAI-XL,animi/,AnythingXL").split(",")
+    if s.strip()
+]
+
 
 class ComfyError(RuntimeError):
     pass
@@ -49,6 +59,42 @@ async def list_models(kind: str = "checkpoints") -> list[str]:
         return list(info[node]["input"]["required"][field][0])
     except (KeyError, IndexError, TypeError):
         return []
+
+
+def pick_default_checkpoint(models: list[str]) -> str:
+    """Best default from a live checkpoint list — see PREFERRED_CHECKPOINTS."""
+    if not models:
+        return ""
+    if DEFAULT_CHECKPOINT in models:
+        return DEFAULT_CHECKPOINT
+    for want in PREFERRED_CHECKPOINTS:
+        for m in models:
+            if want.lower() in m.lower():
+                return m
+    logs.warn("integration", "no preferred checkpoint matched; falling back to the first",
+              fallback=models[0], preferred=PREFERRED_CHECKPOINTS)
+    return models[0]
+
+
+async def default_checkpoint() -> str:
+    """Resolve the default against ComfyUI's live list. '' if it is unreachable."""
+    try:
+        return pick_default_checkpoint(await list_models("checkpoints"))
+    except Exception as exc:  # noqa: BLE001
+        logs.warn("integration", f"could not resolve a default checkpoint: {exc}")
+        return ""
+
+
+async def queue_size() -> int:
+    """Running + pending jobs in ComfyUI's queue. -1 if it can't be read."""
+    try:
+        async with httpx.AsyncClient(timeout=6.0) as c:
+            r = await c.get(f"{COMFYUI_URL}/queue")
+            r.raise_for_status()
+            data = r.json()
+        return len(data.get("queue_running", [])) + len(data.get("queue_pending", []))
+    except Exception:  # noqa: BLE001
+        return -1
 
 
 async def submit(graph: dict[str, Any], client_id: str = "persona-forge") -> str:

@@ -22,6 +22,19 @@ services:
       net.unraid.docker.icon: "https://raw.githubusercontent.com/rhamblen/persona-forge/main/docs/icon.png"
     environment:
       COMFYUI_URL: "${COMFYUI_URL:-http://192.168.1.33:9000}"
+      # Anime-first default for new personas — ComfyUI's own list order would
+      # otherwise select a photoreal model. See docker/.env.
+      DEFAULT_CHECKPOINT: "${DEFAULT_CHECKPOINT:-animi/NoobAI-XL-v1.1.safetensors}"
+      PREFERRED_CHECKPOINTS: "${PREFERRED_CHECKPOINTS:-NoobAI-XL,animi/,AnythingXL}"
+      # Ollama powers the AI prompt assistant (phase 3). See docker/.env.
+      OLLAMA_URL: "${OLLAMA_URL:-http://192.168.1.32:11434}"
+      OLLAMA_MODEL: "${OLLAMA_MODEL:-llama3.1:latest}"
+      # Container control (phase 3): PF restarts ComfyUI/Ollama THROUGH the
+      # docker-socket-proxy below — never the raw docker socket. If DOCKER_PROXY_URL
+      # is unset the feature simply stays disabled. Names are the real UR1 containers.
+      DOCKER_PROXY_URL: "${DOCKER_PROXY_URL:-http://docker-socket-proxy:2375}"
+      COMFYUI_CONTAINER: "${COMFYUI_CONTAINER:-stable-diffusion-ComfyUI}"
+      OLLAMA_CONTAINER: "${OLLAMA_CONTAINER:-ollama}"
       BUILDS_ROOT: "/builds"
       DB_DIR: "/data/db"
       LOG_DIR: "/data/logs"
@@ -53,3 +66,35 @@ services:
       - type: bind
         source: ${BUILDS_HOST_PATH:?set BUILDS_HOST_PATH in docker/.env}
         target: /builds
+    networks:
+      # `default` = LAN egress (reach ComfyUI/Ollama by IP) + the published port.
+      # `docker-ctl` = the isolated link to the socket proxy.
+      - default
+      - docker-ctl
+
+  # Scoped Docker gateway. PF reaches this instead of the raw socket, so the only
+  # host power it gains is: list/inspect containers, and start/restart them. It
+  # CANNOT create, remove, or exec containers, nor touch images/volumes/networks.
+  # The real socket is mounted READ-ONLY and this service is never published to the
+  # LAN (only PF, on docker-ctl, can reach it).
+  docker-socket-proxy:
+    image: ${DOCKER_PROXY_IMAGE:-tecnativa/docker-socket-proxy:latest}
+    container_name: persona-forge-docker-proxy
+    restart: unless-stopped
+    environment:
+      CONTAINERS: 1        # GET list/inspect — needed to report container state
+      ALLOW_START: 1       # POST /containers/{id}/start
+      ALLOW_RESTARTS: 1    # POST /containers/{id}/restart (also stop/kill)
+      POST: 0              # everything else stays read-only
+    volumes:
+      - type: bind
+        source: ${DOCKER_SOCK_PATH:-/var/run/docker.sock}
+        target: /var/run/docker.sock
+        read_only: true
+    networks:
+      - docker-ctl
+
+networks:
+  default:
+  docker-ctl:
+    internal: true         # proxy needs no outbound network; the socket is a file mount
