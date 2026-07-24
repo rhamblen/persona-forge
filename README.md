@@ -53,8 +53,9 @@ shot to shot.)
 **Install** — only the `docker/` folder goes on the server:
 
 1. Copy **`docker/`** to `/mnt/user/appdata/persona-forge/docker/`.
-2. `cp .env.example .env` and set `COMFYUI_URL`, `BUILDS_HOST_PATH`,
-   `DB_HOST_PATH` and `LOGS_HOST_PATH` (all paths **absolute**).
+2. Edit `docker/.env` — set `COMFYUI_URL`, `BUILDS_HOST_PATH`, `DB_HOST_PATH` and
+   `LOGS_HOST_PATH` (all paths **absolute**). It ships ready to use, so there is no
+   file to rename.
 3. Unraid **Docker Compose Manager** → point at
    `/mnt/user/appdata/persona-forge/docker/docker-compose.yml` → **Compose Up**.
 4. Open `http://<server>:8890`.

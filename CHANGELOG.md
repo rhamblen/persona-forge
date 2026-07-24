@@ -9,6 +9,18 @@ Every version below is a **published GitHub Release** with a matching
 
 ---
 
+## [0.2.7] — 2026-07-24
+
+### Changed
+- **`docker/.env` is now shipped as a real, tracked file** instead of
+  `.env.example`. Copying `docker/` to the server now yields a working stack with
+  no rename step. It contains only non-secret config (ComfyUI URL, host paths,
+  port, `PUID`/`PGID`, `TZ`); `.gitignore` still ignores every other `.env`, with a
+  single explicit exception for this one. If a credential is ever needed, it must
+  move out of version control and the exception be dropped.
+
+---
+
 ## [0.2.6] — 2026-07-24
 
 **Consistency pass: docs, UI language, and self-describing builds.**
@@ -182,6 +194,7 @@ Every version below is a **published GitHub Release** with a matching
 - `docker-compose` stack, `.env.example`, and the `appdata/` layout.
 - MIT licence.
 
+[0.2.7]: https://github.com/rhamblen/persona-forge/releases/tag/v0.2.7
 [0.2.6]: https://github.com/rhamblen/persona-forge/releases/tag/v0.2.6
 [0.2.4]: https://github.com/rhamblen/persona-forge/releases/tag/v0.2.4
 [0.2.3]: https://github.com/rhamblen/persona-forge/releases/tag/v0.2.3
