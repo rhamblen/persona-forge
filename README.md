@@ -1,112 +1,130 @@
-# Persona Forge
+# persona-forge
 
-Repo: https://github.com/rhamblen/persona-forge
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Docker](https://img.shields.io/badge/ghcr.io-persona--forge-2496ed.svg)](https://github.com/rhamblen/persona-forge/pkgs/container/persona-forge)
+[![Python](https://img.shields.io/badge/python-3.12-brightgreen.svg)](https://www.python.org)
+[![ComfyUI](https://img.shields.io/badge/ComfyUI-required-purple.svg)](https://github.com/comfyanonymous/ComfyUI)
 
-## Why
+Build **SillyTavern expression sets — face *and* posture** — for your own characters,
+using your own ComfyUI. A guided web app takes you from a prompt to a trained
+per-character LoRA and a full sprite set, with **Ollama** on hand to edit prompts in
+plain language and **full rollback** so an approved prompt is never lost.
 
-Sometimes when using SillyTavern you want to create your own characters with your
-own images — but you don't want a static image, you want expressions. Live2D and VRM
-are complicated to build, and facial expressions alone are easy to misread or simply
-not notice, especially across 28 of them. Using **posture** as well makes the
-character far more readable.
+## Why?
 
-Persona Forge builds both **face and posture** expression sets using ComfyUI, behind
-a custom interface that walks you through the steps — with **Ollama** on hand to
-customise prompts in natural language wherever you need it.
+Sometimes when using SillyTavern you want to create your own characters with your own
+images — but you don't want a static image, you want expressions. Live2D and VRM are
+complicated to build, and facial expressions alone are easy to misread or simply not
+notice, especially across 28 of them. Using **posture** as well makes the character far
+more readable.
 
-## What it does
+Posture is also why this trains a LoRA rather than just prompting: varying the body
+means re-generating it, and only a per-character LoRA keeps it recognisably the same
+person. (IPAdapter alone was tested and drifts — hair, outfit and proportions wander
+shot to shot.)
 
-Self-hosted web app for building consistent 2D anime characters end to end:
+## Features
 
-**Prompt Studio → Dataset Builder → per-character LoRA → Pose / Expression sets**
-→ export to SillyTavern.
+- **Prompt Studio** — pick a checkpoint, refine a prompt against live previews, then
+  **sign off a baseline** that can never be lost.
+- **Version history like a VCS** — every edit appends a new version with a diff of what
+  changed; roll back to any point. Nothing is ever overwritten or deleted.
+- **Persona library** — personas persist and reload. **Clone** one to vary it: the same
+  character skiing *and* lazing on a beach. Clones record their parent so a trained LoRA
+  can be reused instead of retrained.
+- **Dataset builder** — generate a batch, pick the ones that look like the same person,
+  top up until you have enough _(phase 4)_.
+- **Per-character LoRA training** on your own GPU _(phase 5)_.
+- **Pose / expression sets** — the 28 SillyTavern expressions with posture variation,
+  tweakable one sprite at a time _(phase 6)_.
+- **Ollama natural-language prompt editing** _(phase 3)_.
+- **Logs tab** — filter by level and by `boot` / `integration` / `process` / `local`;
+  also on stdout and in a rolling file so boot history survives a restart.
+- Runs **entirely on your LAN**. ComfyUI stays external — this does not bundle it.
 
-- Natural-language prompt editing (via a local Ollama model)
-- Full prompt **version history + rollback** (never lose a signed-off prompt)
-- Drives the existing ComfyUI on UR1; runs entirely on the LAN
+## Quick Start
 
-See **[PROJECT_PLAN.md](PROJECT_PLAN.md)** for the full design, architecture, and
-build roadmap.
+**Prerequisites** — a reachable ComfyUI, and a folder both containers can share:
 
-## Status
+1. In Unraid, edit the ComfyUI container → **Add another Path**: your shared builds
+   folder → container `/builds`, Read/Write.
+2. Add `--output-directory /builds` to ComfyUI's `parameters.txt`, and restart it.
 
-🟡 **0.1.0 — skeleton.** Proves the deploy loop and verifies the two bits of
-infrastructure everything depends on: the **ComfyUI connection** and the **shared
-builds folder being read/write**. UI is a provisional static shell (left sidebar +
-pinned status); React lands in 0.2.x once the style references are in.
-
-Versioning is `0.<phase>.<iteration>` — see `VERSION`.
-
-## Deploying 0.1.0 on UR1
-
-Prerequisites on the ComfyUI container (already done):
-- Unraid → container edit → **Add another Path**: host
-  `/mnt/user/data-and-backups/blender-and-comfyui-output/comfyui-builds` → container
-  `/builds`, Read/Write.
-- `05-comfy-ui/parameters.txt` contains `--output-directory /builds`.
-
-### What to copy
-
-**Only the `docker/` folder.** Nothing else goes on the server — the image is
-pulled from GHCR, so there is no source and no build on UR1. Same pattern as
-`comfyui-mcp` / `blender-mcp`.
-
-Layout on UR1:
-
-```
-/mnt/user/appdata/persona-forge/
-├── docker/
-│   ├── docker-compose.yml   <- point Docker Compose Manager at THIS file
-│   └── .env                 <- you create this from .env.example
-└── appdata/                 <- created automatically by the bind mount
-                                (sqlite db + prompt history; survives updates)
-```
-
-### Steps
+**Install** — only the `docker/` folder goes on the server:
 
 1. Copy **`docker/`** to `/mnt/user/appdata/persona-forge/docker/`.
-2. `cd docker && cp .env.example .env`, then check the values — especially
-   `BUILDS_HOST_PATH` (must be the **same host path** mapped into ComfyUI as
-   `/builds`) and `COMFYUI_URL`.
-3. In the Unraid **Docker Compose Manager** addon, add a stack pointing at
+2. `cp .env.example .env` and set `COMFYUI_URL` and `BUILDS_HOST_PATH`.
+3. Unraid **Docker Compose Manager** → point at
    `/mnt/user/appdata/persona-forge/docker/docker-compose.yml` → **Compose Up**.
-4. Open `http://192.168.1.33:8890`.
+4. Open `http://<server>:8890`.
 
-**Updating later:** `docker compose pull && docker compose up -d` (or Compose
-Manager's update action). No rebuild, no re-copying source.
-
-> **First time only:** the GHCR package is private until published. Run the
-> **"Publish image to GHCR"** GitHub Action (or push a `v*` tag), then set the
-> package visibility to **public** on GitHub — the same step you did for
-> `blender-mcp`. Otherwise the pull will 401.
-
-### Developing locally
-
-Source builds are for the dev box only:
+The image is pulled from GHCR — no source and no build on the server. To update:
 
 ```bash
-cd docker
-docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+docker compose pull && docker compose up -d
 ```
 
-**Expected result:** both dots in the sidebar green — *ComfyUI* showing latency and
-GPU, *Builds* showing `read/write`. If Builds shows red, the bind mount or its
-permissions are wrong, and no later phase will work until it's green.
+**Check it worked:** both dots in the sidebar should be green — *ComfyUI* showing
+latency and GPU, *Builds* showing `read/write`. If Builds is red, the bind mount or its
+permissions are wrong and nothing downstream will work.
 
-## Deploy model
+## Configuration
 
-This project follows the UR1 convention: development happens in this local repo;
-the **`appdata/` folder is copied to `/mnt/user/appdata/persona-forge/` on UR1**
-and the stack is built with the **Docker Compose Manager addon**. ComfyUI
-(UR1:9000) and Ollama are external services the app talks to — it does not bundle
-ComfyUI.
+All settings live in `docker/.env`:
 
-## Structure
+| Variable | Default | What it does |
+|---|---|---|
+| `COMFYUI_URL` | `http://192.168.1.33:9000` | Where ComfyUI lives |
+| `BUILDS_HOST_PATH` | — | **Required.** Host path of the shared builds folder. Must be the same path mapped into ComfyUI as `/builds`. |
+| `APPDATA_HOST_PATH` | `../appdata` | Persistent data (sqlite db, prompt history, logs) |
+| `PF_PORT` | `8890` | Published port |
+| `PUID` / `PGID` | `99` / `100` | Ownership applied to build folders, so the ComfyUI container can write into them |
+| `TZ` | `Europe/London` | Timezone |
+
+Each persona gets a build folder in the shared root:
+
+```
+<builds-root>/<persona>/
+├── lora/     trained LoRA for this character
+└── images/   generated sprites
+```
+
+Finished sprites are **staged, never auto-copied** into SillyTavern — moving them into a
+character's `expressions/` folder stays a deliberate manual step.
+
+## Repo layout
 
 | Path | What |
 |---|---|
-| `backend/` | FastAPI orchestration + state (to be built) |
-| `frontend/` | React UI (to be built) |
-| `appdata/` | Persistent config/db/datasets/loras/output — **the folder copied to UR1** |
-| `docker-compose.yml` | The stack definition |
-| `docs/` | Design notes |
+| `docker/` | The stack — **the only folder deployed to the server** |
+| `backend/` | FastAPI app: orchestration, state, prompt versioning |
+| `frontend/` | Web UI |
+| `workflows/` | ComfyUI API-format templates + parameter manifests |
+| `appdata/` | Persistent data mount (db, logs) |
+| `docs/` | Design notes and UI references |
+| `PROJECT_PLAN.md` | Architecture, phases and open decisions |
+| `CHANGELOG.md` | What changed in each release |
+
+## Status
+
+**Phase 2 of 7** — Prompt Studio is usable; dataset, LoRA training and pose sets are
+still to come. See the roadmap in [PROJECT_PLAN.md](PROJECT_PLAN.md) and the release
+history in [CHANGELOG.md](CHANGELOG.md).
+
+Versioning is `0.<phase>.<iteration>` — the middle digit is the phase, the last
+increments with each update inside it.
+
+## Documentation
+
+- [PROJECT_PLAN.md](PROJECT_PLAN.md) — goals, architecture, phases, open decisions
+- [CHANGELOG.md](CHANGELOG.md) — per-release detail
+- [docs/ui-style.md](docs/ui-style.md) — UI design direction
+
+## Related projects
+
+- [blender-mcp](https://github.com/rhamblen/blender-mcp) — the 3D/VRM avatar track
+- [ComfyUI](https://github.com/comfyanonymous/ComfyUI) — the generation engine
+
+## License
+
+MIT — see [LICENSE](LICENSE).

@@ -226,6 +226,19 @@ async function generate() {
 /* ---------------- logs ---------------- */
 
 let logTimer = null;
+let logFilters = { level: "info", category: "all", follow: true };
+
+function initSegments() {
+  document.querySelectorAll(".seg").forEach((seg) => {
+    seg.addEventListener("click", (e) => {
+      const tile = e.target.closest(".seg-tile");
+      if (!tile) return;
+      seg.querySelectorAll(".seg-tile").forEach((t) => t.classList.toggle("sel", t === tile));
+      logFilters[seg.id === "log-level" ? "level" : "category"] = tile.dataset.v;
+      refreshLogs();
+    });
+  });
+}
 
 function renderLogs(entries, append = false) {
   const box = $("log-list");
@@ -241,13 +254,13 @@ function renderLogs(entries, append = false) {
     </div>`;
   }).join("");
   if (append) box.insertAdjacentHTML("beforeend", html); else box.innerHTML = html;
-  if ($("log-follow").checked) box.scrollTop = box.scrollHeight;
+  if (logFilters.follow) box.scrollTop = box.scrollHeight;
 }
 
 async function refreshLogs() {
   const qs = new URLSearchParams({
-    level: $("log-level").value,
-    category: $("log-category").value,
+    level: logFilters.level,
+    category: logFilters.category,
     limit: "400",
   });
   const search = $("log-search").value.trim();
@@ -294,11 +307,17 @@ document.querySelectorAll(".nav-item[data-view]").forEach((a) =>
     if (a.dataset.view === "logs") refreshLogs();
   }));
 
-["log-level", "log-category"].forEach((id) => $(id).addEventListener("change", refreshLogs));
+initSegments();
 $("log-search").addEventListener("input", () => { clearTimeout(window._ls); window._ls = setTimeout(refreshLogs, 300); });
 $("log-refresh").addEventListener("click", refreshLogs);
 $("log-persisted").addEventListener("click", loadPersistedLogs);
-$("log-follow").addEventListener("change", (e) => startLogPolling(e.target.checked));
+$("log-follow").classList.add("sel");
+$("log-follow").addEventListener("click", () => {
+  logFilters.follow = !logFilters.follow;
+  $("log-follow").classList.toggle("sel", logFilters.follow);
+  $("log-follow").setAttribute("aria-pressed", String(logFilters.follow));
+  startLogPolling(logFilters.follow);
+});
 
 $("project-select").addEventListener("change", (e) => {
   state.projectId = parseInt(e.target.value, 10) || null;

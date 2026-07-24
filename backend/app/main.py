@@ -8,10 +8,12 @@ generation through ComfyUI via workflow templates + manifests.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import time
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -136,6 +138,44 @@ def _share_with_comfyui(path: Path) -> None:
         os.chmod(path, 0o775)
     except Exception as exc:  # noqa: BLE001
         logs.warn("local", f"chmod failed on {path}: {exc}")
+
+
+def _write_persona_sidecar(project_id: int) -> None:
+    """Write persona.json into the build folder.
+
+    The sqlite db in appdata/ is the working store, but that leaves a build folder
+    non-self-describing: copy it elsewhere (or lose the db) and you keep the images
+    but not the prompt that produced them. This sidecar makes each build portable
+    and self-documenting. Best-effort — never break a request over it.
+    """
+    try:
+        with db.connect() as conn:
+            proj = conn.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone()
+            if proj is None:
+                return
+            versions = conn.execute(
+                "SELECT * FROM prompt_versions WHERE project_id = ? ORDER BY id", (project_id,)
+            ).fetchall()
+            current = conn.execute(
+                "SELECT * FROM prompt_versions WHERE id = ?", (proj["current_version_id"],)
+            ).fetchone()
+
+        build_dir = BUILDS_ROOT / proj["slug"]
+        if not build_dir.is_dir():
+            return
+        payload = {
+            "persona": dict(proj),
+            "current_version": db.row_to_dict(current),
+            "signed_off_versions": [dict(v) for v in versions if v["signed_off"]],
+            "version_history": [dict(v) for v in versions],
+            "written_by": f"persona-forge {VERSION}",
+            "written_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        }
+        target = build_dir / "persona.json"
+        target.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
+        _share_with_comfyui(target)
+    except Exception as exc:  # noqa: BLE001
+        logs.warn("local", f"could not write persona.json: {exc}", project_id=project_id)
 
 
 def _probe_writable(path: Path) -> tuple[bool, str | None]:
@@ -273,6 +313,7 @@ async def create_project(body: ProjectCreate) -> dict:
         )
 
     logs.info("process", f"project created: {body.name}", project_id=project_id, slug=slug)
+    _write_persona_sidecar(project_id)
     return await get_project(project_id)
 
 
@@ -371,6 +412,7 @@ async def create_version(project_id: int, body: VersionCreate) -> dict:
         row = conn.execute("SELECT * FROM prompt_versions WHERE id = ?", (new_id,)).fetchone()
     logs.info("process", f"version v{new_id} created", project_id=project_id,
               parent=parent["id"], source=body.source, note=body.note)
+    _write_persona_sidecar(project_id)
     return {"version": dict(row)}
 
 
@@ -384,6 +426,7 @@ async def sign_off(version_id: int) -> dict:
         conn.execute("UPDATE prompt_versions SET signed_off = 1 WHERE id = ?", (version_id,))
         row = conn.execute("SELECT * FROM prompt_versions WHERE id = ?", (version_id,)).fetchone()
     logs.info("process", f"v{version_id} signed off as baseline", version_id=version_id)
+    _write_persona_sidecar(row["project_id"])
     return {"version": dict(row)}
 
 
@@ -399,6 +442,7 @@ async def rollback(project_id: int, version_id: int) -> dict:
             raise HTTPException(404, "version not found for this project")
         conn.execute("UPDATE projects SET current_version_id = ? WHERE id = ?", (version_id, project_id))
     logs.info("process", f"rolled back to v{version_id}", project_id=project_id, version_id=version_id)
+    _write_persona_sidecar(project_id)
     return await get_project(project_id)
 
 
@@ -454,6 +498,7 @@ async def clone_project(project_id: int, body: ProjectClone) -> dict:
     logs.info("process", f"persona cloned: {src['project']['name']} -> {body.name}",
               source_project_id=project_id, new_project_id=new_id, slug=slug,
               style_changed=body.style is not None)
+    _write_persona_sidecar(new_id)
     return await get_project(new_id)
 
 

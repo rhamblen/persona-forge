@@ -1,46 +1,50 @@
 # UI style references
 
-Design direction for the Persona Forge frontend. The look should follow the
-user's preferred references rather than a generic default.
+Design direction for the Persona Forge frontend, taken from the user's own work
+rather than a generic default.
 
-## References provided by the user
+## The reference: `esp32-shutter-hub`
 
-- **Shutter Hub** (and the code editor / VCS tool the user works in) — cited for
-  the overall template feel.
+"Shutter Hub" is the user's own repo — [rhamblen/esp32-shutter-hub](https://github.com/rhamblen/esp32-shutter-hub),
+specifically `ha-card/shutter-hub-card.js`. (Not the photography site of the same
+name, which is what a web search finds.)
 
 ## Design spine (user directives, 2026-07-23)
 
-Three things to borrow, in priority order:
+1. **Version view like a VCS / code-history panel.** The user specifically likes the
+   "version view of the code I'm using". This is the model for the **prompt rollback
+   UI**: a timeline of versions, the signed-off baseline pinned, and a clear diff of
+   what each edit changed. A headline feature, not a side panel.
+2. **Left-hand menu.** Primary navigation is a left sidebar; content to the right.
+3. **General template style** — colour, shape and feel per the tokens below.
 
-1. **Version view like a VCS / code-history panel.** The user specifically likes
-   the "version view of the code I'm using." This is the model for Persona Forge's
-   **prompt rollback UI** — present prompt history the way a version-control tool
-   shows commits/diffs: a timeline of versions, the signed-off baseline pinned, and
-   a clear diff between versions (what an Ollama/manual edit changed). This is a
-   headline feature, not a side panel.
-2. **Left-hand menu.** Primary navigation is a **left sidebar** (phase/section nav),
-   not a top nav bar. Main content area to the right.
-3. **General template style — colour, UI shape, and feel to match the reference.**
-   _Exact palette / corner-radius / density still to be pinned from a screenshot —
-   see below._
+## Design tokens extracted from the shutter-hub card
 
-<!-- Add screenshots to docs/ui-refs/ and link them here. Especially need one that
-     shows the reference's colour palette, card/panel shape (radius, borders,
-     shadows), and the version/history view the user likes. -->
+| Aspect | Value |
+|---|---|
+| Corner radius | **10px** on tiles, buttons and panels |
+| Borders | **1px**, subtle divider colour |
+| Fill | secondary/raised background, not pure page background |
+| **Selection** | **accent border + `box-shadow: 0 0 0 1px accent inset`** — a ring, not a fill |
+| Hover | border switches to accent |
+| Buttons | **icon above a short label**, arranged in `auto-fit` grids |
+| Secondary text | **11–12.5px**, muted colour |
+| De-emphasis | `opacity: .45` rather than hiding |
+| Theming | **CSS variables** throughout — no hardcoded colours |
+| Density | compact and functional |
 
-## Still to pin (need a screenshot of the reference)
+## How this is applied
 
-- Palette + light/dark (the "colour" in directive 3).
-- Corner radius / borders / shadow — the "UI shape" (rounded & soft vs. crisp &
-  square).
-- Density — roomy/editorial vs. compact/tool-dense.
-- The exact version-view layout to emulate (side-by-side diff? inline? timeline
-  rail?).
+- `.seg-tile` in `style.css` implements the tile + selection idiom and is shared by
+  the **Logs filters** now; the **dataset picker in phase 4** (multi-select grid of
+  candidate images) should reuse it, since that is the closest analogue to the
+  card's tile grid.
+- Panels/cards already use 10px radius + 1px borders + raised fill.
+- Everything is driven by the `:root` variables so a palette swap is one edit.
 
-## What we need to pin down before building the frontend (M1)
+## Still open
 
-- Overall layout: sidebar + main canvas? top-nav + wizard steps?
-- Density: roomy/editorial vs. compact/tool-dense.
-- Palette + light/dark.
-- Gallery card style (the dataset + pose grids are the visual centrepiece).
-- Prompt editor + version-timeline presentation.
+- The **palette** is currently a dark theme of my choosing. The shutter-hub card
+  inherits Home Assistant's theme variables, so it has no fixed palette to copy.
+  A screenshot of the look the user wants (or a set of hex values) would settle it.
+- Light-mode support: not implemented; the variables make it straightforward.

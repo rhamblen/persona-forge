@@ -9,6 +9,34 @@ Every version below is a **published GitHub Release** with a matching
 
 ---
 
+## [0.2.5] — 2026-07-24
+
+**Consistency pass: docs, UI language, and self-describing builds.**
+
+### Added
+- **`persona.json` sidecar** written into each build folder (on create, clone,
+  version change, sign-off and rollback). The sqlite db in `appdata/` remains the
+  working store, but a build folder was not self-describing — copy it elsewhere or
+  lose the db and you kept the images without the prompt that made them. Each build
+  now carries its persona, current prompt, signed-off baselines and full version
+  history.
+- `docs/ui-style.md` now records the **actual design tokens** taken from the user's
+  own `esp32-shutter-hub` HA card (10px radius, 1px borders, accent-ring selection,
+  icon-above-label tiles, 11–12.5px muted secondary text, CSS-variable theming).
+
+### Changed
+- **Logs tab restyled for consistency** — the ad-hoc dropdown/checkbox toolbar is
+  replaced with the shared `.seg-tile` idiom (accent border + inset ring for the
+  selected state), matching the rest of the app and the shutter-hub card. Level
+  badges are now chips; the row grid collapses on narrow screens.
+- **README restructured** to match the conventions in `esp32-shutter-hub` and
+  `pihole-mcp`: badges → intro → Why? → Features → Quick Start → Configuration →
+  Repo layout → Status → Documentation → Related projects → License.
+- **`## Status` no longer duplicates the changelog** — it is now a short statement
+  of the current phase, pointing at `CHANGELOG.md` and `PROJECT_PLAN.md`.
+
+---
+
 ## [0.2.4] — 2026-07-24
 
 **Phase 2 — Logs, and a cross-container permissions fix.**
@@ -134,6 +162,7 @@ Every version below is a **published GitHub Release** with a matching
 - `docker-compose` stack, `.env.example`, and the `appdata/` layout.
 - MIT licence.
 
+[0.2.5]: https://github.com/rhamblen/persona-forge/releases/tag/v0.2.5
 [0.2.4]: https://github.com/rhamblen/persona-forge/releases/tag/v0.2.4
 [0.2.3]: https://github.com/rhamblen/persona-forge/releases/tag/v0.2.3
 [0.2.2]: https://github.com/rhamblen/persona-forge/releases/tag/v0.2.2
