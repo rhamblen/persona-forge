@@ -9,6 +9,23 @@ Every version below is a **published GitHub Release** with a matching
 
 ---
 
+## [0.3.4] — 2026-07-24
+
+**Modify stops over-editing.**
+
+### Fixed
+- **Modify was deleting text it wasn't asked to touch.** A small instruction like
+  "make eyes green" could make the requested change but *also* drop whole unrelated
+  sentences (background/aesthetic description, stray words) and rewrite the style and
+  negative fields. The Modify instruction to Ollama is now strict: reproduce the current
+  text **verbatim** and change only the specific words the instruction is about — no
+  rephrasing, reordering, shortening, or dropping anything else; a field the instruction
+  doesn't mention is returned exactly as given. Verified live: "make eyes green" now
+  changes only the eye colour and leaves style/negative untouched. Anything the model
+  still slips can be dismissed with the per-change ✕ from 0.3.3.
+
+---
+
 ## [0.3.3] — 2026-07-24
 
 **Reject AI changes one at a time.**

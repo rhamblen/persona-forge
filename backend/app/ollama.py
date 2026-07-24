@@ -58,9 +58,19 @@ Rules:
 _MODE_HINT = {
     "replace": ("Write all three fields FRESH from the user's description. "
                 "Ignore the current values below except as loose context."),
-    "modify": ("EDIT the current values to satisfy the user's instruction. "
-               "Keep everything the instruction does not touch. Return the full "
-               "updated text for all three fields, not just the changes."),
+    "modify": (
+        "Make the SMALLEST possible edit that satisfies the instruction. This is a "
+        "surgical edit, not a rewrite.\n"
+        "  - Reproduce the current text VERBATIM — word for word, in the same order — "
+        "and change ONLY the specific words the instruction is about.\n"
+        "  - Do NOT rephrase, reorder, summarise, shorten, 'improve', or drop any other "
+        "wording. If a detail is unrelated to the instruction, it MUST appear unchanged.\n"
+        "  - A field the instruction doesn't mention must be returned exactly as given.\n"
+        "  - Return the full text of all three fields (the unchanged parts included), not "
+        "just the diff.\n"
+        "Example: instruction 'make eyes green' on 'short blonde hair, blue eyes, freckles' "
+        "→ 'short blonde hair, green eyes, freckles' (only 'blue' changed; nothing else)."
+    ),
 }
 
 

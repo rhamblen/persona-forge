@@ -106,8 +106,11 @@ LAN; no Claude/Anthropic in the runtime loop.
   served stale (fixes a browser caching a new page against old JS).
 - **0.3.2:** AI suggestions show a client-side word-level diff (added=green, removed=red
   strikethrough) so edits — and any word the local model dropped — are visible before saving.
-- **0.3.3 (current):** the AI diff is now per-change accept/reject — each change has a ✕ to
-  revert just that span (↺ to re-apply); hand-editing a field retires its diff.
+- **0.3.3:** the AI diff is now per-change accept/reject — each change has a ✕ to revert
+  just that span (↺ to re-apply); hand-editing a field retires its diff.
+- **0.3.4 (current):** Modify prompt tightened to a strict verbatim/minimal-edit
+  instruction — it no longer drops or rewrites unrelated text (was deleting whole
+  sentences for a one-word change). See `_MODE_HINT["modify"]` in `ollama.py`.
 - **Remaining:** 0.4 dataset builder · 0.5 LoRA trainer · 0.6 pose/expression studio ·
   0.7 hardening · 1.0 release.
 
