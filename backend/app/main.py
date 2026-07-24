@@ -878,6 +878,102 @@ async def dataset_target(project_id: int, body: DatasetTargetRequest) -> dict:
     return {"target": body.target}
 
 
+# --------------------------------------------------------------------------- #
+# LoRA trainer (Phase C) — 0.5.0: trigger word + stage dataset into ComfyUI input
+# --------------------------------------------------------------------------- #
+
+_TRIGGER_RE = re.compile(r"[^a-z0-9]+")
+
+
+def default_trigger(slug: str) -> str:
+    """A token-safe trigger word derived from the slug, e.g. 'pf_ada_blonde'."""
+    return "pf_" + _TRIGGER_RE.sub("_", slug.lower()).strip("_")
+
+
+def _input_folder(slug: str) -> str:
+    return f"pf-{slug}"
+
+
+async def _dataset_folder_exists(folder: str) -> bool:
+    """Is `folder` visible to ComfyUI's dataset loader (i.e. staged into input/)?"""
+    try:
+        info = await comfy.object_info("LoadImageTextDataSetFromFolder")
+        opts = info["LoadImageTextDataSetFromFolder"]["input"]["required"]["folder"][1]["options"]
+        return folder in opts
+    except Exception:  # noqa: BLE001
+        return False
+
+
+@app.get("/api/projects/{project_id}/lora")
+async def lora_status(project_id: int) -> dict:
+    detail = await get_project(project_id)
+    slug = detail["project"]["slug"]
+    with db.connect() as conn:
+        proj = conn.execute("SELECT trigger_word FROM projects WHERE id = ?", (project_id,)).fetchone()
+        selected = conn.execute(
+            "SELECT COUNT(*) n FROM images WHERE project_id = ? AND kind = 'dataset' AND selected = 1",
+            (project_id,),
+        ).fetchone()["n"]
+    trigger = (proj["trigger_word"] if proj else "") or default_trigger(slug)
+    folder = _input_folder(slug)
+    lora_dir = BUILDS_ROOT / slug / "lora"
+    loras = sorted(p.name for p in lora_dir.glob("*.safetensors")) if lora_dir.is_dir() else []
+    return {
+        "trigger_word": trigger,
+        "selected_count": selected,
+        "input_folder": folder,
+        "staged": await _dataset_folder_exists(folder),
+        "loras": loras,
+    }
+
+
+class LoraTriggerRequest(BaseModel):
+    trigger_word: str = Field(min_length=1, max_length=64)
+
+
+@app.post("/api/projects/{project_id}/lora/trigger")
+async def lora_set_trigger(project_id: int, body: LoraTriggerRequest) -> dict:
+    trigger = _TRIGGER_RE.sub("_", body.trigger_word.lower()).strip("_")
+    if not trigger:
+        raise HTTPException(422, "trigger word must contain a letter or digit")
+    with db.connect() as conn:
+        cur = conn.execute("UPDATE projects SET trigger_word = ? WHERE id = ?", (trigger, project_id))
+        if cur.rowcount == 0:
+            raise HTTPException(404, "project not found")
+    return {"trigger_word": trigger}
+
+
+@app.post("/api/projects/{project_id}/lora/stage")
+async def lora_stage(project_id: int) -> dict:
+    """Push the selected dataset images into ComfyUI's input/pf-<slug> over HTTP."""
+    detail = await get_project(project_id)
+    slug = detail["project"]["slug"]
+    folder = _input_folder(slug)
+    with db.connect() as conn:
+        rows = conn.execute(
+            """SELECT filename, subfolder FROM images
+               WHERE project_id = ? AND kind = 'dataset' AND selected = 1 ORDER BY id""",
+            (project_id,),
+        ).fetchall()
+    if not rows:
+        raise HTTPException(400, "no images selected — pick some in the Dataset tab first")
+
+    staged, errors = 0, []
+    for r in rows:
+        src = BUILDS_ROOT / r["subfolder"] / r["filename"]
+        try:
+            data = src.read_bytes()
+            await comfy.upload_image(data, r["filename"], folder)
+            staged += 1
+        except Exception as exc:  # noqa: BLE001
+            errors.append(f"{r['filename']}: {exc}")
+    logs.info("process", f"LoRA: staged {staged}/{len(rows)} image(s) to input/{folder}",
+              project_id=project_id, errors=len(errors))
+    if staged == 0:
+        raise HTTPException(502, f"could not stage any images: {errors[:3]}")
+    return {"staged": staged, "total": len(rows), "input_folder": folder, "errors": errors[:5]}
+
+
 # --- static frontend -------------------------------------------------------
 class NoCacheStaticFiles(StaticFiles):
     """Serve the frontend with `Cache-Control: no-cache` so a browser always

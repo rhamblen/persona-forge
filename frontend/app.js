@@ -714,6 +714,50 @@ $("ds-target").addEventListener("change", async () => {
   } catch (e) { msg($("ds-msg"), e.message, "bad"); }
 });
 
+/* ---------------- LoRA (Phase C) ---------------- */
+
+async function loadLora() {
+  const np = $("lora-noproject"), main = $("lora-main");
+  if (!state.projectId) { np.hidden = false; main.hidden = true; return; }
+  np.hidden = true; main.hidden = false;
+  try {
+    const d = await api(`/api/projects/${state.projectId}/lora`);
+    $("lora-selected").textContent = `${d.selected_count} selected`;
+    if (document.activeElement !== $("lora-trigger")) $("lora-trigger").value = d.trigger_word;
+    $("lora-staged").innerHTML = d.staged
+      ? `<span class="ok">yes → input/${esc(d.input_folder)}</span>`
+      : `<span class="muted">not staged</span>`;
+    $("lora-list").innerHTML = d.loras.length
+      ? d.loras.map((l) => `<div class="small">${esc(l)}</div>`).join("")
+      : '<p class="muted">None yet.</p>';
+  } catch (e) { msg($("lora-msg"), e.message, "bad"); }
+}
+
+$("lora-trigger-save").addEventListener("click", async () => {
+  const t = $("lora-trigger").value.trim();
+  if (!t || !state.projectId) return;
+  try {
+    const r = await api(`/api/projects/${state.projectId}/lora/trigger`, {
+      method: "POST", body: JSON.stringify({ trigger_word: t }),
+    });
+    $("lora-trigger").value = r.trigger_word;
+    msg($("lora-msg"), `Trigger word set: ${r.trigger_word}`, "ok");
+  } catch (e) { msg($("lora-msg"), e.message, "bad"); }
+});
+
+$("lora-stage").addEventListener("click", async () => {
+  if (!state.projectId) return;
+  const btn = $("lora-stage");
+  btn.disabled = true;
+  msg($("lora-msg"), "Staging selected images to ComfyUI…");
+  try {
+    const r = await api(`/api/projects/${state.projectId}/lora/stage`, { method: "POST" });
+    msg($("lora-msg"), `Staged ${r.staged}/${r.total} image(s) to input/${r.input_folder}.`, "ok");
+    loadLora();
+  } catch (e) { msg($("lora-msg"), e.message, "bad"); }
+  finally { btn.disabled = false; }
+});
+
 /* ---------------- wiring ---------------- */
 
 function showView(name) {
@@ -730,6 +774,7 @@ document.querySelectorAll(".nav-item[data-view]").forEach((a) =>
     if (a.dataset.view === "logs") refreshLogs();
     if (a.dataset.view === "dataset") loadDataset();
     else stopDatasetPolling();
+    if (a.dataset.view === "lora") loadLora();
   }));
 
 $("log-search").addEventListener("input", (e) => {
@@ -766,6 +811,7 @@ $("project-select").addEventListener("change", (e) => {
   loadProject().catch((err) => msg($("studio-msg"), err.message, "bad"));
   stopDatasetPolling();
   if (!$("view-dataset").hidden) loadDataset();
+  if (!$("view-lora").hidden) loadLora();
 });
 
 $("generate-btn").addEventListener("click", () => generate());

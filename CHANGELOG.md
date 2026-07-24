@@ -9,6 +9,26 @@ Every version below is a **published GitHub Release** with a matching
 
 ---
 
+## [0.5.0] — 2026-07-24
+
+**Phase 5 opens: the LoRA trainer (foundation).**
+
+Training will run as a **ComfyUI workflow** (`TrainLoraNode` + Florence2 captioning) — no
+separate trainer container. This release lays the groundwork; captioning and the training
+run follow in 0.5.1 / 0.5.2.
+
+### Added
+- **LoRA tab.** Shows the selected-image count, an editable **trigger word** (the token the
+  trained LoRA binds to — defaults to `pf_<slug>`), the staged status, and any trained LoRAs
+  in `{slug}/lora/`.
+- **Dataset staging.** "Stage dataset to ComfyUI" uploads the selected images into ComfyUI's
+  `input/pf-<slug>` folder via its HTTP `/upload/image` API — so the native dataset loader
+  can read them **with no extra mount** (ComfyUI's input dir isn't on the shared `/builds`
+  volume). Endpoints: `GET/POST /api/projects/{id}/lora`, `.../lora/trigger`, `.../lora/stage`.
+- New `projects.trigger_word` column (auto-migrated); `comfy.upload_image()`.
+
+---
+
 ## [0.4.1] — 2026-07-24
 
 ### Added

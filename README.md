@@ -125,9 +125,9 @@ character's `expressions/` folder stays a deliberate manual step.
 
 ## Status
 
-**Phase 4 of 7** — Prompt Studio and the Dataset builder are usable; LoRA training and
-pose sets are still to come. See the roadmap in [PROJECT_PLAN.md](PROJECT_PLAN.md) and the
-release history in [CHANGELOG.md](CHANGELOG.md).
+**Phase 5 of 7** — Prompt Studio and the Dataset builder are usable; the LoRA trainer is
+underway (dataset staging in; captioning + training run next). See the roadmap in
+[PROJECT_PLAN.md](PROJECT_PLAN.md) and the release history in [CHANGELOG.md](CHANGELOG.md).
 
 Versioning is `0.<phase>.<iteration>` — the middle digit is the phase, the last
 increments with each update inside it.

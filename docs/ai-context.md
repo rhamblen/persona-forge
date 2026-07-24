@@ -115,8 +115,30 @@ LAN; no Claude/Anthropic in the runtime loop.
   fresh seeds, pick same-person images in a grid, target N + progress. Non-blocking:
   `dataset_jobs` table + reconcile-from-history into `images` (kind='dataset'). Endpoints
   under `/api/projects/{id}/dataset`. `projects.dataset_target` column added.
-- **0.4.1 (current):** dataset thumbnails have a hover ⤢ zoom badge that opens the shared
-  lightbox (reuses `openLightbox`); zoom is separate from click-to-select.
+- **0.4.1:** dataset thumbnails have a hover ⤢ zoom badge that opens the shared lightbox
+  (reuses `openLightbox`); zoom is separate from click-to-select.
+- **0.5.0 (current):** Phase 5 foundation — LoRA tab (trigger word, staged status, trained
+  LoRAs) + dataset staging. Endpoints under `/api/projects/{id}/lora`. `projects.trigger_word`
+  column. Training approach settled (see below).
+
+## Phase 5 (LoRA trainer) — settled approach & knowns
+
+- **Training is a ComfyUI workflow, not a separate container.** The instance has native
+  training nodes: `TrainLoraNode` (model, latents, positive, batch_size, steps, learning_rate,
+  rank, optimizer/algorithm/dtypes COMBOs → LORA_MODEL), dataset loaders
+  (`LoadImageTextDataSetFromFolder`, `LoadImageDataSetFromFolder`), and `SaveLoRA`
+  (lora, prefix, steps). Captioning: `Florence2Run` (tasks incl. `caption`, `detailed_caption`,
+  `prompt_gen_tags`), `BLIP`. `python_module comfy_extras.nodes_dataset`.
+- **The dataset loader reads ONLY from ComfyUI's `input/` dir** (a COMBO of its subfolders,
+  e.g. `3d`). `/builds` is NOT under input. The app stages a dataset by **uploading images via
+  ComfyUI's HTTP `/upload/image`** (`type=input`, `subfolder=pf-<slug>`) — validated: the
+  uploaded folder appears in the loader COMBO instantly. **No extra mount needed.**
+- **Captioning decision (user, 2026-07-24): trigger word + light caption** — caption each
+  image `pf_<slug>, <short Florence2 caption>`; the LoRA binds to the trigger token.
+- **Plan:** 0.5.0 stage (done) · 0.5.1 auto-caption (Florence2; store captions, likely inject
+  inline so no `.txt` files needed in input) · 0.5.2 `TrainLoraNode` run (non-blocking +
+  reconcile like the dataset), `SaveLoRA` → `{slug}/lora/`, progress/loss monitor. **Validate
+  the training graph with a short (few-step) test run before shipping 0.5.2.**
 - **Remaining:** 0.5 LoRA trainer · 0.6 pose/expression studio · 0.7 hardening · 1.0 release.
   **Phase 5 next** — training backend TBD (see PROJECT_PLAN: reuse ComfyUI-MCP `train_*`
   flows or a kohya/sd-scripts container). Selected dataset images are `images` rows with

@@ -61,7 +61,7 @@
         <a class="nav-item" data-view="overview" href="#">Overview</a>
         <a class="nav-item is-active" data-view="prompt" href="#">1 · Prompt Studio</a>
         <a class="nav-item" data-view="dataset" href="#">2 · Dataset</a>
-        <a class="nav-item is-disabled" href="#">3 · LoRA</a>
+        <a class="nav-item" data-view="lora" href="#">3 · LoRA</a>
         <a class="nav-item is-disabled" href="#">4 · Poses</a>
         <div class="nav-section">System</div>
         <a class="nav-item" data-view="logs" href="#">Logs</a>
@@ -275,6 +275,54 @@
           <p class="hint" id="ds-msg"></p>
           <div class="ds-grid" id="ds-grid">
             <p class="muted" id="ds-empty">No candidates yet — hit Generate 30.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ LoRA (Phase C) ============ -->
+      <section class="view" id="view-lora" hidden>
+        <header class="main-head">
+          <h1>LoRA</h1>
+          <p class="subtitle">
+            Train a per-character LoRA from your selected dataset. It binds to a
+            <em>trigger word</em> you drop into prompts to summon the character.
+          </p>
+        </header>
+
+        <div id="lora-noproject" class="empty-state" hidden>
+          <p>Select or create a project first (Prompt Studio).</p>
+        </div>
+
+        <div id="lora-main" hidden>
+          <div class="panel">
+            <div class="lora-row">
+              <span class="lora-label">Selected images</span>
+              <span id="lora-selected">—</span>
+            </div>
+            <label class="field">
+              <span class="field-label">Trigger word <em>the token that summons this character</em></span>
+              <div class="lora-trigger">
+                <input id="lora-trigger" spellcheck="false" />
+                <button class="btn" id="lora-trigger-save">Save</button>
+              </div>
+            </label>
+            <div class="lora-row">
+              <span class="lora-label">Dataset staged</span>
+              <span id="lora-staged">—</span>
+            </div>
+            <div class="actions">
+              <button class="btn btn-primary" id="lora-stage">Stage dataset to ComfyUI</button>
+            </div>
+            <p class="hint" id="lora-msg"></p>
+            <p class="muted small">
+              Staging uploads your selected images into ComfyUI's input folder so the trainer
+              can read them. Auto-captioning and the training run arrive in 0.5.1 / 0.5.2.
+            </p>
+          </div>
+
+          <div class="panel">
+            <div class="panel-head"><h2>Trained LoRAs</h2></div>
+            <div id="lora-list"><p class="muted">None yet.</p></div>
           </div>
         </div>
       </section>

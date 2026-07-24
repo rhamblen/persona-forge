@@ -227,6 +227,16 @@ code { background: var(--bg-raised); padding: 1px 5px; border-radius: 4px; font-
   box-shadow: 0 0 0 1px var(--accent) inset; }
 .seg-actions { display: flex; gap: 6px; }
 
+/* ---------- LoRA (Phase C) ---------- */
+.lora-row { display: flex; justify-content: space-between; align-items: baseline;
+  padding: 8px 0; border-bottom: 1px solid var(--line); }
+.lora-label { color: var(--text-dim); }
+.lora-trigger { display: flex; gap: 8px; }
+.lora-trigger input { flex: 1; background: var(--bg-raised); color: var(--text);
+  border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font: inherit;
+  font-family: ui-monospace, Consolas, monospace; }
+.lora-trigger input:focus { outline: none; border-color: var(--accent); }
+
 /* ---------- dataset builder (Phase B) ---------- */
 .ds-bar { display: flex; flex-direction: column; gap: 12px; margin-bottom: 12px; }
 .ds-controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }

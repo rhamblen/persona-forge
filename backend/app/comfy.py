@@ -135,6 +135,28 @@ async def wait(prompt_id: str, timeout_s: float = 900.0, poll_s: float = 2.0) ->
     raise ComfyError(f"timed out waiting for prompt {prompt_id}")
 
 
+async def upload_image(data: bytes, filename: str, subfolder: str = "",
+                       overwrite: bool = True) -> dict[str, Any]:
+    """Push an image into ComfyUI's input/<subfolder> via /upload/image.
+
+    This is how the app stages a training dataset into ComfyUI's input dir without
+    a shared mount — the dataset loader reads only from there. Returns ComfyUI's
+    {name, subfolder, type}.
+    """
+    files = {"image": (filename, data, "image/png")}
+    form = {"subfolder": subfolder, "type": "input", "overwrite": "true" if overwrite else "false"}
+    async with httpx.AsyncClient(timeout=30.0) as c:
+        r = await c.post(f"{COMFYUI_URL}/upload/image", data=form, files=files)
+        if r.status_code >= 400:
+            raise ComfyError(f"upload failed ({r.status_code}): {r.text[:200]}")
+        return r.json()
+
+
+def dataset_folders() -> list[str]:
+    """Deprecated placeholder — folders are read live via object_info when needed."""
+    return []
+
+
 async def history_all(max_items: int = 400) -> dict[str, Any]:
     """The whole recent history keyed by prompt_id — one call to reconcile a batch."""
     async with httpx.AsyncClient(timeout=15.0) as c:
