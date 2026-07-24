@@ -1025,6 +1025,252 @@ async def lora_stage(project_id: int) -> dict:
     return {"staged": staged, "total": len(rows), "input_folder": folder, "errors": errors[:5]}
 
 
+# --------------------------------------------------------------------------- #
+# pose / expression studio (Phase D)
+# --------------------------------------------------------------------------- #
+
+STARTER_POSES = [
+    ("Full body", "full body shot, standing, relaxed natural pose"),
+    ("Portrait", "close-up portrait, head and shoulders"),
+    ("Three-quarter", "three-quarter view, upper body"),
+    ("Sitting", "sitting down, relaxed, hands in lap"),
+    ("Side profile", "side profile view, looking to the side"),
+    ("Waving", "waving hello, friendly, one hand raised"),
+    ("Arms crossed", "arms crossed, confident stance"),
+    ("Walking", "walking forward, mid-stride, dynamic"),
+]
+
+# The 28 SillyTavern expression sprites (the export target).
+EXPRESSIONS_28 = [
+    "admiration", "amusement", "anger", "annoyance", "approval", "caring", "confusion",
+    "curiosity", "desire", "disappointment", "disapproval", "disgust", "embarrassment",
+    "excitement", "fear", "gratitude", "grief", "joy", "love", "nervousness", "neutral",
+    "optimism", "pride", "realization", "relief", "remorse", "sadness", "surprise",
+]
+
+PRESETS = {
+    "starter": STARTER_POSES,
+    "expressions": [(e.capitalize(), f"{e} facial expression") for e in EXPRESSIONS_28],
+}
+
+
+def _pose_dict(row: Any) -> dict:
+    d = dict(row)
+    return d
+
+
+async def _reconcile_poses(project_id: int) -> None:
+    with db.connect() as conn:
+        pending = conn.execute(
+            "SELECT id, prompt_id FROM poses WHERE project_id = ? AND status = 'pending' AND prompt_id != ''",
+            (project_id,),
+        ).fetchall()
+    if not pending:
+        return
+    logs.verbose("process", f"reconciling {len(pending)} pending pose render(s)", project_id=project_id)
+    try:
+        hist = await comfy.history_all()
+    except Exception as exc:  # noqa: BLE001
+        logs.warn("integration", f"could not read history to reconcile poses: {exc}")
+        return
+    done = failed = 0
+    with db.connect() as conn:
+        for job in pending:
+            entry = hist.get(job["prompt_id"])
+            if not entry:
+                continue
+            st = comfy.status_of(entry)
+            if st == "success":
+                imgs = comfy.outputs_from(entry)
+                if imgs:
+                    conn.execute(
+                        "UPDATE poses SET filename = ?, subfolder = ?, status = 'done' WHERE id = ?",
+                        (imgs[-1]["filename"], imgs[-1]["subfolder"], job["id"]),
+                    )
+                    done += 1
+                    logs.verbose("process", "pose render finished", pose_id=job["id"],
+                                 file=imgs[-1]["filename"])
+            elif st == "error":
+                conn.execute("UPDATE poses SET status = 'error' WHERE id = ?", (job["id"],))
+                failed += 1
+                logs.warn("process", "a pose render failed", pose_id=job["id"])
+    if done or failed:
+        logs.info("process", f"pose reconcile: {done} finished, {failed} failed", project_id=project_id)
+
+
+async def _queue_pose(conn, project_id: int, slug: str, version: dict, pose_row: Any) -> None:
+    """Submit one pose's render and mark it pending."""
+    params = {
+        **_version_prompt_params(version),
+        "seed": version.get("seed") or 0,
+        "expression": pose_row["modifier"] or None,
+        "output_prefix": f"{slug}/images/pose_{pose_row['id']}",
+    }
+    params = {k: v for k, v in params.items() if v is not None}
+    logs.verbose("process", "queuing pose render", pose_id=pose_row["id"], name=pose_row["name"])
+    graph = workflows.build_graph("base-character", params)
+    prompt_id = await comfy.submit(graph)
+    conn.execute("UPDATE poses SET prompt_id = ?, status = 'pending' WHERE id = ?",
+                 (prompt_id, pose_row["id"]))
+
+
+@app.get("/api/projects/{project_id}/poses")
+async def poses_list(project_id: int) -> dict:
+    await _reconcile_poses(project_id)
+    with db.connect() as conn:
+        proj = conn.execute("SELECT id FROM projects WHERE id = ?", (project_id,)).fetchone()
+        if proj is None:
+            raise HTTPException(404, "project not found")
+        rows = conn.execute(
+            "SELECT * FROM poses WHERE project_id = ? ORDER BY position, id", (project_id,)
+        ).fetchall()
+    poses = [_pose_dict(r) for r in rows]
+    pending = sum(1 for p in poses if p["status"] == "pending")
+    return {"poses": poses, "generating": pending > 0,
+            "counts": {"total": len(poses), "pending": pending,
+                       "done": sum(1 for p in poses if p["status"] == "done")}}
+
+
+class PoseCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=60)
+    modifier: str = ""
+
+
+@app.post("/api/projects/{project_id}/poses", status_code=201)
+async def pose_add(project_id: int, body: PoseCreate) -> dict:
+    with db.connect() as conn:
+        if conn.execute("SELECT 1 FROM projects WHERE id = ?", (project_id,)).fetchone() is None:
+            raise HTTPException(404, "project not found")
+        pos = conn.execute("SELECT COALESCE(MAX(position), 0) + 1 m FROM poses WHERE project_id = ?",
+                           (project_id,)).fetchone()["m"]
+        cur = conn.execute(
+            "INSERT INTO poses (project_id, name, modifier, position) VALUES (?, ?, ?, ?)",
+            (project_id, body.name.strip(), body.modifier.strip(), pos),
+        )
+        row = conn.execute("SELECT * FROM poses WHERE id = ?", (cur.lastrowid,)).fetchone()
+    logs.info("process", f"pose added: {body.name}", project_id=project_id, pose_id=cur.lastrowid)
+    return _pose_dict(row)
+
+
+class PresetRequest(BaseModel):
+    preset: str = "starter"
+
+
+@app.post("/api/projects/{project_id}/poses/preset")
+async def pose_preset(project_id: int, body: PresetRequest) -> dict:
+    items = PRESETS.get(body.preset)
+    if not items:
+        raise HTTPException(422, f"unknown preset '{body.preset}' (have: {list(PRESETS)})")
+    with db.connect() as conn:
+        if conn.execute("SELECT 1 FROM projects WHERE id = ?", (project_id,)).fetchone() is None:
+            raise HTTPException(404, "project not found")
+        existing = {r["name"] for r in conn.execute(
+            "SELECT name FROM poses WHERE project_id = ?", (project_id,))}
+        base = conn.execute("SELECT COALESCE(MAX(position), 0) m FROM poses WHERE project_id = ?",
+                           (project_id,)).fetchone()["m"]
+        added = 0
+        for i, (name, modifier) in enumerate(items, start=1):
+            if name in existing:
+                continue
+            conn.execute("INSERT INTO poses (project_id, name, modifier, position) VALUES (?, ?, ?, ?)",
+                         (project_id, name, modifier, base + i))
+            added += 1
+    logs.info("process", f"pose preset '{body.preset}' applied: +{added}", project_id=project_id)
+    return {"added": added, "preset": body.preset}
+
+
+class PoseUpdate(BaseModel):
+    name: str | None = None
+    modifier: str | None = None
+
+
+@app.patch("/api/projects/{project_id}/poses/{pose_id}")
+async def pose_update(project_id: int, pose_id: int, body: PoseUpdate) -> dict:
+    sets, vals = [], []
+    if body.name is not None:
+        sets.append("name = ?"); vals.append(body.name.strip())
+    if body.modifier is not None:
+        sets.append("modifier = ?"); vals.append(body.modifier.strip())
+    if not sets:
+        raise HTTPException(422, "nothing to update")
+    vals += [pose_id, project_id]
+    with db.connect() as conn:
+        cur = conn.execute(f"UPDATE poses SET {', '.join(sets)} WHERE id = ? AND project_id = ?", vals)
+        if cur.rowcount == 0:
+            raise HTTPException(404, "pose not found")
+        row = conn.execute("SELECT * FROM poses WHERE id = ?", (pose_id,)).fetchone()
+    return _pose_dict(row)
+
+
+@app.delete("/api/projects/{project_id}/poses/{pose_id}")
+async def pose_delete(project_id: int, pose_id: int) -> dict:
+    with db.connect() as conn:
+        cur = conn.execute("DELETE FROM poses WHERE id = ? AND project_id = ?", (pose_id, project_id))
+        if cur.rowcount == 0:
+            raise HTTPException(404, "pose not found")
+    return {"deleted": pose_id}
+
+
+class PoseAiRequest(BaseModel):
+    instruction: str = Field(min_length=1, max_length=1000)
+
+
+@app.post("/api/projects/{project_id}/poses/{pose_id}/ai")
+async def pose_ai(project_id: int, pose_id: int, body: PoseAiRequest) -> dict:
+    """Revise a pose's modifier via Ollama. Returns the suggestion; does not save."""
+    with db.connect() as conn:
+        row = conn.execute("SELECT modifier FROM poses WHERE id = ? AND project_id = ?",
+                          (pose_id, project_id)).fetchone()
+    if row is None:
+        raise HTTPException(404, "pose not found")
+    try:
+        text = await ollama.revise(body.instruction, row["modifier"])
+    except ollama.OllamaError as exc:
+        raise HTTPException(502, f"AI assistant error: {exc}") from exc
+    return {"modifier": text}
+
+
+@app.post("/api/projects/{project_id}/poses/{pose_id}/generate")
+async def pose_generate(project_id: int, pose_id: int) -> dict:
+    detail = await get_project(project_id)
+    version = detail["current_version"] or {}
+    slug = detail["project"]["slug"]
+    with db.connect() as conn:
+        row = conn.execute("SELECT * FROM poses WHERE id = ? AND project_id = ?",
+                          (pose_id, project_id)).fetchone()
+        if row is None:
+            raise HTTPException(404, "pose not found")
+        try:
+            await _queue_pose(conn, project_id, slug, version, row)
+        except (workflows.WorkflowError, comfy.ComfyError) as exc:
+            raise HTTPException(502, str(exc)) from exc
+    return {"pose_id": pose_id, "status": "pending"}
+
+
+@app.post("/api/projects/{project_id}/poses/generate-all")
+async def poses_generate_all(project_id: int) -> dict:
+    detail = await get_project(project_id)
+    version = detail["current_version"] or {}
+    slug = detail["project"]["slug"]
+    with db.connect() as conn:
+        rows = conn.execute("SELECT * FROM poses WHERE project_id = ? ORDER BY position, id",
+                          (project_id,)).fetchall()
+        if not rows:
+            raise HTTPException(400, "no poses yet — add some or load a preset first")
+        queued = 0
+        for row in rows:
+            try:
+                await _queue_pose(conn, project_id, slug, version, row)
+                queued += 1
+            except (workflows.WorkflowError, comfy.ComfyError) as exc:
+                logs.error("process", f"pose queue failed after {queued}: {exc}", project_id=project_id)
+                if queued == 0:
+                    raise HTTPException(502, f"could not queue poses: {exc}") from exc
+                break
+    logs.info("process", f"poses: queued {queued} render(s)", project_id=project_id, slug=slug)
+    return {"queued": queued}
+
+
 # --- static frontend -------------------------------------------------------
 class NoCacheStaticFiles(StaticFiles):
     """Serve the frontend with `Cache-Control: no-cache` so a browser always

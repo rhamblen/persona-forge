@@ -62,7 +62,7 @@
         <a class="nav-item is-active" data-view="prompt" href="#">1 · Prompt Studio</a>
         <a class="nav-item" data-view="dataset" href="#">2 · Dataset</a>
         <a class="nav-item" data-view="lora" href="#">3 · LoRA</a>
-        <a class="nav-item is-disabled" href="#">4 · Poses</a>
+        <a class="nav-item" data-view="poses" href="#">4 · Poses</a>
         <div class="nav-section">System</div>
         <a class="nav-item" data-view="logs" href="#">Logs</a>
       </nav>
@@ -325,6 +325,69 @@
           <div class="panel">
             <div class="panel-head"><h2>Trained LoRAs</h2></div>
             <div id="lora-list"><p class="muted">None yet.</p></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ POSES (Phase D) ============ -->
+      <section class="view" id="view-poses" hidden>
+        <header class="main-head">
+          <h1>Poses</h1>
+          <p class="subtitle">
+            Generate a set of poses / expressions for this character. Select one to zoom in
+            and refine it — with the AI or by hand — then regenerate just that pose.
+          </p>
+        </header>
+
+        <div id="poses-noproject" class="empty-state" hidden>
+          <p>Select or create a project first (Prompt Studio).</p>
+        </div>
+
+        <div id="poses-main" hidden>
+          <div class="poses-layout">
+            <div class="poses-left">
+              <div class="panel ds-bar">
+                <div class="ds-controls">
+                  <button class="btn btn-primary" id="poses-generate-all">Generate all</button>
+                  <button class="btn" id="poses-add">+ Add pose</button>
+                  <button class="chip" id="poses-preset-starter" title="Add a starter set of body poses">Starter set</button>
+                  <button class="chip" id="poses-preset-expr" title="Add the 28 SillyTavern expressions">28 expressions</button>
+                  <span class="ds-genstate muted small" id="poses-genstate"></span>
+                </div>
+              </div>
+              <p class="hint" id="poses-msg"></p>
+              <div class="poses-grid" id="poses-grid">
+                <p class="muted">No poses yet — add one or load a preset.</p>
+              </div>
+            </div>
+
+            <div class="poses-editor panel" id="poses-editor" hidden>
+              <div class="panel-head">
+                <h2 id="pose-ed-title">Pose</h2>
+                <button class="chip" id="pose-ed-close" title="Close">✕</button>
+              </div>
+              <div class="pose-ed-preview" id="pose-ed-preview"></div>
+              <label class="field">
+                <span class="field-label">Name</span>
+                <input id="pose-ed-name" spellcheck="false" />
+              </label>
+              <label class="field">
+                <span class="field-label">Pose / expression <em>added to the character prompt</em></span>
+                <textarea id="pose-ed-modifier" rows="3" spellcheck="false"></textarea>
+              </label>
+              <div class="pose-ai">
+                <input id="pose-ed-ai" spellcheck="false"
+                  placeholder="Ask AI to change it — e.g. “make her sit cross-legged”" />
+                <button class="btn" id="pose-ed-ai-btn">Suggest ✨</button>
+              </div>
+              <div class="actions">
+                <button class="btn btn-primary" id="pose-ed-regen">Save &amp; regenerate</button>
+                <button class="btn" id="pose-ed-save">Save only</button>
+                <button class="btn btn-ghost" id="pose-ed-zoom" title="Zoom the current image">⤢ Zoom</button>
+                <button class="btn btn-ghost" id="pose-ed-delete">Delete</button>
+              </div>
+              <p class="hint" id="pose-ed-msg"></p>
+            </div>
           </div>
         </div>
       </section>

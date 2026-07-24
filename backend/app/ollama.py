@@ -92,6 +92,42 @@ def _extract_json(text: str) -> dict[str, Any]:
     raise OllamaError("model did not return JSON")
 
 
+_REVISE_SYSTEM = """You edit a single short prompt fragment describing a character's POSE or
+EXPRESSION for an anime image generator. Given the current fragment and an instruction,
+return the revised fragment.
+Rules:
+  - Prose, not Danbooru tags. Keep it short (a pose/expression descriptor, not a full scene).
+  - This describes pose/expression/framing ONLY — never the character's fixed identity.
+  - Make the smallest edit that satisfies the instruction; keep the rest.
+  - Reply with ONLY a JSON object: {"text": "..."}
+"""
+
+
+async def revise(instruction: str, current: str, model: str | None = None) -> str:
+    """Revise a single pose/expression fragment per an instruction. Returns the new text."""
+    model = model or OLLAMA_MODEL
+    user = (f"Current fragment: {current or '(empty)'}\n"
+            f"Instruction: {instruction.strip()}\n"
+            "Return the revised fragment as JSON.")
+    payload = {"model": model, "system": _REVISE_SYSTEM, "prompt": user,
+               "stream": False, "format": "json", "keep_alive": OLLAMA_KEEP_ALIVE,
+               "options": {"temperature": 0.6}}
+    logs.info("integration", "requesting pose revision from Ollama", model=model)
+    logs.verbose("integration", "→ Ollama POST generate (revise)", current_len=len(current or ""))
+    try:
+        async with httpx.AsyncClient(timeout=OLLAMA_TIMEOUT) as c:
+            r = await c.post(f"{OLLAMA_URL}/api/generate", json=payload)
+            r.raise_for_status()
+            reply = r.json().get("response", "")
+    except httpx.HTTPError as exc:
+        logs.error("integration", f"Ollama revise failed: {exc}", url=OLLAMA_URL)
+        raise OllamaError(f"Ollama request failed: {exc}") from exc
+    data = _extract_json(reply)
+    text = str(data.get("text", "")).strip()
+    logs.verbose("integration", "← Ollama revise", chars=len(text))
+    return text or current
+
+
 async def status() -> dict[str, Any]:
     """Reachability, available models, and whether our model is loaded in VRAM.
 

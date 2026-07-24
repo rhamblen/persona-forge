@@ -227,6 +227,41 @@ code { background: var(--bg-raised); padding: 1px 5px; border-radius: 4px; font-
   box-shadow: 0 0 0 1px var(--accent) inset; }
 .seg-actions { display: flex; gap: 6px; }
 
+/* ---------- poses (Phase D) ---------- */
+.poses-layout { display: grid; grid-template-columns: 1fr; gap: 16px; }
+@media (min-width: 1100px) {
+  .poses-layout { grid-template-columns: 1fr 340px; align-items: start; }
+  .poses-editor { position: sticky; top: 16px; }
+}
+.poses-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 10px; }
+.pose-card { padding: 0; border: 1px solid var(--line); border-radius: var(--radius);
+  overflow: hidden; cursor: pointer; background: var(--bg-panel); text-align: left; }
+.pose-card:hover { border-color: var(--accent); }
+.pose-card.sel { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent) inset; }
+.pose-thumb { position: relative; aspect-ratio: 1; background: var(--bg-raised);
+  display: grid; place-items: center; }
+.pose-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.pose-empty { color: var(--text-dim); font-size: 20px; }
+.pose-name { padding: 6px 8px; font-size: 12px; color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pose-badge { position: absolute; bottom: 5px; left: 5px; font-size: 10px; font-weight: 700;
+  padding: 1px 6px; border-radius: 999px; background: rgba(11,13,19,.75); }
+.pose-badge.b-pending { color: var(--warn); }
+.pose-badge.b-error { color: var(--bad); }
+.pose-badge.b-empty { color: var(--text-dim); }
+
+.poses-editor .pose-ed-preview { margin-bottom: 12px; }
+.pose-zoom-frame { display: block; width: 100%; padding: 0; border: 1px solid var(--line);
+  border-radius: 8px; overflow: hidden; background: var(--bg-raised); cursor: zoom-in; }
+.pose-zoom-frame img { width: 100%; display: block; }
+.pose-empty-lg { padding: 40px 0; text-align: center; color: var(--text-dim);
+  background: var(--bg-raised); border: 1px dashed var(--line); border-radius: 8px; }
+.pose-ai { display: flex; gap: 8px; margin: 8px 0; }
+.pose-ai input { flex: 1; background: var(--bg-raised); color: var(--text);
+  border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font: inherit; }
+.pose-ai input:focus { outline: none; border-color: var(--accent); }
+.poses-editor .actions { flex-wrap: wrap; }
+
 /* ---------- LoRA (Phase C) ---------- */
 .lora-row { display: flex; justify-content: space-between; align-items: baseline;
   padding: 8px 0; border-bottom: 1px solid var(--line); }
@@ -307,7 +342,7 @@ code { background: var(--bg-raised); padding: 1px 5px; border-radius: 4px; font-
 .logview .empty { color: var(--text-dim); }
 .logline { display: flex; gap: 10px; white-space: pre-wrap; word-break: break-word; }
 .logline .t { color: #5b6070; flex: 0 0 auto; }
-.logline .lv { flex: 0 0 auto; font-weight: 700; width: 42px; }
+.logline .lv { flex: 0 0 auto; font-weight: 700; width: 64px; }
 .logline .tg { color: var(--text-dim); flex: 0 0 auto; }
 .logline .mg .dt { color: var(--text-dim); opacity: .8; }
 .logline.error .lv { color: var(--bad); }

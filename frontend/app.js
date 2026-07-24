@@ -758,6 +758,196 @@ $("lora-stage").addEventListener("click", async () => {
   finally { btn.disabled = false; }
 });
 
+/* ---------------- poses (Phase D) ---------------- */
+
+let posesTimer = null;
+let posesCache = [];
+let selectedPoseId = null;
+
+function poseImageUrl(p) {
+  if (!p.filename) return "";
+  return `/api/image?filename=${encodeURIComponent(p.filename)}&subfolder=${encodeURIComponent(p.subfolder)}`;
+}
+function stopPosesPolling() { clearInterval(posesTimer); posesTimer = null; }
+function startPosesPolling() {
+  if (posesTimer) return;
+  posesTimer = setInterval(() => {
+    if ($("view-poses").hidden) return stopPosesPolling();
+    loadPoses();
+  }, 3000);
+}
+
+async function loadPoses() {
+  const np = $("poses-noproject"), main = $("poses-main");
+  if (!state.projectId) { np.hidden = false; main.hidden = true; return; }
+  np.hidden = true; main.hidden = false;
+  try {
+    const data = await api(`/api/projects/${state.projectId}/poses`);
+    posesCache = data.poses;
+    renderPosesGrid(data.poses);
+    $("poses-genstate").textContent = data.generating
+      ? `rendering… ${data.counts.pending} in queue` : "";
+    if (selectedPoseId != null) {
+      const cur = posesCache.find((p) => p.id === selectedPoseId);
+      if (cur) refreshPosePreview(cur); else closePoseEditor();
+    }
+    if (data.generating) startPosesPolling(); else stopPosesPolling();
+  } catch (e) { msg($("poses-msg"), e.message, "bad"); }
+}
+
+function poseStatusBadge(p) {
+  if (p.status === "pending") return '<span class="pose-badge b-pending">rendering…</span>';
+  if (p.status === "error") return '<span class="pose-badge b-error">failed</span>';
+  if (p.status === "empty" || !p.filename) return '<span class="pose-badge b-empty">not rendered</span>';
+  return "";
+}
+
+function renderPosesGrid(poses) {
+  const grid = $("poses-grid");
+  if (!poses.length) {
+    grid.innerHTML = '<p class="muted">No poses yet — add one or load a preset.</p>';
+    return;
+  }
+  grid.innerHTML = poses.map((p) => {
+    const img = p.filename
+      ? `<img src="${poseImageUrl(p)}" alt="${esc(p.name)}" loading="lazy" />`
+      : '<div class="pose-empty">—</div>';
+    return `<button type="button" class="pose-card${p.id === selectedPoseId ? " sel" : ""}" data-id="${p.id}">
+      <div class="pose-thumb">${img}${poseStatusBadge(p)}</div>
+      <div class="pose-name">${esc(p.name)}</div>
+    </button>`;
+  }).join("");
+}
+
+function selectPose(id) {
+  selectedPoseId = id;
+  const p = posesCache.find((x) => x.id === id);
+  if (!p) return;
+  $("poses-editor").hidden = false;
+  $("pose-ed-title").textContent = p.name;
+  $("pose-ed-name").value = p.name;
+  $("pose-ed-modifier").value = p.modifier || "";
+  $("pose-ed-ai").value = "";
+  msg($("pose-ed-msg"), "");
+  refreshPosePreview(p);
+  renderPosesGrid(posesCache); // reflect selection ring
+}
+
+function refreshPosePreview(p) {
+  const box = $("pose-ed-preview");
+  const url = poseImageUrl(p);
+  box.innerHTML = url
+    ? `<button type="button" class="pose-zoom-frame" id="pose-ed-zoomimg"><img src="${url}" alt="${esc(p.name)}" /></button>`
+    : `<div class="pose-empty-lg">${p.status === "pending" ? "rendering…" : "not rendered yet"}</div>`;
+  const z = $("pose-ed-zoomimg");
+  if (z) z.addEventListener("click", () => openLightbox(url));
+}
+
+function closePoseEditor() { selectedPoseId = null; $("poses-editor").hidden = true; renderPosesGrid(posesCache); }
+
+async function savePose(regen) {
+  if (selectedPoseId == null) return;
+  const name = $("pose-ed-name").value.trim();
+  const modifier = $("pose-ed-modifier").value.trim();
+  if (!name) return msg($("pose-ed-msg"), "Name can't be empty.", "bad");
+  try {
+    await api(`/api/projects/${state.projectId}/poses/${selectedPoseId}`, {
+      method: "PATCH", body: JSON.stringify({ name, modifier }),
+    });
+    if (regen) {
+      await api(`/api/projects/${state.projectId}/poses/${selectedPoseId}/generate`, { method: "POST" });
+      msg($("pose-ed-msg"), "Saved — regenerating…", "ok");
+      startPosesPolling();
+    } else {
+      msg($("pose-ed-msg"), "Saved.", "ok");
+    }
+    loadPoses();
+  } catch (e) { msg($("pose-ed-msg"), e.message, "bad"); }
+}
+
+async function poseAiSuggest() {
+  const instruction = $("pose-ed-ai").value.trim();
+  if (!instruction || selectedPoseId == null) return;
+  const btn = $("pose-ed-ai-btn");
+  btn.disabled = true;
+  msg($("pose-ed-msg"), "Asking Ollama…");
+  try {
+    const { modifier } = await api(`/api/projects/${state.projectId}/poses/${selectedPoseId}/ai`, {
+      method: "POST", body: JSON.stringify({ instruction }),
+    });
+    $("pose-ed-modifier").value = modifier;
+    msg($("pose-ed-msg"), "Applied to the field. Review, then Save & regenerate.", "ok");
+  } catch (e) { msg($("pose-ed-msg"), e.message, "bad"); }
+  finally { btn.disabled = false; }
+}
+
+async function addPose() {
+  if (!state.projectId) return;
+  try {
+    const p = await api(`/api/projects/${state.projectId}/poses`, {
+      method: "POST", body: JSON.stringify({ name: "New pose", modifier: "" }),
+    });
+    await loadPoses();
+    selectPose(p.id);
+    $("pose-ed-name").focus();
+    $("pose-ed-name").select();
+  } catch (e) { msg($("poses-msg"), e.message, "bad"); }
+}
+
+async function posesPreset(preset) {
+  try {
+    const r = await api(`/api/projects/${state.projectId}/poses/preset`, {
+      method: "POST", body: JSON.stringify({ preset }),
+    });
+    msg($("poses-msg"), r.added ? `Added ${r.added} pose(s).` : "Those poses already exist.", "ok");
+    loadPoses();
+  } catch (e) { msg($("poses-msg"), e.message, "bad"); }
+}
+
+async function posesGenerateAll() {
+  if (!state.projectId) return;
+  const btn = $("poses-generate-all");
+  btn.disabled = true;
+  msg($("poses-msg"), "Queuing renders…");
+  try {
+    const { queued } = await api(`/api/projects/${state.projectId}/poses/generate-all`, { method: "POST" });
+    msg($("poses-msg"), `Queued ${queued} render(s).`, "ok");
+    startPosesPolling();
+    loadPoses();
+  } catch (e) { msg($("poses-msg"), e.message, "bad"); }
+  finally { btn.disabled = false; }
+}
+
+async function deletePose() {
+  if (selectedPoseId == null) return;
+  const p = posesCache.find((x) => x.id === selectedPoseId);
+  if (!confirm(`Delete pose "${p ? p.name : ""}"?`)) return;
+  try {
+    await api(`/api/projects/${state.projectId}/poses/${selectedPoseId}`, { method: "DELETE" });
+    closePoseEditor();
+    loadPoses();
+  } catch (e) { msg($("pose-ed-msg"), e.message, "bad"); }
+}
+
+$("poses-grid").addEventListener("click", (e) => {
+  const card = e.target.closest(".pose-card");
+  if (card) selectPose(parseInt(card.dataset.id, 10));
+});
+$("poses-generate-all").addEventListener("click", posesGenerateAll);
+$("poses-add").addEventListener("click", addPose);
+$("poses-preset-starter").addEventListener("click", () => posesPreset("starter"));
+$("poses-preset-expr").addEventListener("click", () => posesPreset("expressions"));
+$("pose-ed-close").addEventListener("click", closePoseEditor);
+$("pose-ed-save").addEventListener("click", () => savePose(false));
+$("pose-ed-regen").addEventListener("click", () => savePose(true));
+$("pose-ed-ai-btn").addEventListener("click", poseAiSuggest);
+$("pose-ed-delete").addEventListener("click", deletePose);
+$("pose-ed-zoom").addEventListener("click", () => {
+  const p = posesCache.find((x) => x.id === selectedPoseId);
+  const url = p && poseImageUrl(p);
+  if (url) openLightbox(url); else msg($("pose-ed-msg"), "No image yet — regenerate first.", "bad");
+});
+
 /* ---------------- wiring ---------------- */
 
 function showView(name) {
@@ -775,6 +965,8 @@ document.querySelectorAll(".nav-item[data-view]").forEach((a) =>
     if (a.dataset.view === "dataset") loadDataset();
     else stopDatasetPolling();
     if (a.dataset.view === "lora") loadLora();
+    if (a.dataset.view === "poses") loadPoses();
+    else stopPosesPolling();
   }));
 
 $("log-search").addEventListener("input", (e) => {
@@ -810,8 +1002,11 @@ $("project-select").addEventListener("change", (e) => {
   state.projectId = parseInt(e.target.value, 10) || null;
   loadProject().catch((err) => msg($("studio-msg"), err.message, "bad"));
   stopDatasetPolling();
+  stopPosesPolling();
+  selectedPoseId = null;
   if (!$("view-dataset").hidden) loadDataset();
   if (!$("view-lora").hidden) loadLora();
+  if (!$("view-poses").hidden) loadPoses();
 });
 
 $("generate-btn").addEventListener("click", () => generate());

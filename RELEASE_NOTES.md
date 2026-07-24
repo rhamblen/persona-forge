@@ -1,25 +1,30 @@
-# v0.5.1 — Logging overhaul + verbose level
+# v0.6.0 — Pose / Expression studio (Phase 6)
 
-Logs now cover the whole pipeline, not just boot, and there's a `verbose` firehose level.
+Phase 6 opens. Built in parallel with the LoRA phase, so version tags interleave with any
+further 0.5.x LoRA work — that's expected.
 
-## Added
-- **`verbose` log level** below `debug` — every cross-system handshake, each file copied
-  between shares, each poll. New VERBOSE chip + min-level option in the Logs tab (purple),
-  and it reaches stdout too. Default view stays at INFO+, so verbose is opt-in.
-- **Pipeline instrumentation**, level chosen per step:
-  - **integration (verbose)** — the real handshakes: `→ ComfyUI POST prompt / upload/image /
-    history`, `←` responses, Ollama request/response, history polls, with sizes/timings.
-  - **process (info)** — milestones: batch queued, reconcile results, "staging N images
-    /builds → ComfyUI input/…", "staged X/Y".
-  - **local (verbose)** — the share copies: reading each dataset image off `/builds`, byte
-    counts; **warn** if a selected image is missing on the share.
-  - **warn/error** — a dataset image that failed to render, an upload ComfyUI rejected.
-  - **api (verbose)** — every inbound request (`method path → status`, ms).
-  - **Boot** now also handshakes ComfyUI + Ollama and logs whether each is reachable.
+## Added — Poses tab
+1. **All created.** Add poses individually, or load a preset — a **Starter set** of 8 body
+   poses, or the **28 SillyTavern expressions** — then **Generate all**. Each renders from the
+   project prompt + the pose's modifier; rendering is queued and the grid fills in as ComfyUI
+   finishes (tracked in a `poses` table, reconciled from history like the dataset builder).
+2. **Select → zoom.** Click a pose to open its editor; the preview (and a Zoom button) open
+   the image full-size in the lightbox.
+3. **Modify.** With a pose selected, edit its **modifier** by hand *or* ask the AI
+   ("make her sit cross-legged" → Ollama revises just that fragment), then **Save &
+   regenerate** that one pose. The editor is available whenever a pose is selected — zoom is
+   optional, not required, to make a change.
 
-To see it all: Logs tab → set **Min level** to VERBOSE.
+Endpoints under `/api/projects/{id}/poses`; new `poses` table (created on boot).
 
-**Image:** `ghcr.io/rhamblen/persona-forge:0.5.1`
+## Fixed
+- Logs: widened the level column so `VERBOSE` no longer wraps.
+
+## Notes
+- Poses currently render from the base prompt + modifier. Once the LoRA phase lands, pose
+  generation will use the trained character LoRA for on-model consistency.
+
+**Image:** `ghcr.io/rhamblen/persona-forge:0.6.0`
 
 ## Upgrading
 No compose changes since 0.3.0. Pull and restart:

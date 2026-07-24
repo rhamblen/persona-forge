@@ -71,6 +71,24 @@ CREATE TABLE IF NOT EXISTS dataset_jobs (
 );
 
 CREATE INDEX IF NOT EXISTS idx_dsjobs_project ON dataset_jobs(project_id, status);
+
+-- Phase D: one row per pose/expression in a project's set. `modifier` is the
+-- per-pose prompt suffix (e.g. "sitting, relaxed"); the image is (re)generated from
+-- the project prompt + this modifier. prompt_id/status track an in-flight render.
+CREATE TABLE IF NOT EXISTS poses (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id  INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    name        TEXT NOT NULL,
+    modifier    TEXT NOT NULL DEFAULT '',
+    filename    TEXT NOT NULL DEFAULT '',
+    subfolder   TEXT NOT NULL DEFAULT '',
+    prompt_id   TEXT NOT NULL DEFAULT '',
+    status      TEXT NOT NULL DEFAULT 'empty',   -- empty | pending | done | error
+    position    INTEGER NOT NULL DEFAULT 0,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_poses_project ON poses(project_id, position);
 """
 
 

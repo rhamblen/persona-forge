@@ -9,6 +9,30 @@ Every version below is a **published GitHub Release** with a matching
 
 ---
 
+## [0.6.0] — 2026-07-24
+
+**Phase 6 opens: the Pose / Expression studio.** (Built in parallel with the LoRA phase —
+tags interleave with any further 0.5.x work.)
+
+### Added
+- **Poses tab.** Build a set of poses / expressions for a character:
+  1. **All created** — add poses individually, or load a preset (**Starter set** of 8 body
+     poses, or the **28 SillyTavern expressions**), then **Generate all**. Each renders from
+     the project prompt + the pose's modifier; rendering is queued and the grid fills in as
+     ComfyUI finishes (a `poses` table + reconcile-from-history, like the dataset).
+  2. **Select → zoom** — click a pose to open its editor; the preview image (and a Zoom
+     button) open it full-size in the lightbox.
+  3. **Modify** — with a selected pose, edit its **modifier** by hand *or* ask the AI
+     ("make her sit cross-legged" → Ollama revises just that fragment), then **Save &
+     regenerate** that one pose. The editor is available whenever a pose is selected.
+  - Endpoints under `/api/projects/{id}/poses` (list / add / preset / update / delete /
+    ai / generate / generate-all); new `poses` table; `ollama.revise()` for single-field edits.
+
+### Fixed
+- Logs: widened the level column so `VERBOSE` no longer wraps.
+
+---
+
 ## [0.5.1] — 2026-07-24
 
 **Logging overhaul: a `verbose` level, and logs that actually cover the whole pipeline.**

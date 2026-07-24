@@ -119,7 +119,12 @@ LAN; no Claude/Anthropic in the runtime loop.
   (reuses `openLightbox`); zoom is separate from click-to-select.
 - **0.5.0:** Phase 5 foundation — LoRA tab (trigger word, staged status, trained LoRAs) +
   dataset staging. Endpoints under `/api/projects/{id}/lora`. `projects.trigger_word` column.
-- **0.5.1 (current):** logging overhaul — added a `verbose` level (below debug) and
+- **0.6.0 (current):** Phase 6 — Poses tab (parallel with LoRA phase; tags interleave).
+  Add poses / presets (Starter 8, or the 28 ST expressions), Generate all (queued +
+  reconcile via `poses` table), select→zoom→edit (manual or `ollama.revise()`)→regenerate one.
+  Endpoints under `/api/projects/{id}/poses`. Renders base prompt + pose `modifier` via the
+  base-character `expression` param; will use the trained LoRA once Phase 5 completes.
+- **0.5.1:** logging overhaul — added a `verbose` level (below debug) and
   instrumented the pipeline throughout (not just boot). Log-level convention:
   **verbose** = cross-system handshakes / per-file share copies / polls (integration+local);
   **debug** = step detail; **info** = milestones (process); **warn** = recoverable (missing
