@@ -18,8 +18,7 @@
         </div>
       </div>
 
-      <!-- Pinned status block -->
-      <div class="status-block" id="status-block">
+      <div class="status-block">
         <div class="status-row">
           <span class="dot dot-unknown" id="comfy-dot"></span>
           <span class="status-label">ComfyUI</span>
@@ -35,50 +34,139 @@
       </div>
 
       <nav class="nav">
+        <div class="nav-section">Project</div>
+        <select id="project-select" class="project-select"></select>
+        <button class="nav-btn" id="new-project-btn">+ New project</button>
+
         <div class="nav-section">Phases</div>
-        <a class="nav-item is-active" href="#">Overview</a>
-        <a class="nav-item is-disabled" href="#">1 · Prompt Studio</a>
+        <a class="nav-item" data-view="overview" href="#">Overview</a>
+        <a class="nav-item is-active" data-view="prompt" href="#">1 · Prompt Studio</a>
         <a class="nav-item is-disabled" href="#">2 · Dataset</a>
         <a class="nav-item is-disabled" href="#">3 · LoRA</a>
         <a class="nav-item is-disabled" href="#">4 · Poses</a>
-        <div class="nav-section">System</div>
-        <a class="nav-item is-disabled" href="#">Settings</a>
       </nav>
     </aside>
 
-    <!-- MAIN -->
     <main class="main">
-      <header class="main-head">
-        <h1>Overview</h1>
-        <p class="subtitle">Skeleton build — verifying infrastructure before Phase&nbsp;2.</p>
-      </header>
-
-      <section class="cards">
-        <article class="card">
-          <h2>ComfyUI connection</h2>
-          <dl id="comfy-detail"><dd class="muted">checking…</dd></dl>
-        </article>
-
-        <article class="card">
-          <h2>Shared builds folder</h2>
-          <dl id="storage-detail"><dd class="muted">checking…</dd></dl>
-          <p class="note">
-            Must be the same host share mapped into the ComfyUI container, so both
-            can read/write LoRAs and finished images.
-          </p>
-        </article>
-
-        <article class="card card-wide">
-          <h2>Builds</h2>
-          <div id="builds-list"><p class="muted">checking…</p></div>
-        </article>
+      <!-- ============ OVERVIEW ============ -->
+      <section class="view" id="view-overview" hidden>
+        <header class="main-head">
+          <h1>Overview</h1>
+          <p class="subtitle">Infrastructure and existing builds.</p>
+        </header>
+        <div class="cards">
+          <article class="card">
+            <h2>ComfyUI connection</h2>
+            <dl id="comfy-detail"><dd class="muted">checking…</dd></dl>
+          </article>
+          <article class="card">
+            <h2>Shared builds folder</h2>
+            <dl id="storage-detail"><dd class="muted">checking…</dd></dl>
+          </article>
+          <article class="card card-wide">
+            <h2>Builds</h2>
+            <div id="builds-list"><p class="muted">checking…</p></div>
+          </article>
+        </div>
       </section>
 
-      <footer class="foot">
-        Styling is provisional — the palette, shape and version-view come once the
-        UI references land.
-      </footer>
+      <!-- ============ PROMPT STUDIO ============ -->
+      <section class="view" id="view-prompt">
+        <header class="main-head">
+          <h1>Prompt Studio</h1>
+          <p class="subtitle" id="prompt-subtitle">
+            Refine the prompt until you're happy, then sign it off as the baseline.
+          </p>
+        </header>
+
+        <div id="no-project" class="empty-state">
+          <p>No project selected.</p>
+          <button class="btn btn-primary" id="empty-new-project">Create your first project</button>
+        </div>
+
+        <div id="studio" hidden>
+          <div class="studio-grid">
+            <!-- editor -->
+            <div class="panel">
+              <div class="panel-head">
+                <h2>Prompt</h2>
+                <span class="chip" id="current-version-chip">—</span>
+              </div>
+
+              <label class="field">
+                <span class="field-label">Character <em>identity only — no expressions</em></span>
+                <textarea id="f-character" rows="5" spellcheck="false"></textarea>
+              </label>
+
+              <label class="field">
+                <span class="field-label">Style + framing</span>
+                <textarea id="f-style" rows="3" spellcheck="false"></textarea>
+              </label>
+
+              <label class="field">
+                <span class="field-label">Negative</span>
+                <textarea id="f-negative" rows="3" spellcheck="false"></textarea>
+              </label>
+
+              <div class="field-row">
+                <label class="field">
+                  <span class="field-label">Checkpoint</span>
+                  <select id="f-checkpoint"></select>
+                </label>
+                <label class="field field-narrow">
+                  <span class="field-label">Seed</span>
+                  <input id="f-seed" type="number" />
+                </label>
+                <button class="btn btn-ghost" id="reroll-seed" title="Random seed">🎲</button>
+              </div>
+
+              <div class="actions">
+                <button class="btn btn-primary" id="generate-btn">Generate</button>
+                <button class="btn" id="save-version-btn">Save as new version</button>
+                <button class="btn btn-good" id="signoff-btn">Sign off baseline</button>
+              </div>
+              <p class="hint" id="studio-msg"></p>
+            </div>
+
+            <!-- preview -->
+            <div class="panel panel-preview">
+              <div class="panel-head"><h2>Preview</h2></div>
+              <div class="preview" id="preview">
+                <p class="muted">No image yet — hit Generate.</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- version history: presented like a VCS history panel -->
+          <div class="panel panel-versions">
+            <div class="panel-head">
+              <h2>Version history</h2>
+              <span class="muted small">newest first · nothing is ever deleted</span>
+            </div>
+            <div id="version-list"><p class="muted">—</p></div>
+          </div>
+        </div>
+      </section>
     </main>
+  </div>
+
+  <!-- new project modal -->
+  <div class="modal-backdrop" id="modal" hidden>
+    <div class="modal">
+      <h2>New project</h2>
+      <p class="muted small">
+        Creates a build folder with <code>lora/</code> and <code>images/</code> in the shared builds root.
+      </p>
+      <label class="field">
+        <span class="field-label">Project name</span>
+        <input id="np-name" placeholder="e.g. Ada" />
+      </label>
+      <p class="hint" id="np-msg"></p>
+      <div class="actions">
+        <button class="btn btn-primary" id="np-create">Create</button>
+        <button class="btn" id="np-cancel">Cancel</button>
+      </div>
+    </div>
   </div>
 
   <script src="/static/app.js"></script>

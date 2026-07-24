@@ -14,6 +14,12 @@ services:
     pull_policy: always
     ports:
       - "${PF_PORT:-8890}:8000"
+    labels:
+      # Gives the container a clickable WebUI entry in Unraid's Docker tab.
+      # [IP] and [PORT:8000] are Unraid placeholders — 8000 is the *container*
+      # port, which Unraid resolves to whatever PF_PORT publishes it on.
+      net.unraid.docker.webui: "http://[IP]:[PORT:8000]"
+      net.unraid.docker.icon: "https://raw.githubusercontent.com/rhamblen/persona-forge/main/docs/icon.png"
     environment:
       COMFYUI_URL: "${COMFYUI_URL:-http://192.168.1.33:9000}"
       BUILDS_ROOT: "/builds"

@@ -26,17 +26,23 @@ from . import comfy, db, workflows
 COMFYUI_URL = comfy.COMFYUI_URL
 BUILDS_ROOT = Path(os.getenv("BUILDS_ROOT", "/builds"))
 APPDATA_ROOT = Path(os.getenv("APPDATA_ROOT", "/appdata"))
-FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
+def _resolve(name: str, must_be_dir: bool = True) -> Path:
+    """Resolve a sibling asset in both layouts.
 
-def _read_version() -> str:
+    Container: /app/app/main.py  -> /app/<name>
+    Repo:      backend/app/main.py -> <repo-root>/<name>
+    """
     here = Path(__file__).resolve()
-    for cand in (here.parent.parent / "VERSION", here.parent.parent.parent / "VERSION"):
-        if cand.is_file():
-            return cand.read_text().strip()
-    return "0.0.0"
+    cands = [here.parent.parent / name, here.parent.parent.parent / name]
+    for c in cands:
+        if c.is_dir() if must_be_dir else c.is_file():
+            return c
+    return cands[0]
 
 
-VERSION = _read_version()
+FRONTEND_DIR = _resolve("frontend")
+_version_file = _resolve("VERSION", must_be_dir=False)
+VERSION = _version_file.read_text().strip() if _version_file.is_file() else "0.0.0"
 
 app = FastAPI(title="Persona Forge", version=VERSION)
 
