@@ -98,9 +98,12 @@ LAN; no Claude/Anthropic in the runtime loop.
 - **Done:** Phase 1 (deploy loop, infra checks) · Phase 2 (projects=build folders,
   append-only versioning + sign-off + rollback, persona clone reusing parent LoRA,
   persona.json, logs tab, workflow templates/manifests).
-- **0.3.0 (current):** AI prompt assistant (Ollama Replace/Modify), Ollama sidebar
-  Connect/Unload + idle auto-unload, container Start/Restart via socket proxy, preview
-  zoom, anime-first checkpoint default.
+- **0.3.0:** AI prompt assistant (Ollama Replace/Modify), Ollama sidebar Connect/Unload +
+  idle auto-unload, container Start/Restart via socket proxy, preview zoom, anime-first
+  checkpoint default.
+- **0.3.1 (current):** Logs tab reskinned to the house terminal-style standard (matches
+  the esp32-shutter-hub web UI); frontend served `Cache-Control: no-cache` so deploys are
+  never served stale (fixes a browser caching a new page against old JS).
 - **Remaining:** 0.4 dataset builder · 0.5 LoRA trainer · 0.6 pose/expression studio ·
   0.7 hardening · 1.0 release.
 

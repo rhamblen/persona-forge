@@ -199,45 +199,43 @@
           </p>
         </header>
 
-        <div class="panel log-controls">
-          <div class="seg-group">
-            <span class="seg-label">Level</span>
-            <div class="seg" id="log-level">
-              <button class="seg-tile" data-v="debug">debug +</button>
-              <button class="seg-tile sel" data-v="info">info +</button>
-              <button class="seg-tile" data-v="warn">warn +</button>
-              <button class="seg-tile" data-v="error">error</button>
+        <div class="panel">
+          <div class="logbar">
+            <input id="log-search" class="search" placeholder="Search logs…" />
+            <label class="lvlsel">Min level
+              <select id="log-minlevel">
+                <option value="debug">DEBUG</option>
+                <option value="info" selected>INFO</option>
+                <option value="warn">WARN</option>
+                <option value="error">ERROR</option>
+              </select>
+            </label>
+          </div>
+          <div class="logbar">
+            <div class="chips" id="log-level-chips">
+              <button class="chip on" data-lvl="error">ERROR</button>
+              <button class="chip on" data-lvl="warn">WARN</button>
+              <button class="chip on" data-lvl="info">INFO</button>
+              <button class="chip on" data-lvl="debug">DEBUG</button>
+            </div>
+            <div class="logbar-right">
+              <button class="chip on" id="log-autoscroll" title="Follow new lines">Auto-scroll</button>
+              <button class="chip" id="log-persisted" title="Show history from the log file, incl. previous runs">Previous runs</button>
+              <button class="chip" id="log-clear" title="Clear the view">Clear</button>
             </div>
           </div>
-
-          <div class="seg-group">
-            <span class="seg-label">Category</span>
-            <div class="seg" id="log-category">
-              <button class="seg-tile sel" data-v="all">all</button>
-              <button class="seg-tile" data-v="boot">boot</button>
-              <button class="seg-tile" data-v="integration">integration</button>
-              <button class="seg-tile" data-v="process">process</button>
-              <button class="seg-tile" data-v="local">local</button>
+          <div class="logbar">
+            <div class="chips" id="log-cat-chips">
+              <button class="chip cat on" data-cat="boot">boot</button>
+              <button class="chip cat on" data-cat="integration">integration</button>
+              <button class="chip cat on" data-cat="process">process</button>
+              <button class="chip cat on" data-cat="local">local</button>
             </div>
           </div>
-
-          <div class="seg-group grow">
-            <span class="seg-label">Search</span>
-            <input id="log-search" placeholder="filter messages…" />
-          </div>
-
-          <div class="seg-group">
-            <span class="seg-label">&nbsp;</span>
-            <div class="seg-actions">
-              <button class="seg-tile" id="log-follow" aria-pressed="true">Follow</button>
-              <button class="seg-tile" id="log-refresh">Refresh</button>
-              <button class="seg-tile" id="log-persisted">Previous runs</button>
-            </div>
-          </div>
+          <div class="loghead"><b>Live Logs</b> <span class="count" id="log-count">0</span>
+            <span class="wsstate" id="log-state">connecting…</span></div>
+          <div class="logview" id="log-list"><div class="empty">No logs to display</div></div>
         </div>
-
-        <div class="log-stats muted small" id="log-stats"></div>
-        <div class="panel log-panel"><div id="log-list"><p class="muted">loading…</p></div></div>
       </section>
     </main>
   </div>

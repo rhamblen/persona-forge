@@ -727,9 +727,22 @@ async def list_builds() -> dict:
 
 
 # --- static frontend -------------------------------------------------------
+class NoCacheStaticFiles(StaticFiles):
+    """Serve the frontend with `Cache-Control: no-cache` so a browser always
+    revalidates. StaticFiles still sends ETag/Last-Modified, so an unchanged
+    asset returns a cheap 304 — but a NEW build after a deploy is picked up on
+    the next load instead of the browser silently serving stale JS (which showed
+    up as an old UI against a new backend)."""
+
+    async def get_response(self, path: str, scope):  # type: ignore[override]
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
 if FRONTEND_DIR.is_dir():
-    app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")
+    app.mount("/static", NoCacheStaticFiles(directory=FRONTEND_DIR), name="static")
 
     @app.get("/")
     async def index() -> FileResponse:
-        return FileResponse(FRONTEND_DIR / "index.html")
+        return FileResponse(FRONTEND_DIR / "index.html", headers={"Cache-Control": "no-cache"})

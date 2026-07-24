@@ -419,69 +419,76 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && !$("lightbox").hidden) closeLightbox();
 });
 
-/* ---------------- logs ---------------- */
+/* ---------------- logs (terminal style — matches the house standard) ---------------- */
 
+const LOG_RANK = { debug: 0, info: 1, warn: 2, error: 3 };
 let logTimer = null;
-let logFilters = { level: "info", category: "all", follow: true };
+let logState = {
+  minLevel: "info",
+  levelOn: { error: 1, warn: 1, info: 1, debug: 1 },
+  catOn: { boot: 1, integration: 1, process: 1, local: 1 },
+  search: "",
+  autoscroll: true,
+  persisted: false, // "Previous runs" shows a static file snapshot instead of live polling
+  entries: [],
+};
 
-function initSegments() {
-  // Only the log-filter segments; other .seg groups (e.g. the AI mode toggle) own
-  // their own handlers.
-  document.querySelectorAll("#log-level.seg, #log-category.seg").forEach((seg) => {
-    seg.addEventListener("click", (e) => {
-      const tile = e.target.closest(".seg-tile");
-      if (!tile) return;
-      seg.querySelectorAll(".seg-tile").forEach((t) => t.classList.toggle("sel", t === tile));
-      logFilters[seg.id === "log-level" ? "level" : "category"] = tile.dataset.v;
-      refreshLogs();
-    });
-  });
+function logPasses(e) {
+  const rank = LOG_RANK[e.level] ?? 1;
+  return logState.levelOn[e.level] !== 0 &&
+    rank >= LOG_RANK[logState.minLevel] &&
+    logState.catOn[e.category] !== 0 &&
+    (!logState.search || `${e.category} ${e.message}`.toLowerCase().includes(logState.search));
 }
 
-function renderLogs(entries, append = false) {
-  const box = $("log-list");
-  if (!entries.length && !append) { box.innerHTML = '<p class="muted">No matching entries.</p>'; return; }
-  const html = entries.map((e) => {
-    const det = e.detail ? `<div class="log-detail">${esc(JSON.stringify(e.detail))}</div>` : "";
-    const t = (e.ts || "").replace("T", " ").replace(/\+.*$/, "").slice(0, 23);
-    return `<div class="log-row log-${esc(e.level)}">
-      <span class="log-ts">${esc(t)}</span>
-      <span class="log-lvl lvl-${esc(e.level)}">${esc(e.level)}</span>
-      <span class="log-cat cat-${esc(e.category)}">${esc(e.category)}</span>
-      <span class="log-msg">${esc(e.message)}${det}</span>
-    </div>`;
-  }).join("");
-  if (append) box.insertAdjacentHTML("beforeend", html); else box.innerHTML = html;
-  if (logFilters.follow) box.scrollTop = box.scrollHeight;
+function logLineNode(e) {
+  const t = (e.ts || "").replace("T", " ").replace(/\+.*$/, "").slice(11, 23); // HH:MM:SS.mmm
+  const det = e.detail ? ` <span class="dt">${esc(JSON.stringify(e.detail))}</span>` : "";
+  const div = document.createElement("div");
+  div.className = "logline " + esc(e.level);
+  div.innerHTML =
+    `<span class="t">[${esc(t)}]</span>` +
+    `<span class="lv">${esc((e.level || "").toUpperCase())}</span>` +
+    `<span class="tg">${esc(e.category)}:</span>` +
+    `<span class="mg">${esc(e.message)}${det}</span>`;
+  return div;
+}
+
+function renderLogView() {
+  const v = $("log-list");
+  const shown = logState.entries.filter(logPasses);
+  v.innerHTML = "";
+  if (!shown.length) { v.innerHTML = '<div class="empty">No logs to display</div>'; }
+  else { const f = document.createDocumentFragment(); shown.forEach((e) => f.appendChild(logLineNode(e))); v.appendChild(f); }
+  $("log-count").textContent = logState.entries.length;
+  if (logState.autoscroll) v.scrollTop = v.scrollHeight;
+}
+
+function setLogState(text, live) {
+  const el = $("log-state");
+  el.textContent = text;
+  el.className = "wsstate " + (live ? "live" : "off");
 }
 
 async function refreshLogs() {
-  const qs = new URLSearchParams({
-    level: logFilters.level,
-    category: logFilters.category,
-    limit: "400",
-  });
-  const search = $("log-search").value.trim();
-  if (search) qs.set("search", search);
+  if (logState.persisted) return; // static snapshot; don't overwrite with live
   try {
-    const data = await api(`/api/logs?${qs}`);
-    renderLogs(data.entries);
-    const st = data.stats;
-    $("log-stats").textContent =
-      `${st.buffered}/${st.ring_max} buffered · ` +
-      Object.entries(st.by_level).map(([k, v]) => `${k}:${v}`).join("  ") +
-      ` · file ${(st.file_bytes / 1024).toFixed(0)} KB`;
+    const data = await api("/api/logs?limit=500");
+    logState.entries = data.entries;
+    setLogState("● live", true);
+    renderLogView();
   } catch (e) {
-    $("log-list").innerHTML = `<p class="bad">${esc(e.message)}</p>`;
+    setLogState("○ disconnected", false);
   }
 }
 
 async function loadPersistedLogs() {
   try {
     const data = await api("/api/logs/persisted?limit=500");
-    renderLogs(data.entries);
-    $("log-stats").textContent = `showing ${data.entries.length} entries from the log file (previous runs included)`;
-  } catch (e) { $("log-list").innerHTML = `<p class="bad">${esc(e.message)}</p>`; }
+    logState.entries = data.entries;
+    setLogState("○ previous runs", false);
+    renderLogView();
+  } catch (e) { $("log-list").innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
 }
 
 function startLogPolling(on) {
@@ -505,16 +512,33 @@ document.querySelectorAll(".nav-item[data-view]").forEach((a) =>
     if (a.dataset.view === "logs") refreshLogs();
   }));
 
-initSegments();
-$("log-search").addEventListener("input", () => { clearTimeout(window._ls); window._ls = setTimeout(refreshLogs, 300); });
-$("log-refresh").addEventListener("click", refreshLogs);
-$("log-persisted").addEventListener("click", loadPersistedLogs);
-$("log-follow").classList.add("sel");
-$("log-follow").addEventListener("click", () => {
-  logFilters.follow = !logFilters.follow;
-  $("log-follow").classList.toggle("sel", logFilters.follow);
-  $("log-follow").setAttribute("aria-pressed", String(logFilters.follow));
-  startLogPolling(logFilters.follow);
+$("log-search").addEventListener("input", (e) => {
+  logState.search = e.target.value.toLowerCase().trim();
+  renderLogView();
+});
+$("log-minlevel").addEventListener("change", (e) => { logState.minLevel = e.target.value; renderLogView(); });
+$("log-level-chips").addEventListener("click", (e) => {
+  const c = e.target.closest(".chip"); if (!c) return;
+  logState.levelOn[c.dataset.lvl] = logState.levelOn[c.dataset.lvl] ? 0 : 1;
+  c.classList.toggle("on");
+  renderLogView();
+});
+$("log-cat-chips").addEventListener("click", (e) => {
+  const c = e.target.closest(".chip"); if (!c) return;
+  logState.catOn[c.dataset.cat] = logState.catOn[c.dataset.cat] ? 0 : 1;
+  c.classList.toggle("on");
+  renderLogView();
+});
+$("log-autoscroll").addEventListener("click", () => {
+  logState.autoscroll = !logState.autoscroll;
+  $("log-autoscroll").classList.toggle("on", logState.autoscroll);
+  if (logState.autoscroll) renderLogView();
+});
+$("log-clear").addEventListener("click", () => { logState.entries = []; renderLogView(); });
+$("log-persisted").addEventListener("click", () => {
+  logState.persisted = !logState.persisted;
+  $("log-persisted").classList.toggle("on", logState.persisted);
+  if (logState.persisted) loadPersistedLogs(); else refreshLogs();
 });
 
 $("project-select").addEventListener("change", (e) => {

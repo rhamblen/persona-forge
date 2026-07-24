@@ -9,6 +9,30 @@ Every version below is a **published GitHub Release** with a matching
 
 ---
 
+## [0.3.1] — 2026-07-24
+
+**Log page reskinned to the house standard; stale-frontend caching fixed.**
+
+### Changed
+- **Logs tab now matches the esp32-shutter-hub web-UI log page** — a dark monospace
+  terminal (`[time] LVL category: message`, level-coloured red/amber/blue/teal), a
+  **Min level** dropdown plus **colour-coded level toggle-chips**, a **category chip row**
+  (Persona Forge keeps its `boot`/`integration`/`process`/`local` filter), a buffered
+  **count** pill and a **live** state indicator, **Auto-scroll**, **Clear**, and
+  **Previous runs** (the persisted log file, incl. runs before this process). Filtering is
+  client-side over the last 500 entries; each line carries its structured detail inline,
+  dimmed. Replaces the previous grid-row/segment layout.
+
+### Fixed
+- **Browsers served a stale `app.js` after a deploy** — the new page loaded but old
+  cached JS ran against it (the symptom: a new backend with a UI stuck on "checking…").
+  The frontend is now served with `Cache-Control: no-cache`, so a browser always
+  revalidates and picks up a new build on the next load. StaticFiles still sends
+  ETag/Last-Modified, so an unchanged asset is a cheap 304. **After this build deploys, a
+  hard refresh is no longer needed for future updates.**
+
+---
+
 ## [0.3.0] — 2026-07-24
 
 **Phase 3 opens: the AI prompt assistant.**

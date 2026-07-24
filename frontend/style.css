@@ -202,37 +202,44 @@ code { background: var(--bg-raised); padding: 1px 5px; border-radius: 4px; font-
   box-shadow: 0 0 0 1px var(--accent) inset; }
 .seg-actions { display: flex; gap: 6px; }
 
-/* ---------- logs ---------- */
-.log-controls { display: flex; gap: 18px; align-items: flex-start; flex-wrap: wrap;
-  margin-bottom: 12px; }
-.seg-group { display: flex; flex-direction: column; gap: 6px; }
-.seg-group.grow { flex: 1; min-width: 200px; }
-.seg-label { font-size: 11px; text-transform: uppercase; letter-spacing: .08em;
+/* ---------- logs (terminal style, matches the esp32-shutter-hub web UI) ---------- */
+.logbar { display: flex; gap: 12px; align-items: center; justify-content: space-between;
+  margin-bottom: 12px; flex-wrap: wrap; }
+.logbar-right { display: flex; gap: 8px; align-items: center; }
+.search { flex: 1; min-width: 200px; margin: 0; background: var(--bg-raised);
+  color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px;
+  font: inherit; }
+.search:focus { outline: none; border-color: var(--accent); }
+.lvlsel { display: flex; gap: 8px; align-items: center; margin: 0; white-space: nowrap;
+  color: var(--text-dim); font-size: 12px; }
+.lvlsel select { width: auto; margin: 0; background: var(--bg-raised); color: var(--text);
+  border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; font: inherit; }
+.chips { display: flex; gap: 7px; flex-wrap: wrap; }
+.chip { border: 1px solid var(--line); background: transparent; color: var(--text-dim);
+  border-radius: 20px; padding: 5px 12px; font-size: 11px; font-weight: 700; cursor: pointer;
+  opacity: .45; font-family: inherit; }
+.chip.on { opacity: 1; }
+.chip[data-lvl=error] { color: var(--bad); border-color: var(--bad); }
+.chip[data-lvl=warn]  { color: var(--warn); border-color: var(--warn); }
+.chip[data-lvl=info]  { color: var(--accent); border-color: var(--accent); }
+.chip[data-lvl=debug] { color: #2dd4bf; border-color: #2dd4bf; }
+.chip.cat.on { color: var(--text); border-color: var(--accent); }
+.chip#log-autoscroll.on, .chip#log-persisted.on { color: var(--accent); border-color: var(--accent); }
+.loghead { display: flex; gap: 10px; align-items: center; margin-bottom: 8px; }
+.count { background: var(--bg-raised); border-radius: 12px; padding: 1px 9px; font-size: 11px;
   color: var(--text-dim); }
-.log-stats { margin-bottom: 8px; }
-.log-panel { padding: 0; overflow: hidden; }
-#log-list { max-height: 60vh; overflow: auto;
-  font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
-.log-row { display: grid; grid-template-columns: 148px 52px 96px 1fr; gap: 10px;
-  padding: 5px 14px; border-bottom: 1px solid rgba(255,255,255,.04); align-items: start; }
-.log-row:hover { background: var(--bg-raised); }
-.log-ts { color: var(--text-dim); }
-.log-lvl { font-size: 10px; text-transform: uppercase; letter-spacing: .04em;
-  font-weight: 600; padding: 1px 6px; border-radius: 999px; text-align: center;
-  border: 1px solid transparent; }
-.lvl-debug { color: var(--text-dim); border-color: var(--line); }
-.lvl-info  { color: var(--accent); border-color: rgba(110,168,254,.35); }
-.lvl-warn  { color: var(--warn); border-color: rgba(251,191,36,.4); }
-.lvl-error { color: var(--bad); border-color: rgba(248,113,113,.45); }
-.log-error { background: rgba(248,113,113,.06); }
-.log-warn  { background: rgba(251,191,36,.05); }
-.log-cat { font-size: 11px; color: var(--text-dim); }
-.cat-boot { color: #c084fc; } .cat-integration { color: #38bdf8; }
-.cat-process { color: #4ade80; } .cat-local { color: #fbbf24; }
-.log-msg { word-break: break-word; }
-.log-detail { color: var(--text-dim); margin-top: 2px; opacity: .85; }
-
-@media (max-width: 900px) {
-  .log-row { grid-template-columns: 1fr; gap: 2px; }
-  .log-ts, .log-cat { font-size: 11px; }
-}
+.wsstate { margin-left: auto; font-size: 11px; color: var(--text-dim); }
+.wsstate.live { color: var(--ok); }
+.logview { background: #0b0d13; border: 1px solid var(--line); border-radius: 9px;
+  padding: 10px 14px; height: 56vh; overflow: auto;
+  font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12.5px; line-height: 1.7; }
+.logview .empty { color: var(--text-dim); }
+.logline { display: flex; gap: 10px; white-space: pre-wrap; word-break: break-word; }
+.logline .t { color: #5b6070; flex: 0 0 auto; }
+.logline .lv { flex: 0 0 auto; font-weight: 700; width: 42px; }
+.logline .tg { color: var(--text-dim); flex: 0 0 auto; }
+.logline .mg .dt { color: var(--text-dim); opacity: .8; }
+.logline.error .lv { color: var(--bad); }
+.logline.warn  .lv { color: var(--warn); }
+.logline.info  .lv { color: var(--accent); }
+.logline.debug .lv { color: #2dd4bf; }

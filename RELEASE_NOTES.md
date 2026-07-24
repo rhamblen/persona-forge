@@ -1,49 +1,31 @@
-# v0.3.0 — AI prompt assistant, service control, preview zoom
+# v0.3.1 — House-standard log page + stale-cache fix
 
-**Phase 3 opens.** Persona Forge can now author prompts with a local LLM, manage the
-Ollama model and the ComfyUI/Ollama containers from its own sidebar, and zoom previews.
+A polish release: the Logs tab now matches the esp32-shutter-hub web-UI log page, and
+browsers no longer serve a stale frontend after a deploy.
 
-## Added
-- **AI prompt assistant (Ollama).** A card above the three manual fields. Describe a
-  character in plain language and choose **Replace** (author all three fields fresh) or
-  **Modify** (edit the current prompt) — one **Suggest** fills character / style /
-  negative. Nothing is saved automatically: the suggestion lands in the editable fields
-  with a **reject-and-undo** link, and only becomes a version when you Save.
-  - Prose, not Danbooru tags; expression/emotion/pose words are kept out of the
-    character field (a baked-in smile leaks into anger/grief). Verified live.
-  - **Modify never destroys** a field the instruction didn't touch.
-  - Native HTTP to Ollama (`/api/generate`, `format:json`). Endpoints `GET /api/ai/status`,
-    `POST /api/ai/suggest-prompt`. Config `OLLAMA_URL` / `OLLAMA_MODEL`.
-- **Ollama in the sidebar, with Connect / Unload.** Shows `offline` / `idle` / `loaded`.
-  **Connect** preloads the model so the first suggestion is instant instead of a ~60s
-  cold load; **Unload** frees VRAM. Suggestions carry `keep_alive` (`OLLAMA_KEEP_ALIVE`,
-  default 30m) so the model auto-unloads when idle. `POST /api/ai/warm`, `/api/ai/unload`.
-- **Start / restart ComfyUI and Ollama from the app.** Both are containers on the same
-  host as Persona Forge. The sidebar offers **Start** (when stopped) and **Restart** for
-  each; a ComfyUI restart is refused while its queue is busy unless forced.
-  - Goes through a **scoped `tecnativa/docker-socket-proxy` sidecar**, never the raw
-    socket — limited to list/inspect + start/restart, socket mounted **read-only**, on an
-    **internal** network. Disabled unless `DOCKER_PROXY_URL` is set.
-  - `GET /api/containers/status`, `POST /api/containers/{key}/start`,
-    `POST /api/containers/{key}/restart?force=`.
-- **Preview zoom** — click-to-zoom lightbox (backdrop or Esc collapses) + open-in-new-tab.
+## Changed
+- **Logs tab reskinned to the house standard** — a dark monospace terminal
+  (`[time] LVL category: message`, level-coloured), a **Min level** dropdown plus
+  **colour-coded level toggle-chips**, a **category chip row** (`boot`/`integration`/
+  `process`/`local`), a buffered **count** pill, a **live** state indicator, **Auto-scroll**,
+  **Clear**, and **Previous runs** (the persisted file). Structured detail shows inline,
+  dimmed. Filtering is client-side over the last 500 entries.
 
 ## Fixed
-- **New personas defaulted to a photoreal checkpoint.** The default is now resolved
-  (exact `DEFAULT_CHECKPOINT=animi/NoobAI-XL-v1.1`, else first match of
-  `PREFERRED_CHECKPOINTS`, else position 0) instead of ComfyUI's folder order. Projects
-  created earlier are corrected in the UI without a db migration.
+- **Stale `app.js` after a deploy.** The frontend is now served with
+  `Cache-Control: no-cache`, so a browser always revalidates and picks up a new build on
+  the next load (unchanged assets are still cheap 304s). This is what caused the Ollama
+  sidebar to sit on "checking…" against a healthy 0.3.0 backend. **After this build lands,
+  future updates no longer need a hard refresh.**
 
-**Image:** `ghcr.io/rhamblen/persona-forge:0.3.0`
+**Image:** `ghcr.io/rhamblen/persona-forge:0.3.1`
 
 ## Upgrading
-`docker-compose.yml` now defines a **second service** (`docker-socket-proxy`) and a
-`networks:` block, and `docker/.env` gained the `OLLAMA_*`, `DEFAULT_CHECKPOINT`,
-`PREFERRED_CHECKPOINTS` and `DOCKER_*` variables. Re-copy `docker/`, review `docker/.env`
-(the Ollama URL and the two container names), then:
+No compose changes since 0.3.0. Re-copy `docker/` (or just pull), then:
 
 ```bash
 docker compose pull && docker compose up -d
 ```
 
-Container control is optional — comment out `DOCKER_PROXY_URL` to run without the proxy.
+Note: to leave the *stale-cache* state you may be in right now, this one time still needs a
+hard refresh (Ctrl+Shift+R) — from the next update onward the no-cache header handles it.
