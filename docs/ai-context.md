@@ -111,10 +111,12 @@ LAN; no Claude/Anthropic in the runtime loop.
 - **0.3.4:** Modify prompt tightened to a strict verbatim/minimal-edit instruction — it no
   longer drops or rewrites unrelated text (was deleting whole sentences for a one-word
   change). See `_MODE_HINT["modify"]` in `ollama.py`.
-- **0.4.0 (current):** Phase 4 — Dataset tab. Queue a batch of candidates (Generate 30 /
-  +10) at fresh seeds, pick same-person images in a grid, target N + progress. Non-blocking:
+- **0.4.0:** Phase 4 — Dataset tab. Queue a batch of candidates (Generate 30 / +10) at
+  fresh seeds, pick same-person images in a grid, target N + progress. Non-blocking:
   `dataset_jobs` table + reconcile-from-history into `images` (kind='dataset'). Endpoints
   under `/api/projects/{id}/dataset`. `projects.dataset_target` column added.
+- **0.4.1 (current):** dataset thumbnails have a hover ⤢ zoom badge that opens the shared
+  lightbox (reuses `openLightbox`); zoom is separate from click-to-select.
 - **Remaining:** 0.5 LoRA trainer · 0.6 pose/expression studio · 0.7 hardening · 1.0 release.
   **Phase 5 next** — training backend TBD (see PROJECT_PLAN: reuse ComfyUI-MCP `train_*`
   flows or a kohya/sd-scripts container). Selected dataset images are `images` rows with

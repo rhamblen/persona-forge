@@ -9,6 +9,16 @@ Every version below is a **published GitHub Release** with a matching
 
 ---
 
+## [0.4.1] — 2026-07-24
+
+### Added
+- **Zoom on dataset candidates.** Each thumbnail now has a hover **⤢** badge that opens the
+  full image in the lightbox (backdrop or Esc to close), so you can examine a snap closely
+  before deciding. The zoom badge is separate from the click-to-select body — zooming never
+  changes your selection.
+
+---
+
 ## [0.4.0] — 2026-07-24
 
 **Phase 4 opens: the Dataset builder.**

@@ -651,6 +651,7 @@ function renderDataset(data) {
        title="${esc(img.filename)}">
        <img src="${dsImageUrl(img)}" alt="candidate" loading="lazy" />
        <span class="ds-check">✓</span>
+       <span class="ds-zoom" role="button" aria-label="Zoom" title="Zoom to examine">⤢</span>
      </button>`).join("");
 }
 
@@ -690,8 +691,15 @@ async function datasetGenerate(count) {
 }
 
 $("ds-grid").addEventListener("click", (e) => {
-  const t = e.target.closest(".ds-thumb");
-  if (t) toggleDatasetSelect(parseInt(t.dataset.id, 10), t);
+  const thumb = e.target.closest(".ds-thumb");
+  if (!thumb) return;
+  // The zoom badge opens the lightbox and does NOT toggle selection.
+  if (e.target.closest(".ds-zoom")) {
+    const img = thumb.querySelector("img");
+    if (img) openLightbox(img.src);
+    return;
+  }
+  toggleDatasetSelect(parseInt(thumb.dataset.id, 10), thumb);
 });
 $("ds-generate").addEventListener("click", () => datasetGenerate(30));
 $("ds-more").addEventListener("click", () => datasetGenerate(10));

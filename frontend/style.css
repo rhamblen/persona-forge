@@ -255,6 +255,12 @@ code { background: var(--bg-raised); padding: 1px 5px; border-radius: 4px; font-
   color: #0b0d13; font-size: 13px; font-weight: 700; opacity: 0; transform: scale(.6);
   transition: opacity .12s, transform .12s; }
 .ds-thumb.sel .ds-check { opacity: 1; transform: scale(1); }
+.ds-thumb .ds-zoom { position: absolute; top: 6px; left: 6px; width: 24px; height: 24px;
+  display: grid; place-items: center; border-radius: 6px; background: rgba(11,13,19,.72);
+  color: var(--text); font-size: 14px; line-height: 1; cursor: zoom-in;
+  opacity: 0; transition: opacity .12s; }
+.ds-thumb:hover .ds-zoom, .ds-thumb:focus-within .ds-zoom { opacity: 1; }
+.ds-thumb .ds-zoom:hover { background: var(--accent); color: #0b0d13; }
 
 /* ---------- logs (terminal style, matches the esp32-shutter-hub web UI) ---------- */
 .logbar { display: flex; gap: 12px; align-items: center; justify-content: space-between;
