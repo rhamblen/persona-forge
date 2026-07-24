@@ -28,7 +28,9 @@ from pathlib import Path
 from typing import Any, Deque, Iterable
 
 CATEGORIES = ("boot", "integration", "process", "local", "api")
-LEVELS = ("debug", "info", "warn", "error")
+# Ordered least→most severe. `verbose` is the firehose (every handshake, each file
+# copied, each poll); `debug` is step-level detail; `info` is milestones; then warn/error.
+LEVELS = ("verbose", "debug", "info", "warn", "error")
 
 _RING_MAX = int(os.getenv("LOG_RING_SIZE", "2000"))
 _FILE_MAX_BYTES = int(os.getenv("LOG_FILE_MAX_BYTES", str(2 * 1024 * 1024)))
@@ -39,15 +41,19 @@ _ring: Deque[dict[str, Any]] = deque(maxlen=_RING_MAX)
 _lock = threading.Lock()
 _seq = 0
 
+_VERBOSE_NUM = 5  # below logging.DEBUG (10)
+logging.addLevelName(_VERBOSE_NUM, "VERB")
+
 _stdout = logging.getLogger("persona_forge")
 if not _stdout.handlers:
     _h = logging.StreamHandler(sys.stdout)
     _h.setFormatter(logging.Formatter("%(asctime)s %(levelname)-5s %(message)s"))
     _stdout.addHandler(_h)
-    _stdout.setLevel(logging.DEBUG)
+    _stdout.setLevel(_VERBOSE_NUM)  # let verbose reach `docker logs` too, not just the UI
     _stdout.propagate = False
 
-_LEVEL_TO_PY = {"debug": logging.DEBUG, "info": logging.INFO, "warn": logging.WARNING, "error": logging.ERROR}
+_LEVEL_TO_PY = {"verbose": _VERBOSE_NUM, "debug": logging.DEBUG, "info": logging.INFO,
+                "warn": logging.WARNING, "error": logging.ERROR}
 
 
 def _write_file(rec: dict[str, Any]) -> None:
@@ -84,6 +90,7 @@ def log(level: str, category: str, message: str, **detail: Any) -> None:
 
 
 # convenience wrappers -------------------------------------------------------
+def verbose(category: str, message: str, **d: Any) -> None: log("verbose", category, message, **d)
 def debug(category: str, message: str, **d: Any) -> None: log("debug", category, message, **d)
 def info(category: str, message: str, **d: Any) -> None: log("info", category, message, **d)
 def warn(category: str, message: str, **d: Any) -> None: log("warn", category, message, **d)

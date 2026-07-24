@@ -9,6 +9,29 @@ Every version below is a **published GitHub Release** with a matching
 
 ---
 
+## [0.5.1] — 2026-07-24
+
+**Logging overhaul: a `verbose` level, and logs that actually cover the whole pipeline.**
+
+### Added
+- **`verbose` log level** below `debug` — the firehose: every cross-system handshake, each
+  file copied between shares, each poll. Shown in the Logs tab (new VERBOSE chip + min-level
+  option, purple) and on stdout. Default view stays at INFO+, so verbose is opt-in.
+- **Pipeline instrumentation.** Logging now runs *through* the process, not just at boot,
+  with level chosen per step:
+  - `integration` (verbose) — the actual handshakes: `→ ComfyUI POST prompt/upload/history`,
+    `← …`, Ollama request/response, history polls, with sizes and timings.
+  - `process` (info) — milestones: batch queued, reconcile results, "staging N images
+    /builds → ComfyUI input/…", "staged X/Y".
+  - `local` (verbose) — the share copies: reading each dataset image off `/builds`, byte
+    counts; `warn` when a selected image is missing on the share.
+  - `warn`/`error` — a dataset image that failed to render, an upload ComfyUI rejected, a
+    file missing.
+  - `api` (verbose) — every inbound request (`method path → status`, ms).
+  - **Boot** now also handshakes ComfyUI and Ollama and logs whether each is reachable.
+
+---
+
 ## [0.5.0] — 2026-07-24
 
 **Phase 5 opens: the LoRA trainer (foundation).**

@@ -184,6 +184,8 @@ async def suggest_prompt(instruction: str, mode: str, current: dict[str, str],
 
     logs.info("integration", "requesting prompt suggestion from Ollama",
               model=model, mode=mode, url=OLLAMA_URL)
+    logs.verbose("integration", "→ Ollama POST generate",
+                 instruction_len=len(instruction), keep_alive=OLLAMA_KEEP_ALIVE)
     try:
         async with httpx.AsyncClient(timeout=OLLAMA_TIMEOUT) as c:
             r = await c.post(f"{OLLAMA_URL}/api/generate", json=payload)
@@ -192,6 +194,7 @@ async def suggest_prompt(instruction: str, mode: str, current: dict[str, str],
     except httpx.HTTPError as exc:
         logs.error("integration", f"Ollama request failed: {exc}", url=OLLAMA_URL)
         raise OllamaError(f"Ollama request failed: {exc}") from exc
+    logs.verbose("integration", "← Ollama generate", reply_chars=len(reply))
 
     data = _extract_json(reply)
     out = {

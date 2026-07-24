@@ -117,9 +117,15 @@ LAN; no Claude/Anthropic in the runtime loop.
   under `/api/projects/{id}/dataset`. `projects.dataset_target` column added.
 - **0.4.1:** dataset thumbnails have a hover ⤢ zoom badge that opens the shared lightbox
   (reuses `openLightbox`); zoom is separate from click-to-select.
-- **0.5.0 (current):** Phase 5 foundation — LoRA tab (trigger word, staged status, trained
-  LoRAs) + dataset staging. Endpoints under `/api/projects/{id}/lora`. `projects.trigger_word`
-  column. Training approach settled (see below).
+- **0.5.0:** Phase 5 foundation — LoRA tab (trigger word, staged status, trained LoRAs) +
+  dataset staging. Endpoints under `/api/projects/{id}/lora`. `projects.trigger_word` column.
+- **0.5.1 (current):** logging overhaul — added a `verbose` level (below debug) and
+  instrumented the pipeline throughout (not just boot). Log-level convention:
+  **verbose** = cross-system handshakes / per-file share copies / polls (integration+local);
+  **debug** = step detail; **info** = milestones (process); **warn** = recoverable (missing
+  file, failed render); **error** = failures. `api` category logs every inbound request at
+  verbose. Boot handshakes ComfyUI+Ollama. UI: VERBOSE chip + min-level; verbose reaches
+  stdout too. When adding new pipeline steps, log to this convention.
 
 ## Phase 5 (LoRA trainer) — settled approach & knowns
 

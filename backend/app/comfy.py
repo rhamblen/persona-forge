@@ -42,10 +42,13 @@ async def system_stats() -> dict[str, Any]:
 async def object_info(node: str | None = None) -> dict[str, Any]:
     """Node schemas — used to populate model/sampler dropdowns from live state."""
     url = f"{COMFYUI_URL}/object_info" + (f"/{node}" if node else "")
+    logs.verbose("integration", "→ ComfyUI GET object_info", node=node or "(all)")
     async with httpx.AsyncClient(timeout=30.0) as c:
         r = await c.get(url)
         r.raise_for_status()
-        return r.json()
+        data = r.json()
+    logs.verbose("integration", "← ComfyUI object_info", node=node or "(all)", classes=len(data))
+    return data
 
 
 async def list_models(kind: str = "checkpoints") -> list[str]:
@@ -56,9 +59,11 @@ async def list_models(kind: str = "checkpoints") -> list[str]:
     }.get(kind, ("CheckpointLoaderSimple", "ckpt_name"))
     info = await object_info(node)
     try:
-        return list(info[node]["input"]["required"][field][0])
+        models = list(info[node]["input"]["required"][field][0])
     except (KeyError, IndexError, TypeError):
-        return []
+        models = []
+    logs.verbose("integration", f"read {len(models)} {kind} from ComfyUI", node=node)
+    return models
 
 
 def pick_default_checkpoint(models: list[str]) -> str:
@@ -99,7 +104,8 @@ async def queue_size() -> int:
 
 async def submit(graph: dict[str, Any], client_id: str = "persona-forge") -> str:
     """POST an API-format workflow. Returns prompt_id."""
-    logs.debug("integration", "submitting workflow to ComfyUI", nodes=len(graph), url=COMFYUI_URL)
+    logs.verbose("integration", "→ ComfyUI POST prompt", nodes=len(graph), client_id=client_id,
+                 node_types=sorted({n.get("class_type") for n in graph.values() if isinstance(n, dict)}))
     async with httpx.AsyncClient(timeout=60.0) as c:
         r = await c.post(f"{COMFYUI_URL}/prompt", json={"prompt": graph, "client_id": client_id})
         if r.status_code >= 400:
@@ -117,8 +123,11 @@ async def submit(graph: dict[str, Any], client_id: str = "persona-forge") -> str
 async def wait(prompt_id: str, timeout_s: float = 900.0, poll_s: float = 2.0) -> dict[str, Any]:
     """Poll /history until the prompt finishes. Returns the history entry."""
     deadline = asyncio.get_event_loop().time() + timeout_s
+    polls = 0
     async with httpx.AsyncClient(timeout=15.0) as c:
         while asyncio.get_event_loop().time() < deadline:
+            polls += 1
+            logs.verbose("integration", "polling ComfyUI history", prompt_id=prompt_id, poll=polls)
             r = await c.get(f"{COMFYUI_URL}/history/{prompt_id}")
             if r.status_code == 200:
                 hist = r.json()
@@ -145,11 +154,18 @@ async def upload_image(data: bytes, filename: str, subfolder: str = "",
     """
     files = {"image": (filename, data, "image/png")}
     form = {"subfolder": subfolder, "type": "input", "overwrite": "true" if overwrite else "false"}
+    logs.verbose("integration", "→ ComfyUI POST upload/image",
+                 filename=filename, subfolder=subfolder, bytes=len(data))
     async with httpx.AsyncClient(timeout=30.0) as c:
         r = await c.post(f"{COMFYUI_URL}/upload/image", data=form, files=files)
         if r.status_code >= 400:
+            logs.error("integration", f"ComfyUI upload rejected ({r.status_code})",
+                       filename=filename, body=r.text[:200])
             raise ComfyError(f"upload failed ({r.status_code}): {r.text[:200]}")
-        return r.json()
+        out = r.json()
+    logs.verbose("integration", "← ComfyUI upload/image ok",
+                 filename=filename, subfolder=out.get("subfolder"))
+    return out
 
 
 def dataset_folders() -> list[str]:
@@ -159,10 +175,13 @@ def dataset_folders() -> list[str]:
 
 async def history_all(max_items: int = 400) -> dict[str, Any]:
     """The whole recent history keyed by prompt_id — one call to reconcile a batch."""
+    logs.verbose("integration", "→ ComfyUI GET history", max_items=max_items)
     async with httpx.AsyncClient(timeout=15.0) as c:
         r = await c.get(f"{COMFYUI_URL}/history", params={"max_items": max_items})
         r.raise_for_status()
-        return r.json()
+        data = r.json()
+    logs.verbose("integration", "← ComfyUI history", entries=len(data))
+    return data
 
 
 def status_of(entry: dict[str, Any]) -> str | None:

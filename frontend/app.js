@@ -524,11 +524,11 @@ document.addEventListener("keydown", (e) => {
 
 /* ---------------- logs (terminal style — matches the house standard) ---------------- */
 
-const LOG_RANK = { debug: 0, info: 1, warn: 2, error: 3 };
+const LOG_RANK = { verbose: 0, debug: 1, info: 2, warn: 3, error: 4 };
 let logTimer = null;
 let logState = {
   minLevel: "info",
-  levelOn: { error: 1, warn: 1, info: 1, debug: 1 },
+  levelOn: { error: 1, warn: 1, info: 1, debug: 1, verbose: 1 },
   catOn: { boot: 1, integration: 1, process: 1, local: 1 },
   search: "",
   autoscroll: true,

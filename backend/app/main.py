@@ -57,11 +57,28 @@ VERSION = _version_file.read_text().strip() if _version_file.is_file() else "0.0
 app = FastAPI(title="Persona Forge", version=VERSION)
 
 
+@app.middleware("http")
+async def _log_requests(request: Any, call_next: Any):
+    """Every inbound request, at verbose — the firehose for tracing a flow end-to-end."""
+    if request.url.path.startswith("/static"):
+        return await call_next(request)
+    t0 = time.perf_counter()
+    response = await call_next(request)
+    ms = round((time.perf_counter() - t0) * 1000)
+    logs.verbose("api", f"{request.method} {request.url.path} → {response.status_code}", ms=ms)
+    return response
+
+
 @app.on_event("startup")
-def _startup() -> None:
+async def _startup() -> None:
     logs.info("boot", f"Persona Forge {VERSION} starting")
     logs.info("boot", "config", comfyui_url=COMFYUI_URL, builds_root=str(BUILDS_ROOT),
               db_dir=str(DB_DIR), log_dir=str(LOG_DIR), frontend=str(FRONTEND_DIR))
+    logs.verbose("boot", "environment",
+                 ollama_url=ollama.OLLAMA_URL, ollama_model=ollama.OLLAMA_MODEL,
+                 default_checkpoint=comfy.DEFAULT_CHECKPOINT,
+                 docker_proxy=docker_ctl.DOCKER_PROXY_URL or "(disabled)",
+                 puid=BUILD_UID, pgid=BUILD_GID)
     try:
         db.init_db()
         logs.info("boot", "database ready", path=str(db.DB_PATH))
@@ -82,6 +99,19 @@ def _startup() -> None:
         probs = workflows.validate_manifest(m["id"]) if m.get("id") else []
         if probs:
             logs.warn("boot", f"workflow '{m.get('id')}' manifest problems", problems=probs)
+
+    # Handshake with the external systems at boot so the log shows what's reachable.
+    try:
+        stats = await comfy.system_stats()
+        ver = (stats.get("system") or {}).get("comfyui_version", "?")
+        logs.info("integration", "ComfyUI reachable at boot", url=COMFYUI_URL, comfyui_version=ver)
+    except Exception as exc:  # noqa: BLE001
+        logs.warn("integration", f"ComfyUI not reachable at boot: {exc}", url=COMFYUI_URL)
+    ost = await ollama.status()
+    (logs.info if ost.get("reachable") else logs.warn)(
+        "integration", f"Ollama {'reachable' if ost.get('reachable') else 'not reachable'} at boot",
+        url=ollama.OLLAMA_URL, models=len(ost.get("models", [])))
+
     logs.info("boot", "startup complete")
 
 
@@ -754,20 +784,24 @@ async def _reconcile_dataset(project_id: int) -> None:
         ).fetchall()
     if not pending:
         return
+    logs.verbose("process", f"reconciling {len(pending)} pending dataset job(s) against history",
+                 project_id=project_id)
     try:
         hist = await comfy.history_all()
     except Exception as exc:  # noqa: BLE001
         logs.warn("integration", f"could not read ComfyUI history to reconcile dataset: {exc}")
         return
-    done = 0
+    done, failed, still = 0, 0, 0
     with db.connect() as conn:
         for job in pending:
             entry = hist.get(job["prompt_id"])
             if not entry:
+                still += 1
                 continue  # still queued/running, or aged out of history
             st = comfy.status_of(entry)
             if st == "success":
-                for img in comfy.outputs_from(entry):
+                imgs = comfy.outputs_from(entry)
+                for img in imgs:
                     conn.execute(
                         """INSERT INTO images (project_id, version_id, filename, subfolder, kind)
                            VALUES (?, NULL, ?, ?, 'dataset')""",
@@ -775,10 +809,15 @@ async def _reconcile_dataset(project_id: int) -> None:
                     )
                 conn.execute("UPDATE dataset_jobs SET status = 'done' WHERE id = ?", (job["id"],))
                 done += 1
+                logs.verbose("process", "dataset image finished",
+                             prompt_id=job["prompt_id"], files=[i["filename"] for i in imgs])
             elif st == "error":
                 conn.execute("UPDATE dataset_jobs SET status = 'error' WHERE id = ?", (job["id"],))
-    if done:
-        logs.info("process", f"dataset: {done} image(s) finished", project_id=project_id)
+                failed += 1
+                logs.warn("process", "a dataset image failed to render", prompt_id=job["prompt_id"])
+    if done or failed:
+        logs.info("process", f"dataset reconcile: {done} finished, {failed} failed, {still} still running",
+                  project_id=project_id)
 
 
 class DatasetGenerateRequest(BaseModel):
@@ -794,13 +833,16 @@ async def dataset_generate(project_id: int, body: DatasetGenerateRequest) -> dic
     count = max(1, min(body.count, MAX_DATASET_BATCH))
     base = _version_prompt_params(version)
 
+    logs.info("process", f"dataset: queuing a batch of {count} at fresh seeds",
+              project_id=project_id, slug=slug)
     queued = 0
     with db.connect() as conn:
-        for _ in range(count):
-            params = {**base, "seed": random.randint(1, 2**31 - 1),
-                      "output_prefix": f"{slug}/images/ds"}
+        for i in range(count):
+            seed = random.randint(1, 2**31 - 1)
+            params = {**base, "seed": seed, "output_prefix": f"{slug}/images/ds"}
             try:
                 graph = workflows.build_graph("base-character", params)
+                logs.verbose("process", f"queuing dataset image {i + 1}/{count}", seed=seed)
                 prompt_id = await comfy.submit(graph)
             except (workflows.WorkflowError, comfy.ComfyError) as exc:
                 # stop the batch but keep whatever already queued
@@ -956,19 +998,28 @@ async def lora_stage(project_id: int) -> dict:
             (project_id,),
         ).fetchall()
     if not rows:
+        logs.warn("process", "stage requested but no images are selected", project_id=project_id)
         raise HTTPException(400, "no images selected — pick some in the Dataset tab first")
 
+    logs.info("process", f"staging {len(rows)} selected image(s): /builds → ComfyUI input/{folder}",
+              project_id=project_id, source=str(BUILDS_ROOT / slug / "images"))
     staged, errors = 0, []
     for r in rows:
         src = BUILDS_ROOT / r["subfolder"] / r["filename"]
         try:
+            logs.verbose("local", "reading dataset image from builds share", path=str(src))
             data = src.read_bytes()
-            await comfy.upload_image(data, r["filename"], folder)
+            logs.verbose("local", "read image bytes", filename=r["filename"], bytes=len(data))
+            await comfy.upload_image(data, r["filename"], folder)  # logs its own handshake
             staged += 1
+        except FileNotFoundError:
+            logs.warn("local", "selected image is missing on the builds share", path=str(src))
+            errors.append(f"{r['filename']}: not found on /builds")
         except Exception as exc:  # noqa: BLE001
+            logs.error("integration", f"failed to stage {r['filename']}: {exc}", path=str(src))
             errors.append(f"{r['filename']}: {exc}")
-    logs.info("process", f"LoRA: staged {staged}/{len(rows)} image(s) to input/{folder}",
-              project_id=project_id, errors=len(errors))
+    logs.info("process", f"staged {staged}/{len(rows)} image(s) to ComfyUI input/{folder}",
+              project_id=project_id, staged=staged, failed=len(errors))
     if staged == 0:
         raise HTTPException(502, f"could not stage any images: {errors[:3]}")
     return {"staged": staged, "total": len(rows), "input_folder": folder, "errors": errors[:5]}

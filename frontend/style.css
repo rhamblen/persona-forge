@@ -293,6 +293,7 @@ code { background: var(--bg-raised); padding: 1px 5px; border-radius: 4px; font-
 .chip[data-lvl=warn]  { color: var(--warn); border-color: var(--warn); }
 .chip[data-lvl=info]  { color: var(--accent); border-color: var(--accent); }
 .chip[data-lvl=debug] { color: #2dd4bf; border-color: #2dd4bf; }
+.chip[data-lvl=verbose] { color: #a78bfa; border-color: #a78bfa; }
 .chip.cat.on { color: var(--text); border-color: var(--accent); }
 .chip#log-autoscroll.on, .chip#log-persisted.on { color: var(--accent); border-color: var(--accent); }
 .loghead { display: flex; gap: 10px; align-items: center; margin-bottom: 8px; }
@@ -313,3 +314,4 @@ code { background: var(--bg-raised); padding: 1px 5px; border-radius: 4px; font-
 .logline.warn  .lv { color: var(--warn); }
 .logline.info  .lv { color: var(--accent); }
 .logline.debug .lv { color: #2dd4bf; }
+.logline.verbose .lv { color: #a78bfa; }

@@ -1,20 +1,25 @@
-# v0.5.0 — LoRA trainer foundation (Phase 5)
+# v0.5.1 — Logging overhaul + verbose level
 
-Phase 5 opens. Training will run as a **ComfyUI workflow** (`TrainLoraNode` + Florence2
-captioning) — no separate trainer container. This release lays the groundwork; captioning
-and the training run follow in 0.5.1 / 0.5.2.
+Logs now cover the whole pipeline, not just boot, and there's a `verbose` firehose level.
 
 ## Added
-- **LoRA tab.** Selected-image count, an editable **trigger word** (the token the trained
-  LoRA binds to, default `pf_<slug>`), staged status, and any trained LoRAs in `{slug}/lora/`.
-- **Dataset staging.** "Stage dataset to ComfyUI" uploads your selected images into ComfyUI's
-  `input/pf-<slug>` folder over its HTTP `/upload/image` API, so the native dataset loader can
-  read them **without any extra mount** (ComfyUI's input dir isn't on the shared `/builds`
-  volume — validated that the loader picks up the uploaded folder immediately).
-- Endpoints under `/api/projects/{id}/lora` (status / trigger / stage); new
-  `projects.trigger_word` column (auto-migrated on boot).
+- **`verbose` log level** below `debug` — every cross-system handshake, each file copied
+  between shares, each poll. New VERBOSE chip + min-level option in the Logs tab (purple),
+  and it reaches stdout too. Default view stays at INFO+, so verbose is opt-in.
+- **Pipeline instrumentation**, level chosen per step:
+  - **integration (verbose)** — the real handshakes: `→ ComfyUI POST prompt / upload/image /
+    history`, `←` responses, Ollama request/response, history polls, with sizes/timings.
+  - **process (info)** — milestones: batch queued, reconcile results, "staging N images
+    /builds → ComfyUI input/…", "staged X/Y".
+  - **local (verbose)** — the share copies: reading each dataset image off `/builds`, byte
+    counts; **warn** if a selected image is missing on the share.
+  - **warn/error** — a dataset image that failed to render, an upload ComfyUI rejected.
+  - **api (verbose)** — every inbound request (`method path → status`, ms).
+  - **Boot** now also handshakes ComfyUI + Ollama and logs whether each is reachable.
 
-**Image:** `ghcr.io/rhamblen/persona-forge:0.5.0`
+To see it all: Logs tab → set **Min level** to VERBOSE.
+
+**Image:** `ghcr.io/rhamblen/persona-forge:0.5.1`
 
 ## Upgrading
 No compose changes since 0.3.0. Pull and restart:
@@ -22,6 +27,3 @@ No compose changes since 0.3.0. Pull and restart:
 ```bash
 docker compose pull && docker compose up -d
 ```
-
-Next: 0.5.1 auto-captioning (Florence2, trigger-word + light caption), then 0.5.2 the
-`TrainLoraNode` run with progress monitoring.
