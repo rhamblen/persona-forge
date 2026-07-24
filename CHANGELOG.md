@@ -9,6 +9,21 @@ Every version below is a **published GitHub Release** with a matching
 
 ---
 
+## [0.3.2] — 2026-07-24
+
+**See what the AI changed.**
+
+### Added
+- **AI suggestions now show a word-level diff.** After Replace or Modify, a per-field
+  diff appears under the AI box: **added/changed text highlighted green**, **removed text
+  in red strikethrough**. Unchanged fields are omitted. This makes edits easy to scan and,
+  more importantly, surfaces anything the model *dropped* — Modify is instructed to
+  preserve untouched text and can never blank a whole field, but it is a local model, so
+  the red diff is the real safeguard. The suggestion still lands in the editable fields
+  with the existing reject-and-undo. Diff is client-side (LCS over whitespace tokens).
+
+---
+
 ## [0.3.1] — 2026-07-24
 
 **Log page reskinned to the house standard; stale-frontend caching fixed.**

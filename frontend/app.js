@@ -355,30 +355,75 @@ $("ai-mode").addEventListener("click", (e) => {
   [...$("ai-mode").children].forEach((c) => c.classList.toggle("sel", c === t));
 });
 
+// Word-level diff (LCS over whitespace-preserving tokens). Returns HTML with
+// <ins> for added words and <del> for removed words; unchanged text is plain.
+function wordDiff(oldStr, newStr) {
+  const a = (oldStr || "").split(/(\s+)/);
+  const b = (newStr || "").split(/(\s+)/);
+  const n = a.length, m = b.length;
+  const dp = Array.from({ length: n + 1 }, () => new Int32Array(m + 1));
+  for (let i = n - 1; i >= 0; i--)
+    for (let j = m - 1; j >= 0; j--)
+      dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+  const out = [];
+  const push = (cls, tok) => {
+    if (!tok) return;
+    const last = out[out.length - 1];
+    if (last && last.cls === cls) last.tok += tok; else out.push({ cls, tok });
+  };
+  let i = 0, j = 0;
+  while (i < n && j < m) {
+    if (a[i] === b[j]) { push("eq", a[i]); i++; j++; }
+    else if (dp[i + 1][j] >= dp[i][j + 1]) { push("del", a[i]); i++; }
+    else { push("ins", b[j]); j++; }
+  }
+  while (i < n) { push("del", a[i++]); }
+  while (j < m) { push("ins", b[j++]); }
+  return out.map((p) => p.cls === "eq" ? esc(p.tok)
+    : `<${p.cls}>${esc(p.tok)}</${p.cls}>`).join("");
+}
+
+function renderAiDiff(before, after) {
+  const box = $("ai-diff");
+  const fields = [["Character", "character"], ["Style", "style"], ["Negative", "negative"]];
+  const rows = fields
+    .filter(([, k]) => (before[k] || "") !== (after[k] || ""))
+    .map(([label, k]) =>
+      `<div class="ai-diff-row"><span class="ai-diff-label">${label}</span>
+        <div class="ai-diff-text">${wordDiff(before[k] || "", after[k] || "") || '<span class="muted">(empty)</span>'}</div>
+      </div>`);
+  if (!rows.length) {
+    box.innerHTML = '<div class="ai-diff-head muted">No changes.</div>';
+    box.hidden = false;
+    return;
+  }
+  box.innerHTML = `<div class="ai-diff-head"><ins>added</ins> · <del>removed</del></div>` + rows.join("");
+  box.hidden = false;
+}
+
+function clearAiDiff() { const b = $("ai-diff"); b.hidden = true; b.innerHTML = ""; }
+
 async function aiSuggest() {
   const instruction = $("ai-instruction").value.trim();
   if (!instruction) return msg($("ai-msg"), "Describe what you want first.", "bad");
   const btn = $("ai-suggest-btn");
   btn.disabled = true;
+  clearAiDiff();
   msg($("ai-msg"), `Asking Ollama to ${aiMode === "modify" ? "edit the prompt" : "write a prompt"}… (the first call loads the model, up to ~60s)`);
   try {
+    const before = { character: $("f-character").value, style: $("f-style").value, negative: $("f-negative").value };
     const { suggestion } = await api("/api/ai/suggest-prompt", {
       method: "POST",
-      body: JSON.stringify({
-        instruction,
-        mode: aiMode,
-        character: $("f-character").value,
-        style: $("f-style").value,
-        negative: $("f-negative").value,
-      }),
+      body: JSON.stringify({ instruction, mode: aiMode, ...before }),
     });
-    aiUndo = { character: $("f-character").value, style: $("f-style").value, negative: $("f-negative").value };
+    aiUndo = before;
     $("f-character").value = suggestion.character || "";
     $("f-style").value = suggestion.style || "";
     $("f-negative").value = suggestion.negative || "";
+    renderAiDiff(before, suggestion);
     $("ai-msg").innerHTML =
-      `<span class="ok">Applied to the three fields.</span> Edit freely, then Save as new version — or ` +
-      `<a href="#" id="ai-undo">reject and undo</a>.`;
+      `<span class="ok">Applied.</span> Changes are highlighted below (<del>red = removed</del>). ` +
+      `Edit freely, then Save — or <a href="#" id="ai-undo">reject and undo</a>.`;
     $("ai-undo").addEventListener("click", (e) => { e.preventDefault(); aiRevert(); });
   } catch (e) {
     msg($("ai-msg"), e.message, "bad");
@@ -393,6 +438,7 @@ function aiRevert() {
   $("f-style").value = aiUndo.style;
   $("f-negative").value = aiUndo.negative;
   aiUndo = null;
+  clearAiDiff();
   msg($("ai-msg"), "Reverted to the previous prompt.", "ok");
 }
 

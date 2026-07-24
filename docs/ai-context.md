@@ -101,9 +101,12 @@ LAN; no Claude/Anthropic in the runtime loop.
 - **0.3.0:** AI prompt assistant (Ollama Replace/Modify), Ollama sidebar Connect/Unload +
   idle auto-unload, container Start/Restart via socket proxy, preview zoom, anime-first
   checkpoint default.
-- **0.3.1 (current):** Logs tab reskinned to the house terminal-style standard (matches
-  the esp32-shutter-hub web UI); frontend served `Cache-Control: no-cache` so deploys are
-  never served stale (fixes a browser caching a new page against old JS).
+- **0.3.1:** Logs tab reskinned to the house terminal-style standard (matches the
+  esp32-shutter-hub web UI); frontend served `Cache-Control: no-cache` so deploys are never
+  served stale (fixes a browser caching a new page against old JS).
+- **0.3.2 (current):** AI suggestions show a client-side word-level diff (added=green,
+  removed=red strikethrough) so edits — and any word the local model dropped — are visible
+  before saving.
 - **Remaining:** 0.4 dataset builder · 0.5 LoRA trainer · 0.6 pose/expression studio ·
   0.7 hardening · 1.0 release.
 

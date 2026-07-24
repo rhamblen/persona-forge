@@ -140,6 +140,21 @@ body.no-scroll { overflow: hidden; }
 .ai-controls .btn { margin-left: auto; }
 .ai-assist .hint { margin: 8px 0 0; }
 .ai-assist .hint a { color: var(--accent); }
+.ai-assist .hint del { color: var(--bad); text-decoration: line-through; }
+
+/* AI change diff — added words highlighted, removed words red strikethrough */
+.ai-diff { margin-top: 10px; border-top: 1px solid var(--line); padding-top: 8px; }
+.ai-diff-head { font-size: 11px; color: var(--text-dim); margin-bottom: 6px; }
+.ai-diff-head ins, .ai-diff-head del { padding: 0 5px; border-radius: 3px; }
+.ai-diff-row { display: flex; gap: 8px; margin: 5px 0; }
+.ai-diff-label { flex: 0 0 72px; color: var(--text-dim); text-transform: uppercase;
+  font-size: 10px; letter-spacing: .06em; padding-top: 3px; }
+.ai-diff-text { flex: 1; white-space: pre-wrap; word-break: break-word;
+  font-size: 12.5px; line-height: 1.6; }
+.ai-diff ins { background: rgba(74,222,128,.18); color: var(--ok); text-decoration: none;
+  border-radius: 3px; }
+.ai-diff del { background: rgba(248,113,113,.16); color: var(--bad);
+  text-decoration: line-through; border-radius: 3px; }
 .spinner { width: 26px; height: 26px; border: 3px solid var(--line);
   border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
