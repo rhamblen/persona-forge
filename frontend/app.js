@@ -223,6 +223,61 @@ async function generate() {
   }
 }
 
+/* ---------------- logs ---------------- */
+
+let logTimer = null;
+
+function renderLogs(entries, append = false) {
+  const box = $("log-list");
+  if (!entries.length && !append) { box.innerHTML = '<p class="muted">No matching entries.</p>'; return; }
+  const html = entries.map((e) => {
+    const det = e.detail ? `<div class="log-detail">${esc(JSON.stringify(e.detail))}</div>` : "";
+    const t = (e.ts || "").replace("T", " ").replace(/\+.*$/, "").slice(0, 23);
+    return `<div class="log-row log-${esc(e.level)}">
+      <span class="log-ts">${esc(t)}</span>
+      <span class="log-lvl lvl-${esc(e.level)}">${esc(e.level)}</span>
+      <span class="log-cat cat-${esc(e.category)}">${esc(e.category)}</span>
+      <span class="log-msg">${esc(e.message)}${det}</span>
+    </div>`;
+  }).join("");
+  if (append) box.insertAdjacentHTML("beforeend", html); else box.innerHTML = html;
+  if ($("log-follow").checked) box.scrollTop = box.scrollHeight;
+}
+
+async function refreshLogs() {
+  const qs = new URLSearchParams({
+    level: $("log-level").value,
+    category: $("log-category").value,
+    limit: "400",
+  });
+  const search = $("log-search").value.trim();
+  if (search) qs.set("search", search);
+  try {
+    const data = await api(`/api/logs?${qs}`);
+    renderLogs(data.entries);
+    const st = data.stats;
+    $("log-stats").textContent =
+      `${st.buffered}/${st.ring_max} buffered · ` +
+      Object.entries(st.by_level).map(([k, v]) => `${k}:${v}`).join("  ") +
+      ` · file ${(st.file_bytes / 1024).toFixed(0)} KB`;
+  } catch (e) {
+    $("log-list").innerHTML = `<p class="bad">${esc(e.message)}</p>`;
+  }
+}
+
+async function loadPersistedLogs() {
+  try {
+    const data = await api("/api/logs/persisted?limit=500");
+    renderLogs(data.entries);
+    $("log-stats").textContent = `showing ${data.entries.length} entries from the log file (previous runs included)`;
+  } catch (e) { $("log-list").innerHTML = `<p class="bad">${esc(e.message)}</p>`; }
+}
+
+function startLogPolling(on) {
+  clearInterval(logTimer);
+  if (on) logTimer = setInterval(() => { if (!$("view-logs").hidden) refreshLogs(); }, 4000);
+}
+
 /* ---------------- wiring ---------------- */
 
 function showView(name) {
@@ -232,7 +287,18 @@ function showView(name) {
 }
 
 document.querySelectorAll(".nav-item[data-view]").forEach((a) =>
-  a.addEventListener("click", (e) => { e.preventDefault(); showView(a.dataset.view); refreshStatus(); }));
+  a.addEventListener("click", (e) => {
+    e.preventDefault();
+    showView(a.dataset.view);
+    refreshStatus();
+    if (a.dataset.view === "logs") refreshLogs();
+  }));
+
+["log-level", "log-category"].forEach((id) => $(id).addEventListener("change", refreshLogs));
+$("log-search").addEventListener("input", () => { clearTimeout(window._ls); window._ls = setTimeout(refreshLogs, 300); });
+$("log-refresh").addEventListener("click", refreshLogs);
+$("log-persisted").addEventListener("click", loadPersistedLogs);
+$("log-follow").addEventListener("change", (e) => startLogPolling(e.target.checked));
 
 $("project-select").addEventListener("change", (e) => {
   state.projectId = parseInt(e.target.value, 10) || null;
@@ -259,29 +325,54 @@ $("signoff-btn").addEventListener("click", async () => {
   } catch (e) { msg($("studio-msg"), e.message, "bad"); }
 });
 
-// modal
-const openModal = () => { $("modal").hidden = false; $("np-name").value = ""; msg($("np-msg"), ""); $("np-name").focus(); };
-$("new-project-btn").addEventListener("click", openModal);
-$("empty-new-project").addEventListener("click", openModal);
+// modal — shared by "new" and "clone"
+let modalMode = "new";
+function openModal(mode = "new") {
+  modalMode = mode;
+  const cloning = mode === "clone";
+  $("np-title").textContent = cloning ? "Clone persona" : "New persona";
+  $("np-blurb").innerHTML = cloning
+    ? "Copies the current prompt into a new persona so you can vary it — e.g. the same character skiing vs. on the beach. Identity is kept, so the parent's LoRA can be reused later."
+    : "Creates a build folder with <code>lora/</code> and <code>images/</code> in the shared builds root.";
+  $("np-style-wrap").hidden = !cloning;
+  $("np-name").value = "";
+  $("np-style").value = cloning ? ($("f-style").value || "") : "";
+  msg($("np-msg"), "");
+  $("modal").hidden = false;
+  $("np-name").focus();
+}
+$("new-project-btn").addEventListener("click", () => openModal("new"));
+$("empty-new-project").addEventListener("click", () => openModal("new"));
+$("clone-project-btn").addEventListener("click", () => {
+  if (!state.projectId) return msg($("studio-msg"), "Select a persona to clone first.", "bad");
+  openModal("clone");
+});
 $("np-cancel").addEventListener("click", () => ($("modal").hidden = true));
 $("np-create").addEventListener("click", async () => {
   const name = $("np-name").value.trim();
   if (!name) return msg($("np-msg"), "Give it a name.", "bad");
   try {
-    const detail = await api("/api/projects", {
-      method: "POST",
-      body: JSON.stringify({
-        name,
-        character: $("f-character").value || "",
-        style: $("f-style").value || "",
-        negative: $("f-negative").value || "",
-        checkpoint: $("f-checkpoint").value || "",
-        seed: parseInt($("f-seed").value || "123456789", 10),
-      }),
-    });
+    const detail = modalMode === "clone"
+      ? await api(`/api/projects/${state.projectId}/clone`, {
+          method: "POST",
+          body: JSON.stringify({ name, style: $("np-style").value }),
+        })
+      : await api("/api/projects", {
+          method: "POST",
+          body: JSON.stringify({
+            name,
+            character: $("f-character").value || "",
+            style: $("f-style").value || "",
+            negative: $("f-negative").value || "",
+            checkpoint: $("f-checkpoint").value || "",
+            seed: parseInt($("f-seed").value || "123456789", 10),
+          }),
+        });
     $("modal").hidden = true;
     await loadProjects(detail.project.id);
-    msg($("studio-msg"), `Created "${detail.project.name}" → ${detail.build_dir}`, "ok");
+    msg($("studio-msg"),
+      (modalMode === "clone" ? `Cloned to "${detail.project.name}" → ` : `Created "${detail.project.name}" → `) + detail.build_dir,
+      "ok");
   } catch (e) { msg($("np-msg"), e.message, "bad"); }
 });
 
@@ -294,4 +385,5 @@ $("np-create").addEventListener("click", async () => {
   await loadCheckpoints();
   await loadProjects().catch((e) => msg($("studio-msg"), e.message, "bad"));
   setInterval(refreshStatus, POLL_MS);
+  startLogPolling(true);
 })();

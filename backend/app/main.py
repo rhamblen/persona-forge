@@ -21,10 +21,16 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import comfy, db, workflows
+from . import comfy, db, logs, workflows
 
 COMFYUI_URL = comfy.COMFYUI_URL
 BUILDS_ROOT = Path(os.getenv("BUILDS_ROOT", "/builds"))
+# ComfyUI runs in a DIFFERENT container under a different user. Folders we create
+# in the shared builds tree must therefore be owned/permissioned so ComfyUI can
+# write into them, otherwise SaveImage fails with EACCES. Unraid default is
+# nobody:users = 99:100.
+BUILD_UID = int(os.getenv("PUID", "99"))
+BUILD_GID = int(os.getenv("PGID", "100"))
 APPDATA_ROOT = Path(os.getenv("APPDATA_ROOT", "/appdata"))
 def _resolve(name: str, must_be_dir: bool = True) -> Path:
     """Resolve a sibling asset in both layouts.
@@ -49,7 +55,29 @@ app = FastAPI(title="Persona Forge", version=VERSION)
 
 @app.on_event("startup")
 def _startup() -> None:
-    db.init_db()
+    logs.info("boot", f"Persona Forge {VERSION} starting")
+    logs.info("boot", "config", comfyui_url=COMFYUI_URL, builds_root=str(BUILDS_ROOT),
+              appdata_root=str(APPDATA_ROOT), frontend=str(FRONTEND_DIR))
+    try:
+        db.init_db()
+        logs.info("boot", "database ready", path=str(db.DB_PATH))
+    except Exception as exc:  # noqa: BLE001
+        logs.error("boot", f"database init failed: {exc}")
+        raise
+    mounted = BUILDS_ROOT.is_dir()
+    writable, err = (False, "not mounted") if not mounted else _probe_writable(BUILDS_ROOT)
+    (logs.info if (mounted and writable) else logs.error)(
+        "boot", "builds mount check", path=str(BUILDS_ROOT), mounted=mounted, writable=writable, error=err)
+    if not APPDATA_ROOT.is_dir():
+        logs.warn("boot", "appdata not mounted", path=str(APPDATA_ROOT))
+    wf = workflows.list_manifests()
+    logs.info("boot", f"{len(wf)} workflow template(s) loaded",
+              ids=[m.get("id") for m in wf], dir=str(workflows.WORKFLOW_DIR))
+    for m in wf:
+        probs = workflows.validate_manifest(m["id"]) if m.get("id") else []
+        if probs:
+            logs.warn("boot", f"workflow '{m.get('id')}' manifest problems", problems=probs)
+    logs.info("boot", "startup complete")
 
 
 # --------------------------------------------------------------------------- #
@@ -91,6 +119,23 @@ def _argv_value(argv: list[str], flag: str) -> str | None:
         if i + 1 < len(argv):
             return argv[i + 1]
     return None
+
+
+def _share_with_comfyui(path: Path) -> None:
+    """Make a folder we just created writable by the ComfyUI container."""
+    try:
+        os.chown(path, BUILD_UID, BUILD_GID)
+    except Exception as exc:  # noqa: BLE001 - not root, or Windows
+        logs.warn("local", f"chown failed on {path} ({exc}) — falling back to 0777")
+        try:
+            os.chmod(path, 0o777)
+        except Exception as exc2:  # noqa: BLE001
+            logs.error("local", f"chmod fallback failed on {path}: {exc2}")
+        return
+    try:
+        os.chmod(path, 0o775)
+    except Exception as exc:  # noqa: BLE001
+        logs.warn("local", f"chmod failed on {path}: {exc}")
 
 
 def _probe_writable(path: Path) -> tuple[bool, str | None]:
@@ -147,6 +192,28 @@ async def get_workflow(workflow_id: str) -> dict:
 
 
 # --------------------------------------------------------------------------- #
+# logs
+# --------------------------------------------------------------------------- #
+
+@app.get("/api/logs")
+async def get_logs(level: str | None = None, category: str | None = None,
+                   since_id: int = 0, limit: int = 300, search: str | None = None) -> dict:
+    return {
+        "levels": list(logs.LEVELS),
+        "categories": list(logs.CATEGORIES),
+        "entries": logs.read(level=level, category=category, since_id=since_id,
+                             limit=limit, search=search),
+        "stats": logs.stats(),
+    }
+
+
+@app.get("/api/logs/persisted")
+async def get_persisted_logs(limit: int = 500) -> dict:
+    """Log history from the rolling file — includes runs BEFORE this process."""
+    return {"entries": logs.load_persisted(limit=limit)}
+
+
+# --------------------------------------------------------------------------- #
 # projects  (a project == a named build folder)
 # --------------------------------------------------------------------------- #
 
@@ -183,8 +250,14 @@ async def create_project(body: ProjectCreate) -> dict:
     try:
         (build_dir / "lora").mkdir(parents=True)
         (build_dir / "images").mkdir(parents=True)
+        # ComfyUI writes into images/ from its own container — align ownership
+        for d in (build_dir, build_dir / "lora", build_dir / "images"):
+            _share_with_comfyui(d)
     except OSError as exc:
+        logs.error("local", f"could not create build folder: {exc}", path=str(build_dir))
         raise HTTPException(500, f"could not create build folder: {exc}") from exc
+    logs.info("local", "build folder created", path=str(build_dir),
+              subfolders=["lora", "images"], owner=f"{BUILD_UID}:{BUILD_GID}")
 
     with db.connect() as conn:
         cur = conn.execute("INSERT INTO projects (name, slug) VALUES (?, ?)", (body.name, slug))
@@ -199,6 +272,7 @@ async def create_project(body: ProjectCreate) -> dict:
             "UPDATE projects SET current_version_id = ? WHERE id = ?", (cur.lastrowid, project_id)
         )
 
+    logs.info("process", f"project created: {body.name}", project_id=project_id, slug=slug)
     return await get_project(project_id)
 
 
@@ -295,6 +369,8 @@ async def create_version(project_id: int, body: VersionCreate) -> dict:
         new_id = cur.lastrowid
         conn.execute("UPDATE projects SET current_version_id = ? WHERE id = ?", (new_id, project_id))
         row = conn.execute("SELECT * FROM prompt_versions WHERE id = ?", (new_id,)).fetchone()
+    logs.info("process", f"version v{new_id} created", project_id=project_id,
+              parent=parent["id"], source=body.source, note=body.note)
     return {"version": dict(row)}
 
 
@@ -307,6 +383,7 @@ async def sign_off(version_id: int) -> dict:
             raise HTTPException(404, "version not found")
         conn.execute("UPDATE prompt_versions SET signed_off = 1 WHERE id = ?", (version_id,))
         row = conn.execute("SELECT * FROM prompt_versions WHERE id = ?", (version_id,)).fetchone()
+    logs.info("process", f"v{version_id} signed off as baseline", version_id=version_id)
     return {"version": dict(row)}
 
 
@@ -321,7 +398,83 @@ async def rollback(project_id: int, version_id: int) -> dict:
         if row is None:
             raise HTTPException(404, "version not found for this project")
         conn.execute("UPDATE projects SET current_version_id = ? WHERE id = ?", (version_id, project_id))
+    logs.info("process", f"rolled back to v{version_id}", project_id=project_id, version_id=version_id)
     return await get_project(project_id)
+
+
+class ProjectClone(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    style: str | None = None   # usually the whole point of a clone (outfit / scene)
+
+
+@app.post("/api/projects/{project_id}/clone", status_code=201)
+async def clone_project(project_id: int, body: ProjectClone) -> dict:
+    """Clone a persona into a new project seeded with its current prompt.
+
+    Use case: the same character, dressed/staged differently (skiing vs. beach).
+    Identity lives in `character`, so a clone that only changes `style` is the same
+    person — parent_project_id is recorded so Phase C can offer to reuse the
+    parent's trained LoRA instead of retraining.
+    """
+    src = await get_project(project_id)
+    v = src["current_version"] or {}
+    slug = slugify(body.name)
+    build_dir = BUILDS_ROOT / slug
+
+    if not BUILDS_ROOT.is_dir():
+        raise HTTPException(503, f"builds root not mounted at {BUILDS_ROOT}")
+    if build_dir.exists():
+        raise HTTPException(409, f"a build folder named '{slug}' already exists")
+
+    try:
+        (build_dir / "lora").mkdir(parents=True)
+        (build_dir / "images").mkdir(parents=True)
+        for d in (build_dir, build_dir / "lora", build_dir / "images"):
+            _share_with_comfyui(d)
+    except OSError as exc:
+        raise HTTPException(500, f"could not create build folder: {exc}") from exc
+
+    with db.connect() as conn:
+        cur = conn.execute(
+            "INSERT INTO projects (name, slug, parent_project_id) VALUES (?, ?, ?)",
+            (body.name, slug, project_id),
+        )
+        new_id = cur.lastrowid
+        cur = conn.execute(
+            """INSERT INTO prompt_versions
+               (project_id, parent_id, character, style, negative, checkpoint, seed, source, note)
+               VALUES (?, NULL, ?, ?, ?, ?, ?, 'initial', ?)""",
+            (new_id, v.get("character", ""),
+             body.style if body.style is not None else v.get("style", ""),
+             v.get("negative", ""), v.get("checkpoint", ""), v.get("seed", 0),
+             f"cloned from '{src['project']['name']}' (v{v.get('id')})"),
+        )
+        conn.execute("UPDATE projects SET current_version_id = ? WHERE id = ?", (cur.lastrowid, new_id))
+
+    logs.info("process", f"persona cloned: {src['project']['name']} -> {body.name}",
+              source_project_id=project_id, new_project_id=new_id, slug=slug,
+              style_changed=body.style is not None)
+    return await get_project(new_id)
+
+
+@app.post("/api/projects/{project_id}/repair-permissions")
+async def repair_permissions(project_id: int) -> dict:
+    """Re-apply ComfyUI-writable ownership to an existing build folder.
+
+    Needed for folders created before 0.2.4, which came out root-owned and made
+    ComfyUI's SaveImage fail with EACCES.
+    """
+    detail = await get_project(project_id)
+    build_dir = Path(detail["build_dir"])
+    if not build_dir.is_dir():
+        raise HTTPException(404, f"build folder missing: {build_dir}")
+    fixed = []
+    for d in (build_dir, build_dir / "lora", build_dir / "images"):
+        if d.is_dir():
+            _share_with_comfyui(d)
+            fixed.append(str(d))
+    logs.info("local", "repaired build folder permissions", project_id=project_id, paths=fixed)
+    return {"repaired": fixed, "owner": f"{BUILD_UID}:{BUILD_GID}"}
 
 
 # --------------------------------------------------------------------------- #
@@ -352,6 +505,8 @@ async def generate(project_id: int, body: GenerateRequest) -> dict:
     params = {k: v for k, v in params.items() if v is not None}
     params.update(body.params)  # explicit params win
 
+    logs.info("process", f"generation requested ({body.workflow})",
+              project_id=project_id, slug=slug, version_id=version.get("id"))
     try:
         graph = workflows.build_graph(body.workflow, params)
         prompt_id = await comfy.submit(graph)
@@ -370,6 +525,7 @@ async def generate(project_id: int, body: GenerateRequest) -> dict:
 
     err = comfy.error_message(entry)
     if err:
+        logs.error("process", f"generation failed: {err}", project_id=project_id, prompt_id=prompt_id)
         raise HTTPException(502, f"ComfyUI execution error — {err}")
 
     images = comfy.outputs_from(entry)
@@ -381,6 +537,9 @@ async def generate(project_id: int, body: GenerateRequest) -> dict:
                 (project_id, version.get("id"), img["filename"], img["subfolder"]),
             )
 
+    logs.info("process", f"generation complete — {len(images)} image(s)",
+              project_id=project_id, prompt_id=prompt_id,
+              files=[f"{i['subfolder']}/{i['filename']}" for i in images])
     return {
         "prompt_id": prompt_id,
         "status": "success",

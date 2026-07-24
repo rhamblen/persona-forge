@@ -36,7 +36,8 @@
       <nav class="nav">
         <div class="nav-section">Project</div>
         <select id="project-select" class="project-select"></select>
-        <button class="nav-btn" id="new-project-btn">+ New project</button>
+        <button class="nav-btn" id="new-project-btn">+ New persona</button>
+        <button class="nav-btn" id="clone-project-btn">⧉ Clone this persona</button>
 
         <div class="nav-section">Phases</div>
         <a class="nav-item" data-view="overview" href="#">Overview</a>
@@ -44,6 +45,8 @@
         <a class="nav-item is-disabled" href="#">2 · Dataset</a>
         <a class="nav-item is-disabled" href="#">3 · LoRA</a>
         <a class="nav-item is-disabled" href="#">4 · Poses</a>
+        <div class="nav-section">System</div>
+        <a class="nav-item" data-view="logs" href="#">Logs</a>
       </nav>
     </aside>
 
@@ -147,19 +150,68 @@
           </div>
         </div>
       </section>
+      <!-- ============ LOGS ============ -->
+      <section class="view" id="view-logs" hidden>
+        <header class="main-head">
+          <h1>Logs</h1>
+          <p class="subtitle">
+            Boot, integration, process and local activity. Also on stdout
+            (<code>docker logs persona-forge</code>) and in <code>appdata/logs/</code>.
+          </p>
+        </header>
+
+        <div class="log-toolbar">
+          <label class="inline-field">
+            <span>Level</span>
+            <select id="log-level">
+              <option value="debug">debug +</option>
+              <option value="info" selected>info +</option>
+              <option value="warn">warn +</option>
+              <option value="error">error only</option>
+            </select>
+          </label>
+          <label class="inline-field">
+            <span>Category</span>
+            <select id="log-category">
+              <option value="all">all</option>
+              <option value="boot">boot</option>
+              <option value="integration">integration</option>
+              <option value="process">process</option>
+              <option value="local">local</option>
+              <option value="api">api</option>
+            </select>
+          </label>
+          <label class="inline-field grow">
+            <span>Search</span>
+            <input id="log-search" placeholder="filter messages…" />
+          </label>
+          <label class="inline-check">
+            <input type="checkbox" id="log-follow" checked /> <span>Follow</span>
+          </label>
+          <button class="btn btn-sm" id="log-refresh">Refresh</button>
+          <button class="btn btn-sm" id="log-persisted">Load previous runs</button>
+        </div>
+
+        <div class="log-stats muted small" id="log-stats"></div>
+        <div class="panel log-panel"><div id="log-list"><p class="muted">loading…</p></div></div>
+      </section>
     </main>
   </div>
 
   <!-- new project modal -->
   <div class="modal-backdrop" id="modal" hidden>
     <div class="modal">
-      <h2>New project</h2>
-      <p class="muted small">
+      <h2 id="np-title">New persona</h2>
+      <p class="muted small" id="np-blurb">
         Creates a build folder with <code>lora/</code> and <code>images/</code> in the shared builds root.
       </p>
       <label class="field">
-        <span class="field-label">Project name</span>
+        <span class="field-label">Persona name</span>
         <input id="np-name" placeholder="e.g. Ada" />
+      </label>
+      <label class="field" id="np-style-wrap" hidden>
+        <span class="field-label">Style / scene <em>what makes this copy different</em></span>
+        <textarea id="np-style" rows="3" placeholder="e.g. skiing on a snowy slope, winter jacket"></textarea>
       </label>
       <p class="hint" id="np-msg"></p>
       <div class="actions">

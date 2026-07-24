@@ -49,6 +49,24 @@ Four phases, each gating the next. The user's spec, formalised:
 - **Sign off** → the approved prompt + model + seed become a **locked baseline**
   that can never be lost (see Rollback, §4).
 
+#### Persona library — save, reload, clone (added 2026-07-24)
+
+A persona is not a one-shot session. The Prompt Studio must support:
+
+- **Save + reload** — every persona's prompt is persisted and can be reopened later,
+  not just started fresh. (Projects + their full version history already persist;
+  the project selector is the reload path.)
+- **Clone an existing persona** → a new project seeded with the original's current
+  prompt, so it can be varied. The driving example: *the same woman, one dressed for
+  skiing and one lazing on the beach.*
+
+**Why this matters for LoRA cost:** identity lives in the **character** field, and
+outfit/scene live in **style**. A clone that keeps the character but changes the
+style is *the same person* — so it should be able to **reuse the parent's trained
+LoRA rather than retraining**. Clones therefore record a `parent_project_id`, and
+Phase C should offer "reuse parent LoRA" when one exists. That turns outfit/scene
+variants from a ~1 hr training job into a prompt change.
+
 ### Phase B — Dataset Builder
 - Generate a batch (default **30**) from the signed-off prompt, varied seeds/framing.
 - Show them in a **selectable grid**; user picks the ones that look like the *same
@@ -83,6 +101,19 @@ Four phases, each gating the next. The user's spec, formalised:
   Moving it into a character's ST `expressions/` folder is a deliberate **manual**
   step after the build is approved (same copy-in / permission gotcha as the VRM
   assets).
+- **Logs tab** — a first-class view, not an afterthought. Filterable by **level**
+  (`debug` / `info` / `warn` / `error`) and by **category**:
+  - `boot` — startup: config, db init, mount checks. Survives restarts so a crash
+    loop can actually be diagnosed.
+  - `integration` — outbound calls to ComfyUI / Ollama: what was sent, status,
+    latency, errors.
+  - `process` — pipeline steps: project created, version saved/signed off/rolled
+    back, generation queued → finished.
+  - `local` — local processing: file/folder writes, image handling, db work.
+
+  Records go to **stdout** (so `docker logs` works) **and** a ring buffer the UI
+  reads, **and** a rolling JSONL file under `appdata/logs/` so boot history
+  outlives a restart.
 - **Settings** — a settings area holds:
   - **ComfyUI URL** (default `http://192.168.1.33:9000`) plus a **live connection
     status** indicator. The status is **pinned at the top of the left sidebar**

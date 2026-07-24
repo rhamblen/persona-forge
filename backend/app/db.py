@@ -19,7 +19,10 @@ CREATE TABLE IF NOT EXISTS projects (
     name        TEXT NOT NULL,
     slug        TEXT NOT NULL UNIQUE,
     created_at  TEXT NOT NULL DEFAULT (datetime('now')),
-    current_version_id INTEGER
+    current_version_id INTEGER,
+    -- set when this persona was cloned from another; lets Phase C offer
+    -- "reuse parent LoRA" instead of retraining an identical character
+    parent_project_id  INTEGER REFERENCES projects(id)
 );
 
 CREATE TABLE IF NOT EXISTS prompt_versions (
@@ -66,6 +69,10 @@ def connect() -> sqlite3.Connection:
 def init_db() -> None:
     with connect() as conn:
         conn.executescript(SCHEMA)
+        # lightweight migration for databases created before 0.2.4
+        cols = {r["name"] for r in conn.execute("PRAGMA table_info(projects)")}
+        if "parent_project_id" not in cols:
+            conn.execute("ALTER TABLE projects ADD COLUMN parent_project_id INTEGER")
 
 
 def row_to_dict(row: sqlite3.Row | None) -> dict | None:

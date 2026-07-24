@@ -24,6 +24,10 @@ services:
       COMFYUI_URL: "${COMFYUI_URL:-http://192.168.1.33:9000}"
       BUILDS_ROOT: "/builds"
       APPDATA_ROOT: "/appdata"
+      # Ownership applied to build folders we create, so the ComfyUI container
+      # (a different user) can write into them. Unraid default is nobody:users.
+      PUID: "${PUID:-99}"
+      PGID: "${PGID:-100}"
       TZ: "${TZ:-Europe/London}"
     volumes:
       # Persistent app data (sqlite db, prompt history).

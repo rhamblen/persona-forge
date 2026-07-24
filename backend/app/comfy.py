@@ -13,6 +13,8 @@ from typing import Any
 
 import httpx
 
+from . import logs
+
 COMFYUI_URL = os.getenv("COMFYUI_URL", "http://192.168.1.33:9000").rstrip("/")
 
 
@@ -51,13 +53,18 @@ async def list_models(kind: str = "checkpoints") -> list[str]:
 
 async def submit(graph: dict[str, Any], client_id: str = "persona-forge") -> str:
     """POST an API-format workflow. Returns prompt_id."""
+    logs.debug("integration", "submitting workflow to ComfyUI", nodes=len(graph), url=COMFYUI_URL)
     async with httpx.AsyncClient(timeout=60.0) as c:
         r = await c.post(f"{COMFYUI_URL}/prompt", json={"prompt": graph, "client_id": client_id})
         if r.status_code >= 400:
+            logs.error("integration", f"ComfyUI rejected the workflow ({r.status_code})",
+                       body=r.text[:500])
             raise ComfyError(f"ComfyUI rejected the workflow ({r.status_code}): {r.text[:800]}")
         data = r.json()
     if data.get("node_errors"):
+        logs.error("integration", "ComfyUI reported node_errors", node_errors=data["node_errors"])
         raise ComfyError(f"node_errors: {data['node_errors']}")
+    logs.info("integration", "workflow queued", prompt_id=data["prompt_id"])
     return data["prompt_id"]
 
 
@@ -73,8 +80,12 @@ async def wait(prompt_id: str, timeout_s: float = 900.0, poll_s: float = 2.0) ->
                     entry = hist[prompt_id]
                     status = (entry.get("status") or {}).get("status_str")
                     if status in ("success", "error"):
+                        lvl = logs.info if status == "success" else logs.error
+                        lvl("integration", f"prompt {status}", prompt_id=prompt_id,
+                            waited_s=round(asyncio.get_event_loop().time() - (deadline - timeout_s)))
                         return entry
             await asyncio.sleep(poll_s)
+    logs.error("integration", "timed out waiting for prompt", prompt_id=prompt_id, timeout_s=timeout_s)
     raise ComfyError(f"timed out waiting for prompt {prompt_id}")
 
 
