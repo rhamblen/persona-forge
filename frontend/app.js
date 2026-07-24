@@ -355,9 +355,13 @@ $("ai-mode").addEventListener("click", (e) => {
   [...$("ai-mode").children].forEach((c) => c.classList.toggle("sel", c === t));
 });
 
-// Word-level diff (LCS over whitespace-preserving tokens). Returns HTML with
-// <ins> for added words and <del> for removed words; unchanged text is plain.
-function wordDiff(oldStr, newStr) {
+const AI_FIELDS = [["Character", "character"], ["Style", "style"], ["Negative", "negative"]];
+// Per-field ordered parts from the last suggestion: {eq} for unchanged text, or
+// {del, ins, rejected} for a change the user can accept (default) or reject.
+let aiDiffParts = { character: null, style: null, negative: null };
+
+// LCS over whitespace-preserving tokens → ordered parts (changes grouped).
+function diffParts(oldStr, newStr) {
   const a = (oldStr || "").split(/(\s+)/);
   const b = (newStr || "").split(/(\s+)/);
   const n = a.length, m = b.length;
@@ -365,43 +369,85 @@ function wordDiff(oldStr, newStr) {
   for (let i = n - 1; i >= 0; i--)
     for (let j = m - 1; j >= 0; j--)
       dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
-  const out = [];
-  const push = (cls, tok) => {
-    if (!tok) return;
-    const last = out[out.length - 1];
-    if (last && last.cls === cls) last.tok += tok; else out.push({ cls, tok });
-  };
+  const parts = [];
+  let pend = null; // { del, ins } accumulating a change until the next eq run
+  const flush = () => { if (pend) { parts.push({ del: pend.del, ins: pend.ins, rejected: false }); pend = null; } };
+  const eq = (t) => { const last = parts[parts.length - 1]; if (last && last.eq !== undefined) last.eq += t; else parts.push({ eq: t }); };
   let i = 0, j = 0;
   while (i < n && j < m) {
-    if (a[i] === b[j]) { push("eq", a[i]); i++; j++; }
-    else if (dp[i + 1][j] >= dp[i][j + 1]) { push("del", a[i]); i++; }
-    else { push("ins", b[j]); j++; }
+    if (a[i] === b[j]) { flush(); eq(a[i]); i++; j++; }
+    else if (dp[i + 1][j] >= dp[i][j + 1]) { (pend ||= { del: "", ins: "" }).del += a[i++]; }
+    else { (pend ||= { del: "", ins: "" }).ins += b[j++]; }
   }
-  while (i < n) { push("del", a[i++]); }
-  while (j < m) { push("ins", b[j++]); }
-  return out.map((p) => p.cls === "eq" ? esc(p.tok)
-    : `<${p.cls}>${esc(p.tok)}</${p.cls}>`).join("");
+  while (i < n) { (pend ||= { del: "", ins: "" }).del += a[i++]; }
+  while (j < m) { (pend ||= { del: "", ins: "" }).ins += b[j++]; }
+  flush();
+  return parts;
+}
+
+// Field value implied by the current accept/reject choices.
+function fieldFromParts(parts) {
+  return parts.map((p) => p.eq !== undefined ? p.eq : (p.rejected ? p.del : p.ins)).join("");
+}
+
+function renderDiffRow(k) {
+  const parts = aiDiffParts[k];
+  if (!parts) return "";
+  const label = AI_FIELDS.find(([, key]) => key === k)[0];
+  const html = parts.map((p, i) => {
+    if (p.eq !== undefined) return esc(p.eq);
+    const del = p.del ? `<del>${esc(p.del)}</del>` : "";
+    const ins = p.ins ? `<ins>${esc(p.ins)}</ins>` : "";
+    if (p.rejected) {
+      // change undone: original text kept, the addition ghosted; button re-applies
+      const kept = p.del ? esc(p.del) : `<ins class="ghost">${esc(p.ins)}</ins>`;
+      return `<span class="chg rejected">${kept}` +
+        `<button class="chg-x" data-f="${k}" data-i="${i}" title="Re-apply this change">↺</button></span>`;
+    }
+    return `<span class="chg">${del}${ins}` +
+      `<button class="chg-x" data-f="${k}" data-i="${i}" title="Reject this change">×</button></span>`;
+  }).join("");
+  return `<div class="ai-diff-row" data-f="${k}"><span class="ai-diff-label">${label}</span>
+    <div class="ai-diff-text">${html || '<span class="muted">(empty)</span>'}</div></div>`;
 }
 
 function renderAiDiff(before, after) {
-  const box = $("ai-diff");
-  const fields = [["Character", "character"], ["Style", "style"], ["Negative", "negative"]];
-  const rows = fields
-    .filter(([, k]) => (before[k] || "") !== (after[k] || ""))
-    .map(([label, k]) =>
-      `<div class="ai-diff-row"><span class="ai-diff-label">${label}</span>
-        <div class="ai-diff-text">${wordDiff(before[k] || "", after[k] || "") || '<span class="muted">(empty)</span>'}</div>
-      </div>`);
-  if (!rows.length) {
-    box.innerHTML = '<div class="ai-diff-head muted">No changes.</div>';
-    box.hidden = false;
-    return;
+  aiDiffParts = { character: null, style: null, negative: null };
+  for (const [, k] of AI_FIELDS) {
+    if ((before[k] || "") !== (after[k] || "")) aiDiffParts[k] = diffParts(before[k], after[k]);
   }
-  box.innerHTML = `<div class="ai-diff-head"><ins>added</ins> · <del>removed</del></div>` + rows.join("");
+  paintAiDiff();
+}
+
+function paintAiDiff() {
+  const box = $("ai-diff");
+  const rows = AI_FIELDS.map(([, k]) => renderDiffRow(k)).filter(Boolean);
+  if (!rows.length) { box.innerHTML = '<div class="ai-diff-head muted">No changes.</div>'; box.hidden = false; return; }
+  box.innerHTML = `<div class="ai-diff-head"><ins>added</ins> · <del>removed</del>` +
+    ` · <span class="muted">click ✕ to reject a change</span></div>` + rows.join("");
   box.hidden = false;
 }
 
-function clearAiDiff() { const b = $("ai-diff"); b.hidden = true; b.innerHTML = ""; }
+function toggleChange(k, i) {
+  const parts = aiDiffParts[k];
+  if (!parts || !parts[i]) return;
+  parts[i].rejected = !parts[i].rejected;
+  $("f-" + k).value = fieldFromParts(parts); // apply just this field's current choices
+  paintAiDiff();
+}
+
+// A field's diff goes stale once the user hand-edits it — drop it so a later
+// reject can't clobber the manual edit.
+function dropFieldDiff(k) {
+  if (!aiDiffParts[k]) return;
+  aiDiffParts[k] = null;
+  if (!AI_FIELDS.some(([, key]) => aiDiffParts[key])) clearAiDiff(); else paintAiDiff();
+}
+
+function clearAiDiff() {
+  aiDiffParts = { character: null, style: null, negative: null };
+  const b = $("ai-diff"); b.hidden = true; b.innerHTML = "";
+}
 
 async function aiSuggest() {
   const instruction = $("ai-instruction").value.trim();
@@ -422,8 +468,8 @@ async function aiSuggest() {
     $("f-negative").value = suggestion.negative || "";
     renderAiDiff(before, suggestion);
     $("ai-msg").innerHTML =
-      `<span class="ok">Applied.</span> Changes are highlighted below (<del>red = removed</del>). ` +
-      `Edit freely, then Save — or <a href="#" id="ai-undo">reject and undo</a>.`;
+      `<span class="ok">Applied.</span> Review the changes below — click <b>✕</b> to reject any single one, ` +
+      `or <a href="#" id="ai-undo">reject all &amp; undo</a>. Then edit freely and Save.`;
     $("ai-undo").addEventListener("click", (e) => { e.preventDefault(); aiRevert(); });
   } catch (e) {
     msg($("ai-msg"), e.message, "bad");
@@ -443,6 +489,17 @@ function aiRevert() {
 }
 
 $("ai-suggest-btn").addEventListener("click", aiSuggest);
+
+// Per-change reject/re-apply (event-delegated on the diff panel).
+$("ai-diff").addEventListener("click", (e) => {
+  const btn = e.target.closest(".chg-x");
+  if (!btn) return;
+  toggleChange(btn.dataset.f, parseInt(btn.dataset.i, 10));
+});
+// Hand-editing a field retires its diff so a later reject can't overwrite the edit.
+for (const [, k] of AI_FIELDS) {
+  $("f-" + k).addEventListener("input", () => dropFieldDiff(k));
+}
 
 /* ---------------- preview lightbox ---------------- */
 

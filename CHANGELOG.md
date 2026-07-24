@@ -9,6 +9,21 @@ Every version below is a **published GitHub Release** with a matching
 
 ---
 
+## [0.3.3] — 2026-07-24
+
+**Reject AI changes one at a time.**
+
+### Added
+- **Per-change accept/reject in the AI diff.** Each change now carries its own **✕**
+  button — reject a single change and only that span reverts to the previous text; the
+  rest of the suggestion stays. A rejected change is shown dashed-outlined with its
+  addition ghosted, and its button becomes **↺** to re-apply it, so every choice is
+  reversible. "Reject all & undo" remains for the bulk case. Hand-editing a field retires
+  that field's diff (so a later reject can't overwrite a manual edit) while other fields'
+  diffs stay live. All client-side.
+
+---
+
 ## [0.3.2] — 2026-07-24
 
 **See what the AI changed.**

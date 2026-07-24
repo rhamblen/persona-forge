@@ -155,6 +155,16 @@ body.no-scroll { overflow: hidden; }
   border-radius: 3px; }
 .ai-diff del { background: rgba(248,113,113,.16); color: var(--bad);
   text-decoration: line-through; border-radius: 3px; }
+/* a rejectable change: the ins/del pair plus a small toggle button */
+.ai-diff .chg { border-radius: 4px; padding: 0 1px; white-space: normal; }
+.ai-diff .chg-x { border: 0; background: none; cursor: pointer; padding: 0 3px;
+  margin-left: 1px; font-size: 11px; line-height: 1; color: var(--text-dim);
+  border-radius: 3px; vertical-align: baseline; }
+.ai-diff .chg-x:hover { color: var(--bad); background: rgba(248,113,113,.14); }
+.ai-diff .chg.rejected { outline: 1px dashed var(--line); outline-offset: 1px; }
+.ai-diff .chg.rejected .chg-x:hover { color: var(--ok); background: rgba(74,222,128,.14); }
+.ai-diff ins.ghost { background: none; color: var(--text-dim); opacity: .55;
+  text-decoration: line-through; }
 .spinner { width: 26px; height: 26px; border: 3px solid var(--line);
   border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }

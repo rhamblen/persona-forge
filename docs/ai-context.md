@@ -104,9 +104,10 @@ LAN; no Claude/Anthropic in the runtime loop.
 - **0.3.1:** Logs tab reskinned to the house terminal-style standard (matches the
   esp32-shutter-hub web UI); frontend served `Cache-Control: no-cache` so deploys are never
   served stale (fixes a browser caching a new page against old JS).
-- **0.3.2 (current):** AI suggestions show a client-side word-level diff (added=green,
-  removed=red strikethrough) so edits — and any word the local model dropped — are visible
-  before saving.
+- **0.3.2:** AI suggestions show a client-side word-level diff (added=green, removed=red
+  strikethrough) so edits — and any word the local model dropped — are visible before saving.
+- **0.3.3 (current):** the AI diff is now per-change accept/reject — each change has a ✕ to
+  revert just that span (↺ to re-apply); hand-editing a field retires its diff.
 - **Remaining:** 0.4 dataset builder · 0.5 LoRA trainer · 0.6 pose/expression studio ·
   0.7 hardening · 1.0 release.
 
