@@ -134,6 +134,7 @@ increments with each update inside it.
 
 ## Documentation
 
+- [docs/ai-context.md](docs/ai-context.md) — cold-start orientation for a new AI session
 - [PROJECT_PLAN.md](PROJECT_PLAN.md) — goals, architecture, phases, open decisions
 - [CHANGELOG.md](CHANGELOG.md) — per-release detail
 - [docs/ui-style.md](docs/ui-style.md) — UI design direction
