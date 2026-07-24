@@ -9,6 +9,27 @@ Every version below is a **published GitHub Release** with a matching
 
 ---
 
+## [0.4.0] — 2026-07-24
+
+**Phase 4 opens: the Dataset builder.**
+
+### Added
+- **Dataset tab.** From the current prompt, generate a batch of candidate images
+  (**Generate 30** / **+10 more**), each at a fresh random seed, then pick the ones that
+  look like the *same person* in a selectable thumbnail grid. Selected images are the
+  character's training set for the LoRA phase.
+  - Generation is **queued, not blocking** — the batch is submitted to ComfyUI and the
+    tab fills in as each image finishes (a reconcile step pulls completed prompts out of
+    ComfyUI history into the `images` table as `kind='dataset'`). Survives a restart via a
+    `dataset_jobs` table, so an in-flight batch isn't lost.
+  - A **target N** (default 20, per-project) with a progress bar toward it, and live
+    "generating… N left in queue" state while the batch runs.
+  - Endpoints: `POST /api/projects/{id}/dataset/generate`, `GET …/dataset`,
+    `POST …/dataset/select`, `POST …/dataset/target`. New `projects.dataset_target` column
+    and `dataset_jobs` table (auto-migrated).
+
+---
+
 ## [0.3.4] — 2026-07-24
 
 **Modify stops over-editing.**

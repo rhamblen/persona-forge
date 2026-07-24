@@ -22,7 +22,9 @@ CREATE TABLE IF NOT EXISTS projects (
     current_version_id INTEGER,
     -- set when this persona was cloned from another; lets Phase C offer
     -- "reuse parent LoRA" instead of retraining an identical character
-    parent_project_id  INTEGER REFERENCES projects(id)
+    parent_project_id  INTEGER REFERENCES projects(id),
+    -- how many selected images the dataset is aiming for (Phase B)
+    dataset_target     INTEGER NOT NULL DEFAULT 20
 );
 
 CREATE TABLE IF NOT EXISTS prompt_versions (
@@ -55,6 +57,18 @@ CREATE TABLE IF NOT EXISTS images (
 );
 
 CREATE INDEX IF NOT EXISTS idx_images_project ON images(project_id);
+
+-- Phase B: one row per queued dataset image, reconciled against ComfyUI history
+-- as prompts finish. Survives a restart so an in-flight batch isn't lost.
+CREATE TABLE IF NOT EXISTS dataset_jobs (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id  INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    prompt_id   TEXT NOT NULL,
+    status      TEXT NOT NULL DEFAULT 'pending',   -- pending | done | error
+    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_dsjobs_project ON dataset_jobs(project_id, status);
 """
 
 
@@ -69,10 +83,12 @@ def connect() -> sqlite3.Connection:
 def init_db() -> None:
     with connect() as conn:
         conn.executescript(SCHEMA)
-        # lightweight migration for databases created before 0.2.4
+        # lightweight migrations for older databases
         cols = {r["name"] for r in conn.execute("PRAGMA table_info(projects)")}
         if "parent_project_id" not in cols:
             conn.execute("ALTER TABLE projects ADD COLUMN parent_project_id INTEGER")
+        if "dataset_target" not in cols:  # pre-0.4.0
+            conn.execute("ALTER TABLE projects ADD COLUMN dataset_target INTEGER NOT NULL DEFAULT 20")
 
 
 def row_to_dict(row: sqlite3.Row | None) -> dict | None:

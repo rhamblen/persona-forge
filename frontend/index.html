@@ -60,7 +60,7 @@
         <div class="nav-section">Phases</div>
         <a class="nav-item" data-view="overview" href="#">Overview</a>
         <a class="nav-item is-active" data-view="prompt" href="#">1 · Prompt Studio</a>
-        <a class="nav-item is-disabled" href="#">2 · Dataset</a>
+        <a class="nav-item" data-view="dataset" href="#">2 · Dataset</a>
         <a class="nav-item is-disabled" href="#">3 · LoRA</a>
         <a class="nav-item is-disabled" href="#">4 · Poses</a>
         <div class="nav-section">System</div>
@@ -236,6 +236,46 @@
           <div class="loghead"><b>Live Logs</b> <span class="count" id="log-count">0</span>
             <span class="wsstate" id="log-state">connecting…</span></div>
           <div class="logview" id="log-list"><div class="empty">No logs to display</div></div>
+        </div>
+      </section>
+
+      <!-- ============ DATASET (Phase B) ============ -->
+      <section class="view" id="view-dataset" hidden>
+        <header class="main-head">
+          <h1>Dataset</h1>
+          <p class="subtitle">
+            Generate a batch from the current prompt, then pick the images that look like
+            the <em>same person</em>. Selected images become this character's training set.
+          </p>
+        </header>
+
+        <div id="dataset-noproject" class="empty-state" hidden>
+          <p>Select or create a project first (Prompt Studio).</p>
+        </div>
+
+        <div id="dataset-main" hidden>
+          <div class="panel ds-bar">
+            <div class="ds-controls">
+              <button class="btn btn-primary" id="ds-generate">Generate 30</button>
+              <button class="btn" id="ds-more">+10 more</button>
+              <label class="ds-target">Target
+                <input id="ds-target" type="number" min="1" max="200" step="1" />
+              </label>
+              <span class="ds-genstate muted small" id="ds-genstate"></span>
+            </div>
+            <div class="ds-progress">
+              <div class="ds-progress-head">
+                <span id="ds-count">0 selected</span>
+                <span class="muted small" id="ds-candidates">0 candidates</span>
+              </div>
+              <div class="ds-bar-track"><div class="ds-bar-fill" id="ds-fill"></div></div>
+            </div>
+          </div>
+
+          <p class="hint" id="ds-msg"></p>
+          <div class="ds-grid" id="ds-grid">
+            <p class="muted" id="ds-empty">No candidates yet — hit Generate 30.</p>
+          </div>
         </div>
       </section>
     </main>

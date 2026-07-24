@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import random
 import re
 import time
 import uuid
@@ -724,6 +725,157 @@ async def list_builds() -> dict:
             }
         )
     return {"builds": builds}
+
+
+# --------------------------------------------------------------------------- #
+# dataset builder (Phase B)
+# --------------------------------------------------------------------------- #
+
+MAX_DATASET_BATCH = int(os.getenv("MAX_DATASET_BATCH", "60"))
+
+
+def _version_prompt_params(version: dict[str, Any]) -> dict[str, Any]:
+    """The prompt fields shared by preview + dataset generation (seed added by caller)."""
+    params = {
+        "character": version.get("character") or None,
+        "style": version.get("style") or None,
+        "negative": version.get("negative") or None,
+        "checkpoint": version.get("checkpoint") or None,
+    }
+    return {k: v for k, v in params.items() if v is not None}
+
+
+async def _reconcile_dataset(project_id: int) -> None:
+    """Pull finished queued images into the images table as kind='dataset'."""
+    with db.connect() as conn:
+        pending = conn.execute(
+            "SELECT id, prompt_id FROM dataset_jobs WHERE project_id = ? AND status = 'pending'",
+            (project_id,),
+        ).fetchall()
+    if not pending:
+        return
+    try:
+        hist = await comfy.history_all()
+    except Exception as exc:  # noqa: BLE001
+        logs.warn("integration", f"could not read ComfyUI history to reconcile dataset: {exc}")
+        return
+    done = 0
+    with db.connect() as conn:
+        for job in pending:
+            entry = hist.get(job["prompt_id"])
+            if not entry:
+                continue  # still queued/running, or aged out of history
+            st = comfy.status_of(entry)
+            if st == "success":
+                for img in comfy.outputs_from(entry):
+                    conn.execute(
+                        """INSERT INTO images (project_id, version_id, filename, subfolder, kind)
+                           VALUES (?, NULL, ?, ?, 'dataset')""",
+                        (project_id, img["filename"], img["subfolder"]),
+                    )
+                conn.execute("UPDATE dataset_jobs SET status = 'done' WHERE id = ?", (job["id"],))
+                done += 1
+            elif st == "error":
+                conn.execute("UPDATE dataset_jobs SET status = 'error' WHERE id = ?", (job["id"],))
+    if done:
+        logs.info("process", f"dataset: {done} image(s) finished", project_id=project_id)
+
+
+class DatasetGenerateRequest(BaseModel):
+    count: int = 30
+
+
+@app.post("/api/projects/{project_id}/dataset/generate")
+async def dataset_generate(project_id: int, body: DatasetGenerateRequest) -> dict:
+    """Queue `count` candidate images from the current prompt, each at a fresh seed."""
+    detail = await get_project(project_id)
+    version = detail["current_version"] or {}
+    slug = detail["project"]["slug"]
+    count = max(1, min(body.count, MAX_DATASET_BATCH))
+    base = _version_prompt_params(version)
+
+    queued = 0
+    with db.connect() as conn:
+        for _ in range(count):
+            params = {**base, "seed": random.randint(1, 2**31 - 1),
+                      "output_prefix": f"{slug}/images/ds"}
+            try:
+                graph = workflows.build_graph("base-character", params)
+                prompt_id = await comfy.submit(graph)
+            except (workflows.WorkflowError, comfy.ComfyError) as exc:
+                # stop the batch but keep whatever already queued
+                logs.error("process", f"dataset generate failed after {queued}: {exc}",
+                           project_id=project_id)
+                if queued == 0:
+                    raise HTTPException(502, f"could not queue dataset: {exc}") from exc
+                break
+            conn.execute(
+                "INSERT INTO dataset_jobs (project_id, prompt_id, status) VALUES (?, ?, 'pending')",
+                (project_id, prompt_id),
+            )
+            queued += 1
+
+    logs.info("process", f"dataset: queued {queued} image(s)", project_id=project_id, slug=slug)
+    return {"queued": queued}
+
+
+@app.get("/api/projects/{project_id}/dataset")
+async def dataset_list(project_id: int) -> dict:
+    await _reconcile_dataset(project_id)
+    with db.connect() as conn:
+        proj = conn.execute("SELECT dataset_target FROM projects WHERE id = ?", (project_id,)).fetchone()
+        if proj is None:
+            raise HTTPException(404, "project not found")
+        rows = conn.execute(
+            """SELECT id, filename, subfolder, selected FROM images
+               WHERE project_id = ? AND kind = 'dataset' ORDER BY id""",
+            (project_id,),
+        ).fetchall()
+        pending = conn.execute(
+            "SELECT COUNT(*) n FROM dataset_jobs WHERE project_id = ? AND status = 'pending'",
+            (project_id,),
+        ).fetchone()["n"]
+    images = [dict(r) for r in rows]
+    selected = sum(1 for r in images if r["selected"])
+    target = proj["dataset_target"]
+    return {
+        "target": target,
+        "generating": pending > 0,
+        "counts": {"candidates": len(images), "selected": selected, "pending": pending},
+        "reached": selected >= target,
+        "images": images,
+    }
+
+
+class DatasetSelectRequest(BaseModel):
+    image_id: int
+    selected: bool
+
+
+@app.post("/api/projects/{project_id}/dataset/select")
+async def dataset_select(project_id: int, body: DatasetSelectRequest) -> dict:
+    with db.connect() as conn:
+        cur = conn.execute(
+            "UPDATE images SET selected = ? WHERE id = ? AND project_id = ? AND kind = 'dataset'",
+            (1 if body.selected else 0, body.image_id, project_id),
+        )
+        if cur.rowcount == 0:
+            raise HTTPException(404, "dataset image not found")
+    return {"image_id": body.image_id, "selected": body.selected}
+
+
+class DatasetTargetRequest(BaseModel):
+    target: int = Field(ge=1, le=200)
+
+
+@app.post("/api/projects/{project_id}/dataset/target")
+async def dataset_target(project_id: int, body: DatasetTargetRequest) -> dict:
+    with db.connect() as conn:
+        cur = conn.execute("UPDATE projects SET dataset_target = ? WHERE id = ?",
+                           (body.target, project_id))
+        if cur.rowcount == 0:
+            raise HTTPException(404, "project not found")
+    return {"target": body.target}
 
 
 # --- static frontend -------------------------------------------------------

@@ -108,11 +108,17 @@ LAN; no Claude/Anthropic in the runtime loop.
   strikethrough) so edits — and any word the local model dropped — are visible before saving.
 - **0.3.3:** the AI diff is now per-change accept/reject — each change has a ✕ to revert
   just that span (↺ to re-apply); hand-editing a field retires its diff.
-- **0.3.4 (current):** Modify prompt tightened to a strict verbatim/minimal-edit
-  instruction — it no longer drops or rewrites unrelated text (was deleting whole
-  sentences for a one-word change). See `_MODE_HINT["modify"]` in `ollama.py`.
-- **Remaining:** 0.4 dataset builder · 0.5 LoRA trainer · 0.6 pose/expression studio ·
-  0.7 hardening · 1.0 release.
+- **0.3.4:** Modify prompt tightened to a strict verbatim/minimal-edit instruction — it no
+  longer drops or rewrites unrelated text (was deleting whole sentences for a one-word
+  change). See `_MODE_HINT["modify"]` in `ollama.py`.
+- **0.4.0 (current):** Phase 4 — Dataset tab. Queue a batch of candidates (Generate 30 /
+  +10) at fresh seeds, pick same-person images in a grid, target N + progress. Non-blocking:
+  `dataset_jobs` table + reconcile-from-history into `images` (kind='dataset'). Endpoints
+  under `/api/projects/{id}/dataset`. `projects.dataset_target` column added.
+- **Remaining:** 0.5 LoRA trainer · 0.6 pose/expression studio · 0.7 hardening · 1.0 release.
+  **Phase 5 next** — training backend TBD (see PROJECT_PLAN: reuse ComfyUI-MCP `train_*`
+  flows or a kohya/sd-scripts container). Selected dataset images are `images` rows with
+  `kind='dataset'` and `selected=1`.
 
 ## Track A note (separate from the app)
 

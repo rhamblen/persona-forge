@@ -36,8 +36,8 @@ shot to shot.)
 - **Persona library** — personas persist and reload. **Clone** one to vary it: the same
   character skiing *and* lazing on a beach. Clones record their parent so a trained LoRA
   can be reused instead of retrained.
-- **Dataset builder** — generate a batch, pick the ones that look like the same person,
-  top up until you have enough _(phase 4)_.
+- **Dataset builder** — generate a batch, pick the ones that look like the same person in a
+  selectable grid, top up (+10) until you hit your target.
 - **Per-character LoRA training** on your own GPU _(phase 5)_.
 - **Pose / expression sets** — the 28 SillyTavern expressions with posture variation,
   tweakable one sprite at a time _(phase 6)_.
@@ -125,9 +125,9 @@ character's `expressions/` folder stays a deliberate manual step.
 
 ## Status
 
-**Phase 3 of 7** — Prompt Studio is usable and now has AI-assisted prompt authoring;
-dataset, LoRA training and pose sets are still to come. See the roadmap in
-[PROJECT_PLAN.md](PROJECT_PLAN.md) and the release history in [CHANGELOG.md](CHANGELOG.md).
+**Phase 4 of 7** — Prompt Studio and the Dataset builder are usable; LoRA training and
+pose sets are still to come. See the roadmap in [PROJECT_PLAN.md](PROJECT_PLAN.md) and the
+release history in [CHANGELOG.md](CHANGELOG.md).
 
 Versioning is `0.<phase>.<iteration>` — the middle digit is the phase, the last
 increments with each update inside it.

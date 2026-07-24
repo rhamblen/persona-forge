@@ -135,6 +135,19 @@ async def wait(prompt_id: str, timeout_s: float = 900.0, poll_s: float = 2.0) ->
     raise ComfyError(f"timed out waiting for prompt {prompt_id}")
 
 
+async def history_all(max_items: int = 400) -> dict[str, Any]:
+    """The whole recent history keyed by prompt_id — one call to reconcile a batch."""
+    async with httpx.AsyncClient(timeout=15.0) as c:
+        r = await c.get(f"{COMFYUI_URL}/history", params={"max_items": max_items})
+        r.raise_for_status()
+        return r.json()
+
+
+def status_of(entry: dict[str, Any]) -> str | None:
+    """'success' | 'error' | None (still running) for a history entry."""
+    return (entry.get("status") or {}).get("status_str")
+
+
 def outputs_from(entry: dict[str, Any]) -> list[dict[str, str]]:
     """Flatten produced images out of a history entry."""
     out: list[dict[str, str]] = []

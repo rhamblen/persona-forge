@@ -599,6 +599,113 @@ function startLogPolling(on) {
   if (on) logTimer = setInterval(() => { if (!$("view-logs").hidden) refreshLogs(); }, 4000);
 }
 
+/* ---------------- dataset builder (Phase B) ---------------- */
+
+let dsTimer = null;
+
+function dsImageUrl(img) {
+  return `/api/image?filename=${encodeURIComponent(img.filename)}&subfolder=${encodeURIComponent(img.subfolder)}`;
+}
+
+function stopDatasetPolling() { clearInterval(dsTimer); dsTimer = null; }
+
+function startDatasetPolling() {
+  if (dsTimer) return;
+  dsTimer = setInterval(() => {
+    if ($("view-dataset").hidden) return stopDatasetPolling();
+    loadDataset();
+  }, 3000);
+}
+
+async function loadDataset() {
+  const noproj = $("dataset-noproject"), main = $("dataset-main");
+  if (!state.projectId) { noproj.hidden = false; main.hidden = true; return; }
+  noproj.hidden = true; main.hidden = false;
+  try {
+    const data = await api(`/api/projects/${state.projectId}/dataset`);
+    renderDataset(data);
+    if (data.generating) startDatasetPolling(); else stopDatasetPolling();
+  } catch (e) {
+    msg($("ds-msg"), e.message, "bad");
+  }
+}
+
+function renderDataset(data) {
+  const { target, counts, reached, generating, images } = data;
+  if ($("ds-target").value === "" || document.activeElement !== $("ds-target")) $("ds-target").value = target;
+  $("ds-count").textContent = `${counts.selected} / ${target} selected`;
+  $("ds-count").className = reached ? "ok" : "";
+  $("ds-candidates").textContent = `${counts.candidates} candidate${counts.candidates === 1 ? "" : "s"}`;
+  const pct = Math.min(100, target ? Math.round((counts.selected / target) * 100) : 0);
+  $("ds-fill").style.width = pct + "%";
+  $("ds-fill").classList.toggle("full", reached);
+  $("ds-genstate").textContent = generating ? `generating… ${counts.pending} left in queue` : "";
+
+  const grid = $("ds-grid");
+  if (!images.length) {
+    grid.innerHTML = '<p class="muted" id="ds-empty">No candidates yet — hit Generate 30.</p>';
+    return;
+  }
+  grid.innerHTML = images.map((img) =>
+    `<button type="button" class="ds-thumb${img.selected ? " sel" : ""}" data-id="${img.id}"
+       title="${esc(img.filename)}">
+       <img src="${dsImageUrl(img)}" alt="candidate" loading="lazy" />
+       <span class="ds-check">✓</span>
+     </button>`).join("");
+}
+
+async function toggleDatasetSelect(id, el) {
+  const nowSel = !el.classList.contains("sel");
+  el.classList.toggle("sel", nowSel); // optimistic
+  try {
+    await api(`/api/projects/${state.projectId}/dataset/select`, {
+      method: "POST",
+      body: JSON.stringify({ image_id: id, selected: nowSel }),
+    });
+    loadDataset(); // refresh counts/progress
+  } catch (e) {
+    el.classList.toggle("sel", !nowSel); // revert
+    msg($("ds-msg"), e.message, "bad");
+  }
+}
+
+async function datasetGenerate(count) {
+  if (!state.projectId) return;
+  const btnA = $("ds-generate"), btnB = $("ds-more");
+  btnA.disabled = btnB.disabled = true;
+  msg($("ds-msg"), `Queuing ${count} image${count === 1 ? "" : "s"}…`);
+  try {
+    const { queued } = await api(`/api/projects/${state.projectId}/dataset/generate`, {
+      method: "POST",
+      body: JSON.stringify({ count }),
+    });
+    msg($("ds-msg"), `Queued ${queued}. They'll appear below as ComfyUI finishes them.`, "ok");
+    startDatasetPolling();
+    loadDataset();
+  } catch (e) {
+    msg($("ds-msg"), e.message, "bad");
+  } finally {
+    btnA.disabled = btnB.disabled = false;
+  }
+}
+
+$("ds-grid").addEventListener("click", (e) => {
+  const t = e.target.closest(".ds-thumb");
+  if (t) toggleDatasetSelect(parseInt(t.dataset.id, 10), t);
+});
+$("ds-generate").addEventListener("click", () => datasetGenerate(30));
+$("ds-more").addEventListener("click", () => datasetGenerate(10));
+$("ds-target").addEventListener("change", async () => {
+  const target = parseInt($("ds-target").value, 10);
+  if (!target || target < 1 || !state.projectId) return;
+  try {
+    await api(`/api/projects/${state.projectId}/dataset/target`, {
+      method: "POST", body: JSON.stringify({ target }),
+    });
+    loadDataset();
+  } catch (e) { msg($("ds-msg"), e.message, "bad"); }
+});
+
 /* ---------------- wiring ---------------- */
 
 function showView(name) {
@@ -613,6 +720,8 @@ document.querySelectorAll(".nav-item[data-view]").forEach((a) =>
     showView(a.dataset.view);
     refreshStatus();
     if (a.dataset.view === "logs") refreshLogs();
+    if (a.dataset.view === "dataset") loadDataset();
+    else stopDatasetPolling();
   }));
 
 $("log-search").addEventListener("input", (e) => {
@@ -647,6 +756,8 @@ $("log-persisted").addEventListener("click", () => {
 $("project-select").addEventListener("change", (e) => {
   state.projectId = parseInt(e.target.value, 10) || null;
   loadProject().catch((err) => msg($("studio-msg"), err.message, "bad"));
+  stopDatasetPolling();
+  if (!$("view-dataset").hidden) loadDataset();
 });
 
 $("generate-btn").addEventListener("click", () => generate());
