@@ -244,6 +244,11 @@ LAN; no Claude/Anthropic in the runtime loop.
   `DATASET_BODY_FRAMINGS` (24 poses/views around the body); `DATASET_EXPRESSIONS` grew to 18;
   `DATASET_POSE_EXPRESSIONS` (light) used on full-body shots. `_dataset_variation(n, mode)`:
   faces = face×expr, poses = body×light-expr, both = alternate face/body (~50/50).
+- **0.7.7:** Phase 7 — **fix: a stopped/failed build stranded `projects.train_status='training'`**
+  (no prompt id → reconciler couldn't clear it), so every future build died with "a training run
+  is already in progress." `_reconcile_training` now auto-heals an orphaned flag from ComfyUI
+  reality (null `train_prompt_id` = always stale; vanished prompt = stale once `queue_size()==0`)
+  and runs before the gate in `_start_lora_training`; `cancel_job` also resets the flag on stop.
 - **Remaining:** 0.7.x hardening · 1.0 release. The **dataset side of the weak-LoRA fix is now
   complete** (0.7.2 pose + 0.7.3 framing/expression + 0.7.6 targeting/variety). 0.7.x backlog (priority order):
   **(1) raise the automated training-step default to ~1500-2500** (last recipe lever);

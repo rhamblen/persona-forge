@@ -1,33 +1,26 @@
-# v0.7.6 — Target the dataset, and a lot more variety
+# v0.7.7 — Fix: stopped build jamming future builds
 
-Phase 7. Two dataset upgrades: aim a batch at a specific weak axis, and a much bigger range of
-faces and poses to draw from.
+Phase 7. A bugfix for the exact symptom you hit: after a stopped build, every new build failed
+instantly with *"a training run is already in progress for this persona."*
 
-## Added
-- **Variety mode selector** on the Dataset tab. Choose what a batch spreads across so you can
-  reinforce whatever looks weak:
-  - **Both** (default) — alternates close-up faces and full-body poses (~50/50).
-  - **Faces** — close-up/bust shots at varied head angles × the full range of expressions. Use
-    it when the face is weak or you want more expression coverage.
-  - **Poses & views** — full body from many angles and actions. Use it when the character can't
-    hold poses or you want more coverage around the body.
-  - **Off** — same framing, seed only.
-  New `mode` field on `POST /api/projects/{id}/dataset/generate`.
+## What was wrong
+A build cancelled during the training stage left the project flagged `train_status = 'training'`
+with no ComfyUI prompt behind it. The reconciler needs a prompt id to clear that flag, so it
+stayed stuck forever — blocking every future build for that persona.
 
-## Changed
-- **Much larger variety sets.** Framings split into a **face** pool (9 head angles) and a
-  **body** pool (**24** poses/views: front, back, both sides, 3/4 front & back, low/high angle,
-  walking, walking away, running, sitting on the floor or a chair, kneeling, crouching, leaning,
-  arms crossed, hands on hips, arms raised, jumping, cowboy shots, twisting, waving). Expressions
-  grew from 10 to **18**. Full-body shots use light expressions (the face is tiny there) so the
-  focus stays on the pose.
+## Fixed
+1. **Auto-heal.** The reconciler now clears an orphaned `training` flag based on ComfyUI reality
+   (a real run always has a prompt id, so a missing one is stale; a vanished prompt is stale once
+   ComfyUI's queue is idle). It runs right before the "already training" check, so simply
+   **clicking Build again self-heals** — you don't even need to open the LoRA tab.
+2. **Stop resets the flag.** Cancelling a running build now takes the project out of `training`
+   as part of the stop, so it can't get stuck again.
 
-## How to use it
-See a weak face on the trained LoRA? Generate a **Faces** batch and add those. Can't get it to
-sit or turn around? Generate a **Poses & views** batch. Everything reconciles into the same
-dataset — cherry-pick, purge the rest (v0.7.5), retrain.
+## After you deploy
+Your stuck **monster-girl** project clears itself the moment you open its LoRA tab or hit Build.
+Just re-run the build (it's on 113 selected images, dataset already staged).
 
-**Image:** `ghcr.io/rhamblen/persona-forge:0.7.6`
+**Image:** `ghcr.io/rhamblen/persona-forge:0.7.7`
 
 ## Upgrading
 No compose changes. Pull and restart:

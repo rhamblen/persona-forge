@@ -1187,13 +1187,31 @@ async def _dataset_folder_exists(folder: str) -> bool:
 
 
 async def _reconcile_training(project_id: int) -> None:
-    """Flip a project's train_status once its ComfyUI training prompt finishes."""
+    """Flip a project's train_status once its ComfyUI training prompt finishes — and heal an
+    ORPHANED 'training' flag left behind by a stopped/failed build. Without this, a build that
+    was cancelled mid-training leaves train_status='training' forever, and every future build
+    dies with 'a training run is already in progress for this persona'.
+
+    Staleness is judged from ComfyUI reality, not from job rows, so it heals correctly even when
+    called from inside the very build that's trying to start: a real run ALWAYS has a
+    train_prompt_id (set together with the flag), so a null prompt id is unconditionally stale;
+    a set-but-vanished prompt is stale only once ComfyUI's queue is idle."""
     with db.connect() as conn:
         row = conn.execute(
             "SELECT train_prompt_id, train_status, train_started_at, train_steps "
             "FROM projects WHERE id = ?", (project_id,)
         ).fetchone()
-    if not row or row["train_status"] != "training" or not row["train_prompt_id"]:
+    if not row or row["train_status"] != "training":
+        return
+
+    def _heal(reason: str) -> None:
+        with db.connect() as conn:
+            conn.execute("UPDATE projects SET train_status = 'error' WHERE id = ?", (project_id,))
+        logs.warn("process", f"cleared an orphaned 'training' flag ({reason})", project_id=project_id)
+
+    # No prompt id → can never have been a live run. Always stale.
+    if not row["train_prompt_id"]:
+        _heal("no prompt id")
         return
     try:
         hist = await comfy.history_all()
@@ -1202,7 +1220,12 @@ async def _reconcile_training(project_id: int) -> None:
         return
     entry = hist.get(row["train_prompt_id"])
     if not entry:
-        return  # still training, or aged out
+        # Prompt gone from history. If ComfyUI's queue is idle, the run is over
+        # (interrupted / aged out) and the flag is stale. If the queue is busy we can't be sure
+        # it isn't ours still running — leave it.
+        if await comfy.queue_size() == 0:
+            _heal("prompt gone, queue idle")
+        return  # still training, or aged out mid-run
     st = comfy.status_of(entry)
     if st == "success":
         started = row["train_started_at"] or 0
@@ -1297,6 +1320,9 @@ async def _start_lora_training(project_id: int, steps: int, rank: int,
     version = detail["current_version"] or {}
     slug = detail["project"]["slug"]
     folder = _input_folder(slug)
+    # Heal a stale 'training' flag (from a stopped/failed build) before the gate, so a rebuild
+    # isn't blocked by a run that isn't actually happening.
+    await _reconcile_training(project_id)
     with db.connect() as conn:
         proj = conn.execute(
             "SELECT trigger_word, train_status, last_train_seconds, last_train_steps "
@@ -2200,6 +2226,13 @@ async def cancel_job(job_id: int) -> dict:
             logs.info("process", "stop: interrupted ComfyUI to free the GPU", job_id=job_id)
         except Exception as exc:  # noqa: BLE001
             logs.warn("integration", f"stop: could not interrupt ComfyUI: {exc}", job_id=job_id)
+        # Reset the project's train flag so a stopped build can't leave it stuck at 'training'
+        # (which would block every future build with 'a training run is already in progress').
+        if j["project_id"] is not None:
+            with db.connect() as conn:
+                conn.execute(
+                    "UPDATE projects SET train_status = 'error' "
+                    "WHERE id = ? AND train_status = 'training'", (j["project_id"],))
     return _job_dict(j)
 
 

@@ -9,6 +9,26 @@ Every version below is a **published GitHub Release** with a matching
 
 ---
 
+## [0.7.7] — 2026-07-26
+
+**Fix: a stopped build could jam all future builds with "a training run is already in progress."**
+(Phase 7.)
+
+### Fixed
+- **Stopping (or a failure of) a build no longer strands the project in `training` forever.**
+  A `lora_build` cancelled during the training stage left `projects.train_status = 'training'`
+  with no ComfyUI prompt behind it. The reconciler needs a prompt id to clear the flag, so it
+  stayed stuck — and every subsequent build died immediately with *"a training run is already in
+  progress for this persona."* Two-part fix:
+  1. **Auto-heal.** `_reconcile_training` now clears an orphaned `training` flag judged from
+     ComfyUI reality (a real run always has a `train_prompt_id`, so a null id is stale; a
+     vanished prompt is stale once ComfyUI's queue is idle). It also runs right before the
+     "already training" gate, so a rebuild self-heals — no need to open the LoRA tab first.
+  2. **Stop resets the flag.** Cancelling a running build now sets `train_status` off `training`
+     as part of the stop, so it can't get stuck in the first place.
+
+---
+
 ## [0.7.6] — 2026-07-25
 
 **Target the dataset at a weak axis, and a lot more variety.** (Phase 7.)
