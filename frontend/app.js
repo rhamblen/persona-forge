@@ -14,7 +14,11 @@ const fmtDur = (secs) => {  // 95 -> "1m35s", 24 -> "24s", 3800 -> "1h03m20s"
   return `${h}h${String(rm).padStart(2, "0")}m${String(r).padStart(2, "0")}s`;
 };
 
-let state = { projectId: null, versions: [], current: null, checkpoints: [], defaultCheckpoint: "" };
+let state = { projectId: null, versions: [], current: null, checkpoints: [], defaultCheckpoint: "", defaultNegative: "", versionOrdinals: {} };
+
+// Version rows carry a GLOBAL auto-increment id; the UI numbers them PER PROJECT (v1, v2, …).
+// API calls still use the real id — only the label is the ordinal.
+const verLabel = (id) => "v" + (state.versionOrdinals[id] || id);
 
 async function api(path, opts) {
   const r = await fetch(path, { headers: { "Content-Type": "application/json" }, ...opts });
@@ -121,6 +125,15 @@ async function loadCheckpoints() {
   }
 }
 
+async function loadPromptDefaults() {
+  try {
+    const d = await api("/api/prompt-defaults");
+    state.defaultNegative = d.negative || "";
+    // Pre-fill the negatives on a fresh form (no project yet) so it's never blank.
+    if (!state.projectId && !$("f-negative").value) $("f-negative").value = state.defaultNegative;
+  } catch { /* leave the field as-is if unreachable */ }
+}
+
 async function loadProject() {
   if (!state.projectId) return;
   const detail = await api(`/api/projects/${state.projectId}`);
@@ -128,21 +141,21 @@ async function loadProject() {
   $("no-project").hidden = true;
   $("studio").hidden = false;
   $("prompt-subtitle").textContent = `${detail.project.name} — build folder: ${detail.build_dir}`;
-  fillForm(state.current);
-  await loadVersions();
+  await loadVersions();       // sets per-project version ordinals first…
+  fillForm(state.current);    // …so the current-version chip can use them
 }
 
 function fillForm(v) {
   if (!v) return;
   $("f-character").value = v.character || "";
   $("f-style").value = v.style || "";
-  $("f-negative").value = v.negative || "";
+  $("f-negative").value = v.negative || state.defaultNegative;
   $("f-seed").value = v.seed ?? 0;
   // Versions saved before 0.2.8 have an empty checkpoint — fall back to the
   // resolved default rather than letting the browser show option 0 (photoreal).
   if (v.checkpoint && state.checkpoints.includes(v.checkpoint)) $("f-checkpoint").value = v.checkpoint;
   else if (state.defaultCheckpoint) $("f-checkpoint").value = state.defaultCheckpoint;
-  $("current-version-chip").textContent = `v${v.id}${v.signed_off ? " · signed off" : ""}`;
+  $("current-version-chip").textContent = `${verLabel(v.id)}${v.signed_off ? " · signed off" : ""}`;
   $("current-version-chip").className = "chip" + (v.signed_off ? " chip-good" : "");
 }
 
@@ -170,6 +183,9 @@ async function loadVersions() {
   const data = await api(`/api/projects/${state.projectId}/versions`);
   state.versions = data.versions;
   const byId = Object.fromEntries(data.versions.map((v) => [v.id, v]));
+  // number this project's versions 1..N by creation order (global id ascending)
+  state.versionOrdinals = {};
+  [...data.versions].sort((a, b) => a.id - b.id).forEach((v, i) => (state.versionOrdinals[v.id] = i + 1));
   const list = [...data.versions].reverse();
 
   $("version-list").innerHTML = list.map((v) => {
@@ -178,7 +194,7 @@ async function loadVersions() {
       <div class="version-rail"><span class="node ${v.signed_off ? "node-good" : ""}"></span></div>
       <div class="version-body">
         <div class="version-head">
-          <strong>v${v.id}</strong>
+          <strong>${verLabel(v.id)}</strong>
           ${v.signed_off ? '<span class="chip chip-good">signed off</span>' : ""}
           ${isCurrent ? '<span class="chip chip-current">current</span>' : ""}
           <span class="chip chip-src">${esc(v.source)}</span>
@@ -201,14 +217,16 @@ async function loadVersions() {
 }
 
 async function rollback(vid) {
+  const label = verLabel(vid);
   await api(`/api/projects/${state.projectId}/rollback/${vid}`, { method: "POST" });
-  msg($("studio-msg"), `Rolled back to v${vid}. Nothing was deleted.`, "ok");
+  msg($("studio-msg"), `Rolled back to ${label}. Nothing was deleted.`, "ok");
   await loadProject();
 }
 
 async function signOff(vid) {
+  const label = verLabel(vid);
   await api(`/api/versions/${vid}/signoff`, { method: "POST" });
-  msg($("studio-msg"), `v${vid} signed off as the baseline.`, "ok");
+  msg($("studio-msg"), `${label} signed off as the baseline.`, "ok");
   await loadProject();
 }
 
@@ -1234,7 +1252,7 @@ $("generate-btn").addEventListener("click", () => generate());
 $("reroll-seed").addEventListener("click", () => { $("f-seed").value = Math.floor(Math.random() * 2 ** 31); });
 
 $("save-version-btn").addEventListener("click", async () => {
-  try { const v = await saveVersion(); msg($("studio-msg"), `Saved as v${v.id}.`, "ok"); }
+  try { const v = await saveVersion(); msg($("studio-msg"), `Saved as ${verLabel(v.id)}.`, "ok"); }
   catch (e) { msg($("studio-msg"), e.message, "bad"); }
 });
 
@@ -1308,6 +1326,7 @@ $("np-create").addEventListener("click", async () => {
   showView("prompt");
   await refreshStatus();
   await loadCheckpoints();
+  await loadPromptDefaults();
   await loadProjects().catch((e) => msg($("studio-msg"), e.message, "bad"));
   setInterval(refreshStatus, POLL_MS);
   startLogPolling(true);

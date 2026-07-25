@@ -400,6 +400,22 @@ def slugify(name: str) -> str:
     return slug
 
 
+def _default_negative() -> str:
+    """The canonical starter negative prompt — read from the base-character template so
+    there's one source of truth. New projects get this instead of a blank negative."""
+    try:
+        return (workflows.defaults_for("base-character").get("negative") or "").strip()
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+@app.get("/api/prompt-defaults")
+async def prompt_defaults() -> dict:
+    """Starter values the Prompt Studio pre-fills for a fresh persona (e.g. the default
+    negative prompt), so the negatives field isn't blank."""
+    return {"negative": _default_negative()}
+
+
 class ProjectCreate(BaseModel):
     name: str = Field(min_length=1, max_length=80)
     character: str = ""
@@ -418,6 +434,9 @@ async def create_project(body: ProjectCreate) -> dict:
     # first entry (photoreal), so the first generate looked wrong. Resolve it now
     # so the initial version records a real, anime-first model.
     checkpoint = body.checkpoint or await comfy.default_checkpoint()
+    # A fresh persona with no negatives renders low-quality junk; seed the canonical
+    # starter negative when the caller didn't supply one (the user can edit it after).
+    negative = (body.negative or "").strip() or _default_negative()
 
     if not BUILDS_ROOT.is_dir():
         raise HTTPException(503, f"builds root not mounted at {BUILDS_ROOT}")
@@ -443,7 +462,7 @@ async def create_project(body: ProjectCreate) -> dict:
             """INSERT INTO prompt_versions
                (project_id, parent_id, character, style, negative, checkpoint, seed, source, note)
                VALUES (?, NULL, ?, ?, ?, ?, ?, 'initial', 'initial version')""",
-            (project_id, body.character, body.style, body.negative, checkpoint, body.seed),
+            (project_id, body.character, body.style, negative, checkpoint, body.seed),
         )
         conn.execute(
             "UPDATE projects SET current_version_id = ? WHERE id = ?", (cur.lastrowid, project_id)

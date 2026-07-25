@@ -9,6 +9,23 @@ Every version below is a **published GitHub Release** with a matching
 
 ---
 
+## [0.7.1] — 2026-07-25
+
+**Prompt Studio fixes.** (Phase 7.)
+
+### Fixed
+- **New personas start with default negatives instead of a blank field.** A fresh project
+  used to store an empty negative prompt, so the Prompt Studio negatives field came up blank.
+  New projects now seed the canonical starter negative (read from the `base-character` template
+  — one source of truth, exposed at `GET /api/prompt-defaults`), pre-filled in the field and
+  fully editable. Existing projects with an empty negative also show the default.
+- **Version numbers are now per-persona (v1, v2, …), not the global counter.** The version rail
+  and current-version chip showed the global `prompt_versions` row id, so a new character's
+  first version could read "v37". The UI now numbers each project's versions from 1 by creation
+  order; API calls still use the real id under the hood.
+
+---
+
 ## [0.7.0] — 2026-07-25
 
 **Unattended builds: a background job engine.** (Phase 7 — orchestration.)
