@@ -176,10 +176,14 @@ LAN; no Claude/Anthropic in the runtime loop.
   (auto-maps). `SaveImageTextDataSetToFolder` writes to OUTPUT not INPUT, so the two-step
   captioned-folder path doesn't work — inline captioning avoids it.
 - **Test artifacts left in ComfyUI input:** `pf-uploadtest`, `pf-traintest` (harmless).
-- **Remaining:** 0.5 LoRA trainer · 0.6 pose/expression studio · 0.7 hardening · 1.0 release.
-  **Phase 5 next** — training backend TBD (see PROJECT_PLAN: reuse ComfyUI-MCP `train_*`
-  flows or a kohya/sd-scripts container). Selected dataset images are `images` rows with
-  `kind='dataset'` and `selected=1`.
+- ✅ **Phase 5 (LoRA trainer) COMPLETE** through 0.5.3 — tab, trigger word, dataset staging,
+  native `TrainLoraNode` training (validated), per-image Florence-2 captioning. **Development
+  of the LoRA tab is handed to the Poses/Phase-6 session** as of 2026-07-25 (one stream). The
+  remaining LoRA-related work — **wiring the trained LoRA into pose generation** — is Phase-6
+  work. See `docs/handover-lora-into-poses.md`.
+- ✅ **Phase 6 (pose/expression studio)** — poses grid/edit/regenerate (0.6.0) + SillyTavern
+  sprite export (0.6.1) done. **In progress:** load the trained LoRA into pose generation.
+- **Remaining:** 0.7 hardening · 1.0 release.
 
 ## Track A note (separate from the app)
 
