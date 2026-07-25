@@ -391,6 +391,24 @@
               <div class="poses-grid" id="poses-grid">
                 <p class="muted">No poses yet — add one or load a preset.</p>
               </div>
+
+              <div class="panel export-panel" id="poses-export">
+                <div class="panel-head">
+                  <h2>Export to SillyTavern</h2>
+                  <span class="muted small" id="poses-export-state"></span>
+                </div>
+                <p class="muted small">
+                  Mattes each rendered pose to a transparent PNG (BEN2) and names it for
+                  SillyTavern. Sprites are staged in the build folder — copy them into your
+                  character’s folder yourself; nothing is written to SillyTavern automatically.
+                </p>
+                <div class="export-controls">
+                  <button class="btn btn-primary" id="poses-export-btn">Export to SillyTavern</button>
+                  <code class="export-folder" id="poses-export-folder"></code>
+                </div>
+                <p class="hint" id="poses-export-msg"></p>
+                <div class="sprite-grid" id="poses-export-grid"></div>
+              </div>
             </div>
 
             <div class="poses-editor panel" id="poses-editor" hidden>

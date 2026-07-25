@@ -9,6 +9,24 @@ Every version below is a **published GitHub Release** with a matching
 
 ---
 
+## [0.6.1] — 2026-07-25
+
+**Export the pose set to SillyTavern sprites.** (Phase 6.)
+
+### Added
+- **Export to SillyTavern** on the Poses tab. Every rendered pose is matted to a
+  **transparent PNG** (BEN2) and named for SillyTavern — an exact expression name (e.g.
+  `joy`) is kept verbatim so ST recognises it, anything else is slugified, and name
+  collisions are de-duped. Sprites land in `<build>/export/<Character>/` and are **staged
+  only — never auto-copied into SillyTavern** (the deliberate manual step from the project's
+  settled decisions). Queued + reconciled from ComfyUI history like the rest.
+- New `workflows/bg-remove.json` (BEN2 `rem_mode` + WAS `Image Save` with
+  `prefix_as_filename` for exact `<name>.png` output — the only matte path that works on this
+  ComfyUI, per `workflows/README.md`). New `export_jobs` table; endpoints
+  `GET/POST /api/projects/{id}/poses/export`.
+
+---
+
 ## [0.5.2] — 2026-07-25
 
 **The LoRA actually trains now.** (Phase 5 — released after 0.6.0 because the LoRA and

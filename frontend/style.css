@@ -262,6 +262,30 @@ code { background: var(--bg-raised); padding: 1px 5px; border-radius: 4px; font-
 .pose-ai input:focus { outline: none; border-color: var(--accent); }
 .poses-editor .actions { flex-wrap: wrap; }
 
+/* ---- export to SillyTavern (0.6.1) ---- */
+.export-panel { margin-top: 14px; }
+.export-panel .panel-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.export-controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 8px 0; }
+.export-folder { font-family: ui-monospace, Consolas, monospace; font-size: 12px;
+  color: var(--text-dim); background: var(--bg-raised); border: 1px solid var(--line);
+  border-radius: 6px; padding: 4px 8px; word-break: break-all; }
+.sprite-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; margin-top: 8px; }
+.sprite-card { margin: 0; }
+.sprite-thumb { aspect-ratio: 1; border: 1px solid var(--line); border-radius: 8px; overflow: hidden;
+  /* checkerboard so a transparent sprite is legible */
+  background-color: var(--bg-raised);
+  background-image:
+    linear-gradient(45deg, var(--line) 25%, transparent 25%),
+    linear-gradient(-45deg, var(--line) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, var(--line) 75%),
+    linear-gradient(-45deg, transparent 75%, var(--line) 75%);
+  background-size: 14px 14px;
+  background-position: 0 0, 0 7px, 7px -7px, -7px 0; }
+.sprite-thumb img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.sprite-card figcaption { font-size: 11px; color: var(--text-dim); text-align: center;
+  margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  font-family: ui-monospace, Consolas, monospace; }
+
 /* ---------- LoRA (Phase C) ---------- */
 .lora-row { display: flex; justify-content: space-between; align-items: baseline;
   padding: 8px 0; border-bottom: 1px solid var(--line); }

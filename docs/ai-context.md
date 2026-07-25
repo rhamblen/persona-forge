@@ -124,6 +124,12 @@ LAN; no Claude/Anthropic in the runtime loop.
   reconcile via `poses` table), select→zoom→edit (manual or `ollama.revise()`)→regenerate one.
   Endpoints under `/api/projects/{id}/poses`. Renders base prompt + pose `modifier` via the
   base-character `expression` param; will use the trained LoRA once Phase 5 completes.
+- **0.6.1 (current):** Phase 6 — Export to SillyTavern on the Poses tab. Mattes each rendered
+  pose to a transparent PNG (BEN2) named for ST (exact expression names verbatim, else
+  slugified, de-duped), staged to `<build>/export/<Character>/`, never auto-copied. New
+  `workflows/bg-remove.json` (BEN2 + WAS Image Save prefix_as_filename), `export_jobs` table,
+  `GET/POST /api/projects/{id}/poses/export`. (Built in a parallel session; committed after
+  review — compiles, manifest valid, BEN2 correct.)
 - **0.5.1:** logging overhaul — added a `verbose` level (below debug) and
   instrumented the pipeline throughout (not just boot). Log-level convention:
   **verbose** = cross-system handshakes / per-file share copies / polls (integration+local);

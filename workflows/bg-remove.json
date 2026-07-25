@@ -1,0 +1,41 @@
+{
+  "1": {
+    "class_type": "LoadImage",
+    "inputs": { "image": "example.png" },
+    "_meta": { "title": "Rendered pose (from ComfyUI input)" }
+  },
+  "2": {
+    "class_type": "easy imageRemBg",
+    "inputs": {
+      "images": ["1", 0],
+      "rem_mode": "BEN2",
+      "image_output": "Hide",
+      "save_prefix": "ComfyUI",
+      "add_background": "none",
+      "refine_foreground": true
+    },
+    "_meta": { "title": "Transparent background (BEN2)" }
+  },
+  "3": {
+    "class_type": "Image Save",
+    "inputs": {
+      "images": ["2", 0],
+      "output_path": "persona-forge/export",
+      "filename_prefix": "sprite",
+      "filename_delimiter": "_",
+      "filename_number_padding": 4,
+      "filename_number_start": "false",
+      "extension": "png",
+      "dpi": 300,
+      "quality": 100,
+      "optimize_image": "true",
+      "lossless_webp": "false",
+      "overwrite_mode": "prefix_as_filename",
+      "show_history": "false",
+      "show_history_by_prefix": "true",
+      "embed_workflow": "false",
+      "show_previews": "true"
+    },
+    "_meta": { "title": "Save <name>.png" }
+  }
+}

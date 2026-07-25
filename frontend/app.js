@@ -800,6 +800,7 @@ $("lora-train-btn").addEventListener("click", async () => {
 let posesTimer = null;
 let posesCache = [];
 let selectedPoseId = null;
+let exportGenerating = false;
 
 function poseImageUrl(p) {
   if (!p.filename) return "";
@@ -828,7 +829,8 @@ async function loadPoses() {
       const cur = posesCache.find((p) => p.id === selectedPoseId);
       if (cur) refreshPosePreview(cur); else closePoseEditor();
     }
-    if (data.generating) startPosesPolling(); else stopPosesPolling();
+    await loadExport();
+    if (data.generating || exportGenerating) startPosesPolling(); else stopPosesPolling();
   } catch (e) { msg($("poses-msg"), e.message, "bad"); }
 }
 
@@ -965,6 +967,48 @@ async function deletePose() {
     loadPoses();
   } catch (e) { msg($("pose-ed-msg"), e.message, "bad"); }
 }
+
+/* ---- export to SillyTavern (0.6.1) ---- */
+async function loadExport() {
+  if (!state.projectId) { exportGenerating = false; return; }
+  try {
+    const d = await api(`/api/projects/${state.projectId}/poses/export`);
+    exportGenerating = d.generating;
+    renderExport(d);
+  } catch (e) { /* soft — the poses grid already surfaces project errors */ }
+}
+
+function renderExport(d) {
+  $("poses-export-btn").disabled = !d.exportable || d.generating;
+  $("poses-export-folder").textContent = d.folder ? `/builds/${d.folder}` : "";
+  const st = $("poses-export-state");
+  if (d.generating) st.textContent = `removing backgrounds… ${d.counts.pending} left`;
+  else if (d.counts.done) st.textContent =
+    `${d.counts.done} sprite(s) ready${d.counts.error ? `, ${d.counts.error} failed` : ""}`;
+  else st.textContent = d.exportable ? `${d.exportable} rendered pose(s) ready to export` : "render some poses first";
+  $("poses-export-grid").innerHTML = (d.sprites || []).map((s) => {
+    const url = `/api/image?filename=${encodeURIComponent(s.filename)}&subfolder=${encodeURIComponent(s.subfolder)}`;
+    return `<figure class="sprite-card"><div class="sprite-thumb"><img src="${url}" loading="lazy" alt="${esc(s.target_name)}" /></div>` +
+      `<figcaption>${esc(s.target_name)}</figcaption></figure>`;
+  }).join("");
+}
+
+async function startExport() {
+  if (!state.projectId) return;
+  const btn = $("poses-export-btn");
+  btn.disabled = true;
+  msg($("poses-export-msg"), "Removing backgrounds…");
+  try {
+    const r = await api(`/api/projects/${state.projectId}/poses/export`, { method: "POST" });
+    msg($("poses-export-msg"),
+      `Exporting ${r.queued} sprite(s) → /builds/${r.folder}`, "ok");
+    exportGenerating = true;
+    startPosesPolling();
+    loadExport();
+  } catch (e) { msg($("poses-export-msg"), e.message, "bad"); btn.disabled = false; }
+}
+
+$("poses-export-btn").addEventListener("click", startExport);
 
 $("poses-grid").addEventListener("click", (e) => {
   const card = e.target.closest(".pose-card");

@@ -1364,6 +1364,175 @@ async def poses_generate_all(project_id: int) -> dict:
     return {"queued": queued}
 
 
+# --------------------------------------------------------------------------- #
+# export to SillyTavern (Phase D, 0.6.1): matte each rendered pose to a
+# transparent PNG (BEN2) and save it under its SillyTavern filename. Staged into
+# the build folder only — never auto-copied into ST (deliberate manual step).
+# --------------------------------------------------------------------------- #
+
+_EXPR_SET = set(EXPRESSIONS_28)
+_SPRITE_RE = re.compile(r"[^a-z0-9]+")
+_FOLDER_RE = re.compile(r"[^A-Za-z0-9 _-]+")
+
+
+def _sprite_stem(pose_name: str) -> str:
+    """The filename stem a pose exports under. An exact SillyTavern expression name
+    (e.g. 'joy') is kept verbatim so ST recognises it; anything else is slugified."""
+    low = pose_name.strip().lower()
+    if low in _EXPR_SET:
+        return low
+    return _SPRITE_RE.sub("_", low).strip("_") or "pose"
+
+
+def _export_char_folder(name: str) -> str:
+    """A filesystem-safe character folder name derived from the project name."""
+    cleaned = re.sub(r"\s+", " ", _FOLDER_RE.sub("", name)).strip()
+    return cleaned or "character"
+
+
+def _export_folder_path(slug: str, name: str) -> str:
+    """Where the sprites land, relative to ComfyUI's output root (== /builds)."""
+    return f"{slug}/export/{_export_char_folder(name)}"
+
+
+async def _reconcile_export(project_id: int) -> None:
+    """Flip queued export jobs to done/error as their BEN2 renders finish."""
+    with db.connect() as conn:
+        pending = conn.execute(
+            "SELECT id, prompt_id FROM export_jobs WHERE project_id = ? AND status = 'pending' AND prompt_id != ''",
+            (project_id,),
+        ).fetchall()
+    if not pending:
+        return
+    try:
+        hist = await comfy.history_all()
+    except Exception as exc:  # noqa: BLE001
+        logs.warn("integration", f"could not read history to reconcile export: {exc}")
+        return
+    done = failed = 0
+    with db.connect() as conn:
+        for job in pending:
+            entry = hist.get(job["prompt_id"])
+            if not entry:
+                continue
+            st = comfy.status_of(entry)
+            if st == "success":
+                imgs = comfy.outputs_from(entry)
+                if imgs:
+                    conn.execute(
+                        "UPDATE export_jobs SET filename = ?, subfolder = ?, status = 'done' WHERE id = ?",
+                        (imgs[-1]["filename"], imgs[-1]["subfolder"], job["id"]),
+                    )
+                    done += 1
+                    logs.verbose("process", "sprite exported", export_id=job["id"], file=imgs[-1]["filename"])
+            elif st == "error":
+                conn.execute("UPDATE export_jobs SET status = 'error' WHERE id = ?", (job["id"],))
+                failed += 1
+                logs.warn("process", "a sprite export failed", export_id=job["id"])
+    if done or failed:
+        logs.info("process", f"export reconcile: {done} done, {failed} failed", project_id=project_id)
+
+
+@app.get("/api/projects/{project_id}/poses/export")
+async def poses_export_status(project_id: int) -> dict:
+    await _reconcile_export(project_id)
+    detail = await get_project(project_id)
+    name, slug = detail["project"]["name"], detail["project"]["slug"]
+    with db.connect() as conn:
+        if conn.execute("SELECT 1 FROM projects WHERE id = ?", (project_id,)).fetchone() is None:
+            raise HTTPException(404, "project not found")
+        rows = conn.execute(
+            "SELECT * FROM export_jobs WHERE project_id = ? ORDER BY id", (project_id,)
+        ).fetchall()
+        exportable = conn.execute(
+            "SELECT COUNT(*) n FROM poses WHERE project_id = ? AND status = 'done' AND filename != ''",
+            (project_id,),
+        ).fetchone()["n"]
+    jobs = [dict(r) for r in rows]
+    pending = sum(1 for j in jobs if j["status"] == "pending")
+    sprites = [
+        {"target_name": j["target_name"], "filename": j["filename"], "subfolder": j["subfolder"]}
+        for j in jobs if j["status"] == "done" and j["filename"]
+    ]
+    return {
+        "folder": _export_folder_path(slug, name),
+        "exportable": exportable,
+        "generating": pending > 0,
+        "counts": {
+            "total": len(jobs), "pending": pending,
+            "done": sum(1 for j in jobs if j["status"] == "done"),
+            "error": sum(1 for j in jobs if j["status"] == "error"),
+        },
+        "sprites": sprites,
+    }
+
+
+@app.post("/api/projects/{project_id}/poses/export")
+async def poses_export(project_id: int) -> dict:
+    """Matte every rendered pose to a transparent SillyTavern-named PNG via BEN2."""
+    detail = await get_project(project_id)
+    name, slug = detail["project"]["name"], detail["project"]["slug"]
+    with db.connect() as conn:
+        inflight = conn.execute(
+            "SELECT COUNT(*) n FROM export_jobs WHERE project_id = ? AND status = 'pending'",
+            (project_id,),
+        ).fetchone()["n"]
+        if inflight:
+            raise HTTPException(409, "an export is already in progress for this persona")
+        poses = conn.execute(
+            "SELECT * FROM poses WHERE project_id = ? AND status = 'done' AND filename != '' ORDER BY position, id",
+            (project_id,),
+        ).fetchall()
+    if not poses:
+        raise HTTPException(400, "no rendered poses to export — generate the set first")
+
+    out_path = _export_folder_path(slug, name)
+    up_folder = f"pf-export-{slug}"
+    # a fresh export replaces the previous batch's job rows
+    with db.connect() as conn:
+        conn.execute("DELETE FROM export_jobs WHERE project_id = ?", (project_id,))
+
+    logs.info("process", f"exporting {len(poses)} pose(s) → transparent sprites in {out_path}",
+              project_id=project_id, folder=out_path)
+    queued, errors, used = 0, [], {}
+    for p in poses:
+        stem = _sprite_stem(p["name"])
+        seen = used.get(stem, 0)
+        used[stem] = seen + 1
+        if seen:  # two poses map to the same name — don't let them overwrite each other
+            stem = f"{stem}_{seen + 1}"
+        src = BUILDS_ROOT / (p["subfolder"] or f"{slug}/images") / p["filename"]
+        try:
+            logs.verbose("local", "reading rendered pose off builds share", path=str(src))
+            data = src.read_bytes()
+            up = await comfy.upload_image(data, f"pose_{p['id']}.png", up_folder)
+            img_ref = f"{up['subfolder']}/{up['name']}" if up.get("subfolder") else up["name"]
+            graph = workflows.build_graph("bg-remove", {
+                "image": img_ref,
+                "output_path": out_path,
+                "filename_prefix": stem,
+                "add_background": "none",
+            })
+            prompt_id = await comfy.submit(graph)
+            with db.connect() as conn:
+                conn.execute(
+                    "INSERT INTO export_jobs (project_id, pose_id, prompt_id, target_name) VALUES (?, ?, ?, ?)",
+                    (project_id, p["id"], prompt_id, f"{stem}.png"),
+                )
+            queued += 1
+        except FileNotFoundError:
+            logs.warn("local", "pose image missing on the builds share", path=str(src))
+            errors.append(f"{p['name']}: source image not found on /builds")
+        except (workflows.WorkflowError, comfy.ComfyError) as exc:
+            logs.error("integration", f"export queue failed for pose {p['id']}: {exc}", path=str(src))
+            errors.append(f"{p['name']}: {exc}")
+    if queued == 0:
+        raise HTTPException(502, f"could not queue any exports: {errors[:3]}")
+    logs.info("process", f"export queued {queued}/{len(poses)} sprite(s)",
+              project_id=project_id, folder=out_path, failed=len(errors))
+    return {"queued": queued, "folder": out_path, "errors": errors[:5]}
+
+
 # --- static frontend -------------------------------------------------------
 class NoCacheStaticFiles(StaticFiles):
     """Serve the frontend with `Cache-Control: no-cache` so a browser always

@@ -1,0 +1,13 @@
+{
+  "id": "bg-remove",
+  "name": "Background removal (BEN2) → transparent sprite",
+  "description": "Phase D export: matte one already-rendered pose to a transparent PNG with BEN2 and save it under its SillyTavern filename. Only BEN2 mattes cleanly on this ComfyUI (see workflows/README.md gotchas); the WAS Image Save 'prefix_as_filename' mode is what yields exact <name>.png instead of <name>_00001_.png.",
+  "file": "bg-remove.json",
+  "output_node": "3",
+  "params": {
+    "image":           { "node": "1", "input": "image",           "type": "text", "label": "Input image (ComfyUI input path)" },
+    "add_background":  { "node": "2", "input": "add_background",  "type": "text", "label": "Background (none = transparent, else a colour)" },
+    "output_path":     { "node": "3", "input": "output_path",     "type": "path", "label": "Export folder (relative to ComfyUI output)" },
+    "filename_prefix": { "node": "3", "input": "filename_prefix", "type": "text", "label": "Output filename stem" }
+  }
+}

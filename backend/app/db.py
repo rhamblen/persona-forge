@@ -92,6 +92,23 @@ CREATE TABLE IF NOT EXISTS poses (
 );
 
 CREATE INDEX IF NOT EXISTS idx_poses_project ON poses(project_id, position);
+
+-- Phase D (0.6.1): one row per pose being exported to a transparent sprite. Each row
+-- is a BEN2 background-removal render queued in ComfyUI, reconciled from history as it
+-- finishes. `target_name` is the SillyTavern filename the sprite is saved under.
+CREATE TABLE IF NOT EXISTS export_jobs (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id  INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    pose_id     INTEGER,
+    prompt_id   TEXT NOT NULL,
+    target_name TEXT NOT NULL DEFAULT '',
+    filename    TEXT NOT NULL DEFAULT '',
+    subfolder   TEXT NOT NULL DEFAULT '',
+    status      TEXT NOT NULL DEFAULT 'pending',   -- pending | done | error
+    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_exportjobs_project ON export_jobs(project_id, status);
 """
 
 
