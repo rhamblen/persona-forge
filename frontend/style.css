@@ -320,6 +320,9 @@ code { background: var(--bg-raised); padding: 1px 5px; border-radius: 4px; font-
   font-size: 12px; margin-left: 4px; }
 .ds-target input { width: 64px; background: var(--bg-raised); color: var(--text);
   border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; font: inherit; }
+.ds-variety { display: flex; align-items: center; gap: 6px; color: var(--text-dim);
+  font-size: 12px; cursor: pointer; }
+.ds-variety input { accent-color: var(--accent); cursor: pointer; }
 .ds-genstate { margin-left: auto; }
 .ds-progress-head { display: flex; justify-content: space-between; align-items: baseline;
   margin-bottom: 5px; }

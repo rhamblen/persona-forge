@@ -700,13 +700,15 @@ async function datasetGenerate(count) {
   if (!state.projectId) return;
   const btnA = $("ds-generate"), btnB = $("ds-more");
   btnA.disabled = btnB.disabled = true;
+  const poseVariety = $("ds-variety") ? $("ds-variety").checked : true;
   msg($("ds-msg"), `Queuing ${count} image${count === 1 ? "" : "s"}…`);
   try {
     const { queued } = await api(`/api/projects/${state.projectId}/dataset/generate`, {
       method: "POST",
-      body: JSON.stringify({ count }),
+      body: JSON.stringify({ count, pose_variety: poseVariety }),
     });
-    msg($("ds-msg"), `Queued ${queued}. They'll appear below as ComfyUI finishes them.`, "ok");
+    const how = poseVariety ? " across varied poses & framings" : "";
+    msg($("ds-msg"), `Queued ${queued}${how}. They'll appear below as ComfyUI finishes them.`, "ok");
     startDatasetPolling();
     loadDataset();
   } catch (e) {

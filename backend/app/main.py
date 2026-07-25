@@ -787,6 +787,28 @@ async def list_builds() -> dict:
 
 MAX_DATASET_BATCH = int(os.getenv("MAX_DATASET_BATCH", "60"))
 
+# A LoRA only learns identity *independent of stance* if the training set shows the
+# character in many framings and poses. Left to vary only the seed, every candidate is
+# the same waist-up stance, so the LoRA overfits one pose and then fights pose prompts.
+# When pose variety is on we cycle candidates across this set, injecting each entry as
+# the base-character `expression` suffix (node 5) — the same, already-validated lever the
+# Poses tab uses. Deliberately framing/angle-led (not facial expression); keep entries
+# short and non-conflicting so they win cleanly over any framing baked into the style.
+DATASET_POSES = [
+    "full body shot, standing, relaxed natural pose, front view",
+    "full body, walking forward, mid-stride, dynamic pose",
+    "sitting down, relaxed, hands resting in lap",
+    "three-quarter view, upper body, turned slightly",
+    "side profile view, looking to the side",
+    "arms crossed, confident stance, front view",
+    "waving hello, one hand raised, friendly",
+    "cowboy shot, hands on hips, standing",
+    "full body, from a slightly low angle, standing",
+    "three-quarter back view, looking over the shoulder",
+    "close-up portrait, head and shoulders",
+    "leaning back, casual, seated",
+]
+
 
 def _version_prompt_params(version: dict[str, Any]) -> dict[str, Any]:
     """The prompt fields shared by preview + dataset generation (seed added by caller)."""
@@ -846,27 +868,53 @@ async def _reconcile_dataset(project_id: int) -> None:
 
 class DatasetGenerateRequest(BaseModel):
     count: int = 30
+    # Spread candidates across DATASET_POSES so the training set has pose/framing variety
+    # (the fix for weak, pose-locked LoRAs). Turn off for a same-pose, seed-only batch.
+    pose_variety: bool = True
 
 
 @app.post("/api/projects/{project_id}/dataset/generate")
 async def dataset_generate(project_id: int, body: DatasetGenerateRequest) -> dict:
-    """Queue `count` candidate images from the current prompt, each at a fresh seed."""
+    """Queue `count` candidate images from the current prompt.
+
+    With `pose_variety` on (default) each candidate is drawn from a different framing/pose
+    in DATASET_POSES *and* a fresh seed, so the resulting training set teaches identity
+    independent of stance. With it off, only the seed varies (the original behaviour).
+    """
     detail = await get_project(project_id)
     version = detail["current_version"] or {}
     slug = detail["project"]["slug"]
     count = max(1, min(body.count, MAX_DATASET_BATCH))
     base = _version_prompt_params(version)
+    vary = body.pose_variety
 
-    logs.info("process", f"dataset: queuing a batch of {count} at fresh seeds",
+    # Continue the pose rotation across successive batches (Generate 30, then +10 more)
+    # so coverage stays even instead of restarting at pose 0 each time.
+    offset = 0
+    if vary:
+        with db.connect() as conn:
+            offset = conn.execute(
+                "SELECT COUNT(*) n FROM dataset_jobs WHERE project_id = ?", (project_id,),
+            ).fetchone()["n"]
+
+    logs.info("process",
+              f"dataset: queuing a batch of {count} "
+              + (f"across {len(DATASET_POSES)} pose/framing variations"
+                 if vary else "at fresh seeds (same-pose)"),
               project_id=project_id, slug=slug)
     queued = 0
     with db.connect() as conn:
         for i in range(count):
             seed = random.randint(1, 2**31 - 1)
             params = {**base, "seed": seed, "output_prefix": f"{slug}/images/ds"}
+            pose = None
+            if vary:
+                pose = DATASET_POSES[(offset + i) % len(DATASET_POSES)]
+                params["expression"] = pose
             try:
                 graph = workflows.build_graph("base-character", params)
-                logs.verbose("process", f"queuing dataset image {i + 1}/{count}", seed=seed)
+                logs.verbose("process", f"queuing dataset image {i + 1}/{count}",
+                             seed=seed, pose=pose)
                 prompt_id = await comfy.submit(graph)
             except (workflows.WorkflowError, comfy.ComfyError) as exc:
                 # stop the batch but keep whatever already queued
@@ -882,7 +930,7 @@ async def dataset_generate(project_id: int, body: DatasetGenerateRequest) -> dic
             queued += 1
 
     logs.info("process", f"dataset: queued {queued} image(s)", project_id=project_id, slug=slug)
-    return {"queued": queued}
+    return {"queued": queued, "pose_variety": vary}
 
 
 @app.get("/api/projects/{project_id}/dataset")

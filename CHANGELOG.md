@@ -9,6 +9,30 @@ Every version below is a **published GitHub Release** with a matching
 
 ---
 
+## [0.7.2] — 2026-07-25
+
+**Pose & framing variety in the Dataset Builder — the fix for weak, pose-locked LoRAs.** (Phase 7.)
+
+### Changed
+- **Dataset batches now spread candidates across a range of poses and framings** instead of
+  varying only the seed. Every candidate is drawn from a different framing/pose (full body,
+  sitting, walking, arms crossed, three-quarter, side profile, low angle, back view, portrait…)
+  *and* a fresh seed. This is the highest-leverage quality fix in the pipeline: a training set
+  built this way teaches the LoRA identity **independent of stance**, so the trained character
+  can actually do the starter poses instead of collapsing to the one waist-up stance it was
+  trained on (the `sweetie-pie` failure). The pose is injected through the base-character
+  `expression` suffix — the same, already-validated lever the Poses tab uses — so no new
+  workflow or graph change was needed.
+- **The rotation continues across batches.** *Generate 30* then *+10 more* keeps cycling from
+  where the last batch left off, so pose coverage stays even rather than restarting at pose 0.
+
+### Added
+- **"Pose & framing variety" toggle** on the Dataset tab (on by default). Uncheck it for a
+  same-pose, seed-only batch — the original behaviour — when you deliberately want one stance.
+  New `pose_variety` field on `POST /api/projects/{id}/dataset/generate` (defaults to `true`).
+
+---
+
 ## [0.7.1] — 2026-07-25
 
 **Prompt Studio fixes.** (Phase 7.)
