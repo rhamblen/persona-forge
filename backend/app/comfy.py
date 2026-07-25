@@ -118,6 +118,36 @@ async def queue_size() -> int:
         return -1
 
 
+async def interrupt() -> bool:
+    """Interrupt ComfyUI's currently running prompt (POST /interrupt) — frees the GPU now.
+    Used when a build is stopped: the cooperative job-cancel only halts the pipeline, so this
+    stops the in-flight training/render already handed to ComfyUI. Best-effort."""
+    logs.verbose("integration", "→ ComfyUI POST interrupt")
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as c:
+            r = await c.post(f"{COMFYUI_URL}/interrupt")
+            r.raise_for_status()
+        logs.info("integration", "interrupted the running ComfyUI prompt")
+        return True
+    except Exception as exc:  # noqa: BLE001
+        logs.warn("integration", f"could not interrupt ComfyUI: {exc}")
+        return False
+
+
+async def clear_pending() -> bool:
+    """Clear ComfyUI's pending queue (POST /queue {clear:true}) — drops not-yet-started
+    prompts (e.g. queued pose renders) so a stopped build doesn't keep firing. Best-effort."""
+    logs.verbose("integration", "→ ComfyUI POST queue clear")
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as c:
+            r = await c.post(f"{COMFYUI_URL}/queue", json={"clear": True})
+            r.raise_for_status()
+        return True
+    except Exception as exc:  # noqa: BLE001
+        logs.warn("integration", f"could not clear ComfyUI queue: {exc}")
+        return False
+
+
 async def submit(graph: dict[str, Any], client_id: str = "persona-forge") -> str:
     """POST an API-format workflow. Returns prompt_id."""
     logs.verbose("integration", "→ ComfyUI POST prompt", nodes=len(graph), client_id=client_id,

@@ -840,6 +840,7 @@ $("lora-train-btn").addEventListener("click", async () => {
 /* ---------------- unattended build (Phase 7, job engine) ---------------- */
 
 let buildTimer = null;
+let currentBuildId = null;
 function stopBuildPolling() { clearInterval(buildTimer); buildTimer = null; }
 function startBuildPolling() {
   if (buildTimer) return;
@@ -855,10 +856,12 @@ async function loadBuild() {
     const d = await api(`/api/projects/${state.projectId}/jobs`);
     const build = (d.jobs || []).find((j) => j.kind === "lora_build"); // list is newest-first
     const st = $("build-status"), prog = $("build-progress"), bar = $("build-bar");
-    const btn = $("build-btn"), m = $("build-msg");
-    if (!build) { st.textContent = ""; st.className = "lora-train-status small muted"; prog.hidden = true; btn.disabled = false; stopBuildPolling(); return; }
+    const btn = $("build-btn"), m = $("build-msg"), stopBtn = $("build-stop");
+    if (!build) { st.textContent = ""; st.className = "lora-train-status small muted"; prog.hidden = true; btn.disabled = false; if (stopBtn) stopBtn.hidden = true; currentBuildId = null; stopBuildPolling(); return; }
     const active = build.status === "queued" || build.status === "running";
+    currentBuildId = build.id;
     btn.disabled = active;
+    if (stopBtn) { stopBtn.hidden = !active; stopBtn.disabled = false; }
     st.textContent = build.status === "running" ? `running · ${build.stage || "starting"}`
       : build.status === "queued" ? "queued"
       : build.status === "done" ? "done ✓"
@@ -892,6 +895,19 @@ $("build-btn").addEventListener("click", async () => {
     startBuildPolling();
     loadBuild();
   } catch (e) { msg($("lora-build-err"), e.message, "bad"); btn.disabled = false; }
+});
+
+$("build-stop").addEventListener("click", async () => {
+  if (!currentBuildId) return;
+  if (!confirm("Stop this build? It cancels the training/rendering in progress and frees the GPU — progress so far is lost.")) return;
+  const sb = $("build-stop");
+  sb.disabled = true;
+  msg($("lora-build-err"), "Stopping the build and freeing the GPU…");
+  try {
+    await api(`/api/jobs/${currentBuildId}/cancel`, { method: "POST" });
+    msg($("lora-build-err"), "Stop requested — the build will halt within a few seconds and the GPU is freed.", "ok");
+    loadBuild();
+  } catch (e) { msg($("lora-build-err"), e.message, "bad"); sb.disabled = false; }
 });
 
 /* ---------------- poses (Phase D) ---------------- */

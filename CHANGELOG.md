@@ -9,6 +9,25 @@ Every version below is a **published GitHub Release** with a matching
 
 ---
 
+## [0.7.4] — 2026-07-25
+
+**Stop a running build from the UI — and actually free the GPU.** (Phase 7.)
+
+### Added
+- **"Stop build" button** on the Build panel (LoRA tab), shown whenever a build is queued or
+  running. One click (with a confirm) cancels the build. Previously the only way to stop a
+  build was to POST the cancel endpoint by hand.
+
+### Changed
+- **Cancelling a running `lora_build` now interrupts ComfyUI too.** The job cancel is
+  cooperative — it stops the *pipeline* from advancing, but the training run already handed to
+  ComfyUI would keep using the GPU until it finished. The cancel endpoint now also calls
+  ComfyUI `POST /interrupt` and clears its pending queue, so the **GPU is freed immediately**.
+  New `comfy.interrupt()` / `comfy.clear_pending()`; wired into `POST /api/jobs/{id}/cancel`.
+  Best-effort — if ComfyUI is unreachable the job is still flagged and the worker finalizes it.
+
+---
+
 ## [0.7.3] — 2026-07-25
 
 **Close-up + full-body framings and varied expressions in the dataset — the other half of the

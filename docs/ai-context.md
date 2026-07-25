@@ -229,6 +229,11 @@ LAN; no Claude/Anthropic in the runtime loop.
   (Florence-2). Same `expression`-suffix injection — no new graph, no schema change. Toggle
   relabelled "Framing, pose & expression variety." **Caveat:** a style prompt that hard-codes
   "full body" can fight close-ups; the app doesn't rewrite prose.
+- **0.7.4:** Phase 7 — **Stop a running build.** "Stop build" button on the LoRA-tab Build panel
+  (shown while queued/running). Cancelling a running `lora_build` now also **interrupts ComfyUI**
+  (`comfy.interrupt()` + `comfy.clear_pending()` in `POST /api/jobs/{id}/cancel`) so the GPU frees
+  immediately, not just the pipeline. Cooperative job-cancel alone left the in-flight training
+  churning the GPU.
 - **Remaining:** 0.7.x hardening · 1.0 release. The **dataset side of the weak-LoRA fix is now
   complete** (0.7.2 pose + 0.7.3 framing/expression). 0.7.x backlog (priority order):
   **(1) raise the automated training-step default to ~1500-2500** (last recipe lever);

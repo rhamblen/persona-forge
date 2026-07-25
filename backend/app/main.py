@@ -2066,6 +2066,18 @@ async def cancel_job(job_id: int) -> dict:
     j = jobs.cancel(job_id)
     if not j:
         raise HTTPException(404, "job not found")
+    # A running lora_build has ComfyUI work in flight (training, then pose renders). The
+    # cooperative cancel only stops the pipeline *advancing* — the GPU keeps churning on the
+    # already-submitted prompt until it finishes. So also interrupt ComfyUI and clear its
+    # pending queue to free the GPU immediately. Best-effort: never fail the cancel if ComfyUI
+    # is unreachable (the job is flagged regardless and the worker will finalize it).
+    if j["status"] == jobs.RUNNING and j["kind"] == "lora_build":
+        try:
+            await comfy.interrupt()
+            await comfy.clear_pending()
+            logs.info("process", "stop: interrupted ComfyUI to free the GPU", job_id=job_id)
+        except Exception as exc:  # noqa: BLE001
+            logs.warn("integration", f"stop: could not interrupt ComfyUI: {exc}", job_id=job_id)
     return _job_dict(j)
 
 

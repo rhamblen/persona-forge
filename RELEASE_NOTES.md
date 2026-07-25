@@ -1,41 +1,25 @@
-# v0.7.3 — Close-ups + varied expressions in the dataset
+# v0.7.4 — Stop a running build
 
-Phase 7. The other half of the weak-LoRA fix. 0.7.2 made the dataset vary **pose**; this
-adds the two things that were still making trained LoRAs *weak*: **close-up framings** and
-**varied facial expressions**.
+Phase 7. A one-click way to stop an in-progress LoRA build — and it now actually frees the GPU.
 
-## Why
-A LoRA learns face fidelity from face *pixels*. An all-full-body training set means the face
-is a tiny patch in every frame → a blurry, weak identity. And if every image wears one
-expression, that expression glues itself into identity and fights you when you later prompt
-`angry` or `sad` (the "smile leaks into grief" failure). Both are fixed by making the dataset
-diverse on those axes.
+## Added
+- **"Stop build" button** on the Build panel (LoRA tab), shown whenever a build is queued or
+  running. Click it (there's a confirm) and the build stops. Until now the only way to stop a
+  build mid-run was to hit the cancel API by hand.
 
 ## Changed
-- **Framing distance.** ~**40%** of each batch is now **close-up / bust** (face fills the
-  frame) for a strong face; the rest are full-body/pose shots for body, outfit and pose
-  independence.
-- **Facial expression.** Candidates cycle through **neutral, happy, sad, angry, shocked,
-  embarrassed, alluring, flirtatious** (neutral-weighted). Because the trainer captions each
-  image (Florence-2), the expression lands in the caption and **decouples** from the trigger
-  word instead of binding to identity.
-- The two axes rotate independently (12 framings × 10 expressions) → a batch of 30 gives
-  **30 unique framing+expression pairs**, none repeated; *+10 more* continues the rotation.
-  Same injection lever as before — **no new graph, no schema change.**
-- Dataset-tab toggle relabelled **"Framing, pose & expression variety."** Uncheck for a
-  same-framing, neutral, seed-only batch.
+- **Stopping a running build now interrupts ComfyUI too.** The job cancel was *cooperative* — it
+  halted the pipeline from advancing, but the training run already submitted to ComfyUI kept
+  churning the GPU until it finished. Stop now also calls ComfyUI `POST /interrupt` and clears
+  its pending queue, so the **GPU is freed right away**. New `comfy.interrupt()` /
+  `comfy.clear_pending()`, wired into `POST /api/jobs/{id}/cancel`. Best-effort: if ComfyUI is
+  unreachable the job is still flagged and the worker finalizes it.
 
-## Watch out for
-If a project's **style** prompt hard-codes a framing like "full body," it can fight the
-close-up candidates (the suffix usually wins, not always). The app won't rewrite your prose —
-drop framing words from the style field if close-ups render wide.
+## Note
+A stopped build lands as **canceled** (or **error** if ComfyUI was interrupted mid-training) —
+both are terminal and harmless; just start a fresh build when ready.
 
-## The full recipe now
-Pose-varied **+** close-up-rich **+** expression-varied dataset **+ ~1500–2500 training steps**
-= a strong, flexible LoRA. The dataset side is now complete; raising the training-step default
-is the last lever.
-
-**Image:** `ghcr.io/rhamblen/persona-forge:0.7.3`
+**Image:** `ghcr.io/rhamblen/persona-forge:0.7.4`
 
 ## Upgrading
 No compose changes. Pull and restart:
