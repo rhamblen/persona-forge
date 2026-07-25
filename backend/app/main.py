@@ -17,7 +17,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 from fastapi import FastAPI, HTTPException
@@ -797,49 +797,104 @@ MAX_DATASET_BATCH = int(os.getenv("MAX_DATASET_BATCH", "60"))
 # the trainer captions every image (Florence-2), the varied expressions land in the caption
 # and decouple from the trigger word rather than binding to identity.
 #
-# Framings: keep a healthy share of CLOSE-UP/BUST shots — face fidelity comes from face
-# pixels, so an all-full-body set gives a weak, blurry face. The rest are wider shots that
-# teach body, outfit and pose independence. Keep entries short and non-conflicting so they
-# win cleanly over any framing baked into the style prompt.
-DATASET_FRAMINGS = [
-    # Close framings — carry the high-frequency identity detail (~1/3 of the set).
-    "close-up portrait, face fills the frame, head and shoulders",
-    "close-up portrait, head and shoulders, looking at the viewer",
-    "bust shot, upper body, facing the viewer",
-    "three-quarter view, upper body, turned slightly",
-    # Wider framings — teach proportions, outfit and pose independence.
-    "cowboy shot, from the thighs up, standing",
-    "full body shot, standing, relaxed natural pose, front view",
-    "full body, walking forward, mid-stride, dynamic pose",
-    "full body, sitting down, relaxed",
-    "full body, side profile view, looking to the side",
-    "full body, three-quarter back view, looking over the shoulder",
-    "full body, arms crossed, confident stance",
-    "full body, from a slightly low angle, standing",
+# Framings are split into two pools so a batch can target one axis (see `mode` below):
+#   - FACE: close-up/bust shots at varied head angles — carry the high-frequency identity
+#     detail (a set with too few of these gives a weak, blurry face) and are where expressions
+#     read clearly.
+#   - BODY: full-body poses + many views/angles AROUND the body — teach proportions, outfit and
+#     pose independence so the LoRA isn't stance-locked.
+# Keep entries short and non-conflicting so they win cleanly over any framing baked into the
+# style prompt.
+DATASET_FACE_FRAMINGS = [
+    "close-up portrait, face fills the frame, front view, looking at the viewer",
+    "close-up portrait, three-quarter view from the left",
+    "close-up portrait, three-quarter view from the right",
+    "close-up portrait, side profile",
+    "close-up, looking slightly up, chin raised",
+    "close-up, looking slightly down",
+    "close-up portrait, looking over the shoulder",
+    "bust shot, head and shoulders, facing the viewer",
+    "bust shot, head and shoulders, three-quarter view",
 ]
 
-# Expressions: neutral-weighted with a spread so no single expression binds to identity.
+DATASET_BODY_FRAMINGS = [
+    "full body, standing, front view, relaxed natural pose",
+    "full body, standing, back view, seen from behind",
+    "full body, standing, left side view",
+    "full body, standing, right side view",
+    "full body, three-quarter view from the front",
+    "full body, three-quarter view from behind, looking over the shoulder",
+    "full body, from a low angle, standing",
+    "full body, from a high angle, looking down",
+    "full body, walking forward, mid-stride",
+    "full body, walking away, seen from behind",
+    "full body, running, dynamic action pose",
+    "full body, sitting on the floor, relaxed",
+    "full body, sitting on a chair, legs crossed",
+    "full body, kneeling",
+    "full body, crouching",
+    "full body, leaning against a wall, casual",
+    "full body, arms crossed, confident stance",
+    "full body, hands on hips",
+    "full body, arms raised, stretching",
+    "full body, jumping, mid-air, dynamic",
+    "cowboy shot, from the thighs up, front view",
+    "cowboy shot, from the thighs up, three-quarter view",
+    "full body, twisting at the waist, turning",
+    "full body, one hand waving, the other relaxed",
+]
+
+# Expressions: neutral-weighted with a wide spread so no single expression binds to identity.
 # "Alluring"/"flirtatious" are kept at a tasteful expression (gaze/smirk) level. Tune freely.
 DATASET_EXPRESSIONS = [
     "neutral expression, relaxed",
     "neutral expression, calm, closed mouth",
     "gentle happy smile",
-    "bright cheerful smile",
+    "bright cheerful smile, laughing",
+    "soft warm smile",
     "sad, downcast eyes",
+    "crying, teary eyes",
     "angry, furrowed brow",
+    "annoyed, frowning",
     "shocked, wide eyes, open mouth",
+    "surprised, raised eyebrows",
     "embarrassed, blushing, shy",
+    "nervous, worried look",
+    "thoughtful, looking away",
+    "pouting, sulking",
+    "confident smirk",
     "alluring, soft half-lidded gaze",
     "flirtatious, playful smirk",
 ]
 
+# On full-body shots the face is tiny, so keep expressions light there — the emphasis is the
+# pose/view, not the face.
+DATASET_POSE_EXPRESSIONS = [
+    "neutral expression",
+    "relaxed",
+    "gentle smile",
+    "confident",
+]
 
-def _dataset_variation(n: int) -> str:
-    """A framing+expression suffix for candidate index `n`. The two axes rotate at
-    different rates (12 vs 10, lcm 60) so a batch of 30 gives varied, non-repeating pairs."""
-    framing = DATASET_FRAMINGS[n % len(DATASET_FRAMINGS)]
-    expression = DATASET_EXPRESSIONS[n % len(DATASET_EXPRESSIONS)]
-    return f"{framing}, {expression}"
+
+def _dataset_variation(n: int, mode: str = "both") -> str:
+    """A framing+expression suffix for candidate index `n`, per `mode`:
+      - "faces": close-up/bust framings × the full expression spread (top up a weak face).
+      - "poses": full-body framings + many views × light expressions (top up weak poses/angles).
+      - "both" : alternate a face shot and a body shot (≈50/50), with full expression variety.
+    Framing and expression rotate at different rates so pairs vary and don't repeat quickly."""
+    if mode == "faces":
+        framing = DATASET_FACE_FRAMINGS[n % len(DATASET_FACE_FRAMINGS)]
+        return f"{framing}, {DATASET_EXPRESSIONS[n % len(DATASET_EXPRESSIONS)]}"
+    if mode == "poses":
+        framing = DATASET_BODY_FRAMINGS[n % len(DATASET_BODY_FRAMINGS)]
+        return f"{framing}, {DATASET_POSE_EXPRESSIONS[n % len(DATASET_POSE_EXPRESSIONS)]}"
+    # both — alternate face/body so every batch keeps a strong share of close-ups
+    if n % 2 == 0:
+        framing = DATASET_FACE_FRAMINGS[(n // 2) % len(DATASET_FACE_FRAMINGS)]
+    else:
+        framing = DATASET_BODY_FRAMINGS[(n // 2) % len(DATASET_BODY_FRAMINGS)]
+    return f"{framing}, {DATASET_EXPRESSIONS[n % len(DATASET_EXPRESSIONS)]}"
 
 
 def _version_prompt_params(version: dict[str, Any]) -> dict[str, Any]:
@@ -900,10 +955,13 @@ async def _reconcile_dataset(project_id: int) -> None:
 
 class DatasetGenerateRequest(BaseModel):
     count: int = 30
-    # Spread candidates across DATASET_FRAMINGS x DATASET_EXPRESSIONS so the training set has
-    # framing + pose + expression variety (the fix for weak, pose-locked LoRAs). Turn off for a
-    # same-framing, neutral, seed-only batch.
+    # Spread candidates across framing × expression so the training set has framing + pose +
+    # expression variety (the fix for weak, pose-locked LoRAs). Turn off for a same-framing,
+    # neutral, seed-only batch.
     pose_variety: bool = True
+    # Which axis to spread across — "both" (faces + poses), "faces" (close-ups + expressions,
+    # to strengthen a weak face) or "poses" (full body + many views, to strengthen weak poses).
+    mode: Literal["both", "faces", "poses"] = "both"
 
 
 @app.post("/api/projects/{project_id}/dataset/generate")
@@ -931,10 +989,11 @@ async def dataset_generate(project_id: int, body: DatasetGenerateRequest) -> dic
                 "SELECT COUNT(*) n FROM dataset_jobs WHERE project_id = ?", (project_id,),
             ).fetchone()["n"]
 
+    mode_desc = {"both": "faces + poses", "faces": "close-up faces + expressions",
+                 "poses": "full body + many views"}.get(body.mode, body.mode)
     logs.info("process",
               f"dataset: queuing a batch of {count} "
-              + ("across varied framings + expressions (close-ups + full body)"
-                 if vary else "at fresh seeds (same framing/expression)"),
+              + (f"across varied {mode_desc}" if vary else "at fresh seeds (same framing/expression)"),
               project_id=project_id, slug=slug)
     queued = 0
     with db.connect() as conn:
@@ -943,7 +1002,7 @@ async def dataset_generate(project_id: int, body: DatasetGenerateRequest) -> dic
             params = {**base, "seed": seed, "output_prefix": f"{slug}/images/ds"}
             variation = None
             if vary:
-                variation = _dataset_variation(offset + i)
+                variation = _dataset_variation(offset + i, body.mode)
                 params["expression"] = variation
             try:
                 graph = workflows.build_graph("base-character", params)
@@ -964,7 +1023,7 @@ async def dataset_generate(project_id: int, body: DatasetGenerateRequest) -> dic
             queued += 1
 
     logs.info("process", f"dataset: queued {queued} image(s)", project_id=project_id, slug=slug)
-    return {"queued": queued, "pose_variety": vary}
+    return {"queued": queued, "pose_variety": vary, "mode": body.mode if vary else None}
 
 
 @app.get("/api/projects/{project_id}/dataset")

@@ -9,6 +9,32 @@ Every version below is a **published GitHub Release** with a matching
 
 ---
 
+## [0.7.6] — 2026-07-25
+
+**Target the dataset at a weak axis, and a lot more variety.** (Phase 7.)
+
+### Added
+- **Variety mode selector** on the Dataset tab — pick what a batch spreads across so you can
+  top up whichever axis looks weak:
+  - **Both** (default) — alternates close-up faces and full-body poses (~50/50).
+  - **Faces** — close-up/bust framings at varied head angles × the full expression range.
+    Use this when the face is weak or you want more expressions.
+  - **Poses & views** — full body from many angles and actions. Use this when the LoRA can't
+    hold poses or you want more coverage around the body.
+  - **Off** — same framing, seed only (the old plain behaviour).
+  `mode` field on `POST /api/projects/{id}/dataset/generate` (`both` | `faces` | `poses`).
+
+### Changed
+- **Much larger variety sets.** Framings are now split into a **face** pool (9: front, 3/4 L/R,
+  profile, up, down, over-the-shoulder, bust) and a **body** pool (**24**: front/back/left/right,
+  3/4 front & back, low/high angle, walking, walking-away, running, sitting on floor/chair,
+  kneeling, crouching, leaning, arms crossed, hands on hips, arms raised, jumping, cowboy shots,
+  twisting, waving). Expressions grew from 10 to **18** (added laughing, warm smile, crying,
+  annoyed, surprised, nervous, thoughtful, pouting, confident smirk). Full-body shots use a
+  light expression set (the face is tiny there) so the emphasis stays on the pose/view.
+
+---
+
 ## [0.7.5] — 2026-07-25
 
 **Delete dataset candidates — purge the unselected, or drop one.** (Phase 7.)

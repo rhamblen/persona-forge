@@ -1,22 +1,33 @@
-# v0.7.5 — Delete dataset candidates
+# v0.7.6 — Target the dataset, and a lot more variety
 
-Phase 7. Clean up the dataset after cherry-picking: purge everything you didn't select, or drop
-individual pictures.
+Phase 7. Two dataset upgrades: aim a batch at a specific weak axis, and a much bigger range of
+faces and poses to draw from.
 
 ## Added
-- **"Purge unselected" button** on the Dataset tab. Once you've picked your keepers, one click
-  removes **every unselected candidate** — DB rows *and* the image files on `/builds` — leaving
-  just your training set. The button shows the live count ("Purge 12 unselected") and disappears
-  when there's nothing unselected. `POST /api/projects/{id}/dataset/purge`.
-- **Per-candidate delete.** Every dataset thumbnail now has a 🗑 badge (appears on hover) to
-  delete that single image — selected or not. `DELETE /api/projects/{id}/dataset/{image_id}`.
+- **Variety mode selector** on the Dataset tab. Choose what a batch spreads across so you can
+  reinforce whatever looks weak:
+  - **Both** (default) — alternates close-up faces and full-body poses (~50/50).
+  - **Faces** — close-up/bust shots at varied head angles × the full range of expressions. Use
+    it when the face is weak or you want more expression coverage.
+  - **Poses & views** — full body from many angles and actions. Use it when the character can't
+    hold poses or you want more coverage around the body.
+  - **Off** — same framing, seed only.
+  New `mode` field on `POST /api/projects/{id}/dataset/generate`.
 
-## Notes
-- Both confirm first and are **irreversible** — the files are unlinked from `/builds`.
-- Deletion is guarded against escaping the builds root and is best-effort: a candidate always
-  leaves the dataset even if its file was already gone.
+## Changed
+- **Much larger variety sets.** Framings split into a **face** pool (9 head angles) and a
+  **body** pool (**24** poses/views: front, back, both sides, 3/4 front & back, low/high angle,
+  walking, walking away, running, sitting on the floor or a chair, kneeling, crouching, leaning,
+  arms crossed, hands on hips, arms raised, jumping, cowboy shots, twisting, waving). Expressions
+  grew from 10 to **18**. Full-body shots use light expressions (the face is tiny there) so the
+  focus stays on the pose.
 
-**Image:** `ghcr.io/rhamblen/persona-forge:0.7.5`
+## How to use it
+See a weak face on the trained LoRA? Generate a **Faces** batch and add those. Can't get it to
+sit or turn around? Generate a **Poses & views** batch. Everything reconciles into the same
+dataset — cherry-pick, purge the rest (v0.7.5), retrain.
+
+**Image:** `ghcr.io/rhamblen/persona-forge:0.7.6`
 
 ## Upgrading
 No compose changes. Pull and restart:

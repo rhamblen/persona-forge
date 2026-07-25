@@ -708,14 +708,17 @@ async function datasetGenerate(count) {
   if (!state.projectId) return;
   const btnA = $("ds-generate"), btnB = $("ds-more");
   btnA.disabled = btnB.disabled = true;
-  const poseVariety = $("ds-variety") ? $("ds-variety").checked : true;
+  const modeSel = $("ds-variety-mode");
+  const mode = modeSel ? modeSel.value : "both";
+  const poseVariety = mode !== "off";
   msg($("ds-msg"), `Queuing ${count} image${count === 1 ? "" : "s"}…`);
   try {
     const { queued } = await api(`/api/projects/${state.projectId}/dataset/generate`, {
       method: "POST",
-      body: JSON.stringify({ count, pose_variety: poseVariety }),
+      body: JSON.stringify({ count, pose_variety: poseVariety, mode: poseVariety ? mode : "both" }),
     });
-    const how = poseVariety ? " across varied framings, poses & expressions" : "";
+    const how = { both: " across varied faces & poses", faces: " of close-up faces + expressions",
+                  poses: " of full-body poses & views" }[mode] || "";
     msg($("ds-msg"), `Queued ${queued}${how}. They'll appear below as ComfyUI finishes them.`, "ok");
     startDatasetPolling();
     loadDataset();

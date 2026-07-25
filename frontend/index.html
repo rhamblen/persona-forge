@@ -263,9 +263,14 @@
               <label class="ds-target">Target
                 <input id="ds-target" type="number" min="1" max="200" step="1" />
               </label>
-              <label class="ds-variety" title="Spread candidates across varied framings (close-up + full body), poses and facial expressions (neutral, happy, sad, angry, shocked, embarrassed, alluring…) so the LoRA learns a strong face and keeps identity independent of stance and expression. Uncheck for a same-framing, neutral, seed-only batch.">
-                <input id="ds-variety" type="checkbox" checked />
-                Framing, pose &amp; expression variety
+              <label class="ds-variety" title="What to spread this batch across. Both = alternating close-up faces and full-body poses. Faces = close-ups + a wide range of expressions (top up a weak face). Poses & views = full body from many angles/actions (top up weak poses). Off = same framing, seed only.">
+                Variety
+                <select id="ds-variety-mode">
+                  <option value="both" selected>Both (faces + poses)</option>
+                  <option value="faces">Faces (close-ups + expressions)</option>
+                  <option value="poses">Poses &amp; views (full body, angles)</option>
+                  <option value="off">Off (seed only)</option>
+                </select>
               </label>
               <button class="btn btn-danger btn-sm" id="ds-purge" hidden>Purge unselected</button>
               <span class="ds-genstate muted small" id="ds-genstate"></span>

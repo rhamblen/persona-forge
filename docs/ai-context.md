@@ -238,8 +238,14 @@ LAN; no Claude/Anthropic in the runtime loop.
   `selected=0` dataset images — DB rows + files on `/builds`; `POST .../dataset/purge`) + a
   per-thumbnail 🗑 delete (`DELETE .../dataset/{image_id}`). File delete via `_delete_dataset_file`
   (guards against escaping `BUILDS_ROOT`, best-effort). Both confirm + irreversible.
+- **0.7.6:** Phase 7 — **targeted dataset generation + bigger variety sets.** `mode` field
+  (`both`|`faces`|`poses`) on `POST .../dataset/generate` + a Dataset-tab select, so a batch can
+  reinforce a weak axis. Framings split into `DATASET_FACE_FRAMINGS` (9 head angles) and
+  `DATASET_BODY_FRAMINGS` (24 poses/views around the body); `DATASET_EXPRESSIONS` grew to 18;
+  `DATASET_POSE_EXPRESSIONS` (light) used on full-body shots. `_dataset_variation(n, mode)`:
+  faces = face×expr, poses = body×light-expr, both = alternate face/body (~50/50).
 - **Remaining:** 0.7.x hardening · 1.0 release. The **dataset side of the weak-LoRA fix is now
-  complete** (0.7.2 pose + 0.7.3 framing/expression). 0.7.x backlog (priority order):
+  complete** (0.7.2 pose + 0.7.3 framing/expression + 0.7.6 targeting/variety). 0.7.x backlog (priority order):
   **(1) raise the automated training-step default to ~1500-2500** (last recipe lever);
   **(2) custom / editable dataset example prompts** (user request 2026-07-25) — per-project
   user-added example shots on top of the `DATASET_FRAMINGS × DATASET_EXPRESSIONS` auto-rotation
