@@ -707,7 +707,7 @@ async function datasetGenerate(count) {
       method: "POST",
       body: JSON.stringify({ count, pose_variety: poseVariety }),
     });
-    const how = poseVariety ? " across varied poses & framings" : "";
+    const how = poseVariety ? " across varied framings, poses & expressions" : "";
     msg($("ds-msg"), `Queued ${queued}${how}. They'll appear below as ComfyUI finishes them.`, "ok");
     startDatasetPolling();
     loadDataset();

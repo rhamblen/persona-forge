@@ -2,8 +2,10 @@
 
 > **Latest session handover:** `docs/handover-2026-07-25.md` — shipped 0.6.2→0.7.1 (LoRA-driven
 > poses, training timer, **generic job engine + `lora_build` overnight build**, prompt-studio
-> fixes), moved aux GPU containers off the 3090. **0.7.2 then shipped the pose/framing variety
-> fix** in the Dataset Builder (weak, pose-locked LoRAs — now resolved). Read it first.
+> fixes), moved aux GPU containers off the 3090. **0.7.2 + 0.7.3 fixed the weak/pose-locked LoRA**
+> at the dataset root: 0.7.2 = pose/framing variety, 0.7.3 = close-up framings + varied
+> expressions. Dataset side now complete; last lever is a higher training-step default. Read it
+> first.
 
 
 Dense factual map for the next AI session. Not for end users. Read this first, then
@@ -214,17 +216,23 @@ LAN; no Claude/Anthropic in the runtime loop.
   multi-character **add-to-queue** cast builder + concurrency lanes — both ride this engine
   (that's the whole point of building it generic). Lorebook/campaign/ingest (Phase E/F/G) also
   plug in as handlers. Manual Train/Generate-all still work (engine reuses the same helpers).
-- **0.7.2:** Phase 7 — **pose/framing variety in the Dataset Builder** (fix for weak, pose-locked
-  LoRAs). `dataset_generate` now cycles candidates across `DATASET_POSES` (12 framings/angles),
-  injected via the base-character `expression` suffix, in addition to a fresh seed; the rotation
-  continues across successive batches (offset by existing `dataset_jobs` count). `pose_variety`
-  bool on `POST .../dataset/generate` (default true) + a "Pose & framing variety" toggle on the
-  Dataset tab. No new workflow/graph, no schema change. **Pairs with ~1500-2500 steps** for a
-  flexible LoRA; plugs into the `lora_build` overnight job.
-- **Remaining:** 0.7.x hardening · 1.0 release. Optional polish: reuse-parent-LoRA for clones
-  (`parent_project_id`), training loss/step readout, and **raising the automated training-step
-  default to ~1500-2500** (0.7.2 fixed the dataset side of the `sweetie-pie` weakness; the step
-  count is the remaining half of the recipe).
+- **0.7.2:** Phase 7 — **pose/framing variety in the Dataset Builder** (fix for the *pose-locked*
+  half of weak LoRAs). `dataset_generate` cycles candidates across framings via the base-character
+  `expression` suffix + a fresh seed; rotation continues across batches (offset by existing
+  `dataset_jobs` count). `pose_variety` bool (default true) + a Dataset-tab toggle.
+- **0.7.3:** Phase 7 — **close-up framings + varied expressions in the dataset** (fix for the
+  *weak-face* half). Two-axis variety: `DATASET_FRAMINGS` (12; ~⅓ close-up/bust so the face has
+  enough pixels — the rest full body/pose) × `DATASET_EXPRESSIONS` (10; neutral, happy, sad, angry,
+  shocked, embarrassed, alluring, flirtatious — neutral-weighted). Combined per candidate by
+  `_dataset_variation(n)` (`n % 12` framing, `n % 10` expression → 30 unique pairs in a 30-batch).
+  Varied expressions **decouple** from identity because the trainer captions each image
+  (Florence-2). Same `expression`-suffix injection — no new graph, no schema change. Toggle
+  relabelled "Framing, pose & expression variety." **Caveat:** a style prompt that hard-codes
+  "full body" can fight close-ups; the app doesn't rewrite prose.
+- **Remaining:** 0.7.x hardening · 1.0 release. The **dataset side of the weak-LoRA fix is now
+  complete** (0.7.2 pose + 0.7.3 framing/expression). Last recipe lever: **raise the automated
+  training-step default to ~1500-2500** (0.7.x). Optional polish: reuse-parent-LoRA for clones
+  (`parent_project_id`), training loss/step readout.
 
 ## Track A note (separate from the app)
 

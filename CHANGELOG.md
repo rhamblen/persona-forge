@@ -9,6 +9,37 @@ Every version below is a **published GitHub Release** with a matching
 
 ---
 
+## [0.7.3] — 2026-07-25
+
+**Close-up + full-body framings and varied expressions in the dataset — the other half of the
+weak-LoRA fix.** (Phase 7.)
+
+### Changed
+- **Dataset variety is now two axes: framing *and* facial expression.** 0.7.2 varied pose;
+  this adds the two things that were still making trained LoRAs weak:
+  - **Framing distance.** ~40% of a batch is now **close-up / bust** framing (face fills the
+    frame) with the rest full-body/pose. Identity fidelity comes from *face pixels* — an
+    all-full-body set gives a tiny, blurry face and a weak LoRA. Close-ups fix the face; the
+    wider shots still teach body, outfit and pose independence.
+  - **Facial expression.** Candidates now cycle through neutral, happy, sad, angry, shocked,
+    embarrassed, alluring and flirtatious (neutral-weighted). A single baked-in expression
+    otherwise glues itself into identity and fights expression prompts later (the same
+    "smile leaks into grief" failure the pipeline already knew about). Because the trainer
+    captions every image (Florence-2), the expression lands in the caption and **decouples**
+    from the trigger word instead of binding to it.
+- The two axes rotate independently (12 framings × 10 expressions), so a batch of 30 yields
+  **30 unique framing+expression pairs** with none repeated, and *+10 more* continues the
+  rotation. Still injected through the base-character `expression` suffix — no new graph, no
+  schema change.
+- The Dataset-tab toggle is relabelled **"Framing, pose & expression variety."**
+
+### Caveat
+- If a project's **style** prompt hard-codes a framing (e.g. "full body"), it can fight the
+  close-up candidates — the suffix usually wins but not always. The app does **not** rewrite
+  your prose to resolve this; drop framing words from the style field if close-ups come out wide.
+
+---
+
 ## [0.7.2] — 2026-07-25
 
 **Pose & framing variety in the Dataset Builder — the fix for weak, pose-locked LoRAs.** (Phase 7.)

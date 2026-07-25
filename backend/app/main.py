@@ -787,27 +787,59 @@ async def list_builds() -> dict:
 
 MAX_DATASET_BATCH = int(os.getenv("MAX_DATASET_BATCH", "60"))
 
-# A LoRA only learns identity *independent of stance* if the training set shows the
-# character in many framings and poses. Left to vary only the seed, every candidate is
-# the same waist-up stance, so the LoRA overfits one pose and then fights pose prompts.
-# When pose variety is on we cycle candidates across this set, injecting each entry as
-# the base-character `expression` suffix (node 5) — the same, already-validated lever the
-# Poses tab uses. Deliberately framing/angle-led (not facial expression); keep entries
-# short and non-conflicting so they win cleanly over any framing baked into the style.
-DATASET_POSES = [
+# A LoRA only learns identity *independent of stance and expression* if the training set
+# shows the character across many framings, poses AND facial expressions. Left to vary only
+# the seed, every candidate is the same waist-up neutral stance, so the LoRA overfits it and
+# then (a) can't do other poses, (b) has a weak face (the face is a tiny patch in a full-body
+# frame), and (c) glues one expression into identity. We fix all three by cycling candidates
+# across two axes — framing and expression — combining each pair into the base-character
+# `expression` suffix (node 5), the same already-validated lever the Poses tab uses. Because
+# the trainer captions every image (Florence-2), the varied expressions land in the caption
+# and decouple from the trigger word rather than binding to identity.
+#
+# Framings: keep a healthy share of CLOSE-UP/BUST shots — face fidelity comes from face
+# pixels, so an all-full-body set gives a weak, blurry face. The rest are wider shots that
+# teach body, outfit and pose independence. Keep entries short and non-conflicting so they
+# win cleanly over any framing baked into the style prompt.
+DATASET_FRAMINGS = [
+    # Close framings — carry the high-frequency identity detail (~1/3 of the set).
+    "close-up portrait, face fills the frame, head and shoulders",
+    "close-up portrait, head and shoulders, looking at the viewer",
+    "bust shot, upper body, facing the viewer",
+    "three-quarter view, upper body, turned slightly",
+    # Wider framings — teach proportions, outfit and pose independence.
+    "cowboy shot, from the thighs up, standing",
     "full body shot, standing, relaxed natural pose, front view",
     "full body, walking forward, mid-stride, dynamic pose",
-    "sitting down, relaxed, hands resting in lap",
-    "three-quarter view, upper body, turned slightly",
-    "side profile view, looking to the side",
-    "arms crossed, confident stance, front view",
-    "waving hello, one hand raised, friendly",
-    "cowboy shot, hands on hips, standing",
+    "full body, sitting down, relaxed",
+    "full body, side profile view, looking to the side",
+    "full body, three-quarter back view, looking over the shoulder",
+    "full body, arms crossed, confident stance",
     "full body, from a slightly low angle, standing",
-    "three-quarter back view, looking over the shoulder",
-    "close-up portrait, head and shoulders",
-    "leaning back, casual, seated",
 ]
+
+# Expressions: neutral-weighted with a spread so no single expression binds to identity.
+# "Alluring"/"flirtatious" are kept at a tasteful expression (gaze/smirk) level. Tune freely.
+DATASET_EXPRESSIONS = [
+    "neutral expression, relaxed",
+    "neutral expression, calm, closed mouth",
+    "gentle happy smile",
+    "bright cheerful smile",
+    "sad, downcast eyes",
+    "angry, furrowed brow",
+    "shocked, wide eyes, open mouth",
+    "embarrassed, blushing, shy",
+    "alluring, soft half-lidded gaze",
+    "flirtatious, playful smirk",
+]
+
+
+def _dataset_variation(n: int) -> str:
+    """A framing+expression suffix for candidate index `n`. The two axes rotate at
+    different rates (12 vs 10, lcm 60) so a batch of 30 gives varied, non-repeating pairs."""
+    framing = DATASET_FRAMINGS[n % len(DATASET_FRAMINGS)]
+    expression = DATASET_EXPRESSIONS[n % len(DATASET_EXPRESSIONS)]
+    return f"{framing}, {expression}"
 
 
 def _version_prompt_params(version: dict[str, Any]) -> dict[str, Any]:
@@ -868,8 +900,9 @@ async def _reconcile_dataset(project_id: int) -> None:
 
 class DatasetGenerateRequest(BaseModel):
     count: int = 30
-    # Spread candidates across DATASET_POSES so the training set has pose/framing variety
-    # (the fix for weak, pose-locked LoRAs). Turn off for a same-pose, seed-only batch.
+    # Spread candidates across DATASET_FRAMINGS x DATASET_EXPRESSIONS so the training set has
+    # framing + pose + expression variety (the fix for weak, pose-locked LoRAs). Turn off for a
+    # same-framing, neutral, seed-only batch.
     pose_variety: bool = True
 
 
@@ -877,9 +910,10 @@ class DatasetGenerateRequest(BaseModel):
 async def dataset_generate(project_id: int, body: DatasetGenerateRequest) -> dict:
     """Queue `count` candidate images from the current prompt.
 
-    With `pose_variety` on (default) each candidate is drawn from a different framing/pose
-    in DATASET_POSES *and* a fresh seed, so the resulting training set teaches identity
-    independent of stance. With it off, only the seed varies (the original behaviour).
+    With `pose_variety` on (default) each candidate is drawn from a different framing *and*
+    facial expression (plus a fresh seed), so the resulting training set teaches identity
+    independent of stance and expression, with enough close-ups for a strong face. With it
+    off, only the seed varies (the original behaviour).
     """
     detail = await get_project(project_id)
     version = detail["current_version"] or {}
@@ -888,8 +922,8 @@ async def dataset_generate(project_id: int, body: DatasetGenerateRequest) -> dic
     base = _version_prompt_params(version)
     vary = body.pose_variety
 
-    # Continue the pose rotation across successive batches (Generate 30, then +10 more)
-    # so coverage stays even instead of restarting at pose 0 each time.
+    # Continue the variation rotation across successive batches (Generate 30, then +10 more)
+    # so coverage stays even instead of restarting at the first framing each time.
     offset = 0
     if vary:
         with db.connect() as conn:
@@ -899,22 +933,22 @@ async def dataset_generate(project_id: int, body: DatasetGenerateRequest) -> dic
 
     logs.info("process",
               f"dataset: queuing a batch of {count} "
-              + (f"across {len(DATASET_POSES)} pose/framing variations"
-                 if vary else "at fresh seeds (same-pose)"),
+              + ("across varied framings + expressions (close-ups + full body)"
+                 if vary else "at fresh seeds (same framing/expression)"),
               project_id=project_id, slug=slug)
     queued = 0
     with db.connect() as conn:
         for i in range(count):
             seed = random.randint(1, 2**31 - 1)
             params = {**base, "seed": seed, "output_prefix": f"{slug}/images/ds"}
-            pose = None
+            variation = None
             if vary:
-                pose = DATASET_POSES[(offset + i) % len(DATASET_POSES)]
-                params["expression"] = pose
+                variation = _dataset_variation(offset + i)
+                params["expression"] = variation
             try:
                 graph = workflows.build_graph("base-character", params)
                 logs.verbose("process", f"queuing dataset image {i + 1}/{count}",
-                             seed=seed, pose=pose)
+                             seed=seed, variation=variation)
                 prompt_id = await comfy.submit(graph)
             except (workflows.WorkflowError, comfy.ComfyError) as exc:
                 # stop the batch but keep whatever already queued
