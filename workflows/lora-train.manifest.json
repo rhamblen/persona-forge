@@ -1,0 +1,17 @@
+{
+  "id": "lora-train",
+  "name": "LoRA training (native ComfyUI TrainLoraNode)",
+  "description": "Phase C: train a character LoRA from a staged dataset. Loads images from a ComfyUI input subfolder, VAE-encodes them, conditions on the trigger word, trains via TrainLoraNode and saves to the build folder. Validated end-to-end 2026-07-24.",
+  "file": "lora-train.json",
+  "output_node": "save",
+  "params": {
+    "checkpoint":      { "node": "ckpt",  "input": "ckpt_name",     "type": "model", "label": "Base checkpoint", "model_type": "checkpoints" },
+    "dataset_folder":  { "node": "load",  "input": "folder",        "type": "text",  "label": "Dataset folder (ComfyUI input)" },
+    "trigger":         { "node": "pos",   "input": "text",          "type": "text",  "label": "Trigger caption" },
+    "steps":           { "node": "train", "input": "steps",         "type": "int",   "label": "Steps", "min": 1, "max": 5000 },
+    "rank":            { "node": "train", "input": "rank",          "type": "int",   "label": "Rank",  "min": 1, "max": 128 },
+    "learning_rate":   { "node": "train", "input": "learning_rate", "type": "float", "label": "Learning rate" },
+    "seed":            { "node": "train", "input": "seed",          "type": "int",   "label": "Seed" },
+    "output_prefix":   { "node": "save",  "input": "prefix",        "type": "path",  "label": "Output prefix" }
+  }
+}

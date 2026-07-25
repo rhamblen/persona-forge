@@ -1,0 +1,57 @@
+{
+  "ckpt": {
+    "class_type": "CheckpointLoaderSimple",
+    "inputs": { "ckpt_name": "animi/NoobAI-XL-v1.1.safetensors" },
+    "_meta": { "title": "Checkpoint" }
+  },
+  "load": {
+    "class_type": "LoadImageDataSetFromFolder",
+    "inputs": { "folder": "pf-dataset" },
+    "_meta": { "title": "Training dataset (ComfyUI input subfolder)" }
+  },
+  "batch": {
+    "class_type": "ImageListToImageBatch",
+    "inputs": { "images": ["load", 0] }
+  },
+  "vae": {
+    "class_type": "VAEEncode",
+    "inputs": { "pixels": ["batch", 0], "vae": ["ckpt", 2] }
+  },
+  "pos": {
+    "class_type": "CLIPTextEncode",
+    "inputs": { "clip": ["ckpt", 1], "text": "pf_char" },
+    "_meta": { "title": "Trigger caption" }
+  },
+  "train": {
+    "class_type": "TrainLoraNode",
+    "inputs": {
+      "model": ["ckpt", 0],
+      "latents": ["vae", 0],
+      "positive": ["pos", 0],
+      "batch_size": 1,
+      "grad_accumulation_steps": 1,
+      "steps": 500,
+      "learning_rate": 0.0005,
+      "rank": 16,
+      "optimizer": "AdamW",
+      "loss_function": "MSE",
+      "seed": 0,
+      "training_dtype": "bf16",
+      "lora_dtype": "bf16",
+      "quantized_backward": false,
+      "algorithm": "LoRA",
+      "gradient_checkpointing": true,
+      "checkpoint_depth": 1,
+      "offloading": true,
+      "existing_lora": "[None]",
+      "bucket_mode": false,
+      "bypass_mode": false
+    },
+    "_meta": { "title": "Train LoRA" }
+  },
+  "save": {
+    "class_type": "SaveLoRA",
+    "inputs": { "lora": ["train", 0], "prefix": "pf-char/lora/pf-char", "steps": ["train", 2] },
+    "_meta": { "title": "Save LoRA" }
+  }
+}

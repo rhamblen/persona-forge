@@ -716,6 +716,16 @@ $("ds-target").addEventListener("change", async () => {
 
 /* ---------------- LoRA (Phase C) ---------------- */
 
+let loraTimer = null;
+function stopLoraPolling() { clearInterval(loraTimer); loraTimer = null; }
+function startLoraPolling() {
+  if (loraTimer) return;
+  loraTimer = setInterval(() => {
+    if ($("view-lora").hidden) return stopLoraPolling();
+    loadLora();
+  }, 5000);
+}
+
 async function loadLora() {
   const np = $("lora-noproject"), main = $("lora-main");
   if (!state.projectId) { np.hidden = false; main.hidden = true; return; }
@@ -730,6 +740,15 @@ async function loadLora() {
     $("lora-list").innerHTML = d.loras.length
       ? d.loras.map((l) => `<div class="small">${esc(l)}</div>`).join("")
       : '<p class="muted">None yet.</p>';
+    // training state
+    const ts = d.train_status;
+    const st = $("lora-train-status");
+    st.textContent = ts === "training" ? "training… (running on the GPU — this takes a while)"
+      : ts === "done" ? "last run finished ✓"
+      : ts === "error" ? "last run failed — check the logs" : "";
+    st.className = "lora-train-status small " + (ts === "training" ? "warn" : ts === "done" ? "ok" : ts === "error" ? "bad" : "muted");
+    $("lora-train-btn").disabled = ts === "training";
+    if (ts === "training") startLoraPolling(); else stopLoraPolling();
   } catch (e) { msg($("lora-msg"), e.message, "bad"); }
 }
 
@@ -756,6 +775,24 @@ $("lora-stage").addEventListener("click", async () => {
     loadLora();
   } catch (e) { msg($("lora-msg"), e.message, "bad"); }
   finally { btn.disabled = false; }
+});
+
+$("lora-train-btn").addEventListener("click", async () => {
+  if (!state.projectId) return;
+  const steps = parseInt($("lora-steps").value, 10) || 500;
+  const rank = parseInt($("lora-rank").value, 10) || 16;
+  const learning_rate = parseFloat($("lora-lr").value) || 0.0005;
+  const btn = $("lora-train-btn");
+  btn.disabled = true;
+  msg($("lora-msg"), "Freeing VRAM and starting training…");
+  try {
+    const r = await api(`/api/projects/${state.projectId}/lora/train`, {
+      method: "POST", body: JSON.stringify({ steps, rank, learning_rate }),
+    });
+    msg($("lora-msg"), `Training started — ${r.steps} steps, rank ${r.rank}. It'll show under Trained LoRAs when done.`, "ok");
+    startLoraPolling();
+    loadLora();
+  } catch (e) { msg($("lora-msg"), e.message, "bad"); btn.disabled = false; }
 });
 
 /* ---------------- poses (Phase D) ---------------- */
@@ -1003,6 +1040,7 @@ $("project-select").addEventListener("change", (e) => {
   loadProject().catch((err) => msg($("studio-msg"), err.message, "bad"));
   stopDatasetPolling();
   stopPosesPolling();
+  stopLoraPolling();
   selectedPoseId = null;
   if (!$("view-dataset").hidden) loadDataset();
   if (!$("view-lora").hidden) loadLora();

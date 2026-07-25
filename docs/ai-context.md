@@ -146,10 +146,21 @@ LAN; no Claude/Anthropic in the runtime loop.
   uploaded folder appears in the loader COMBO instantly. **No extra mount needed.**
 - **Captioning decision (user, 2026-07-24): trigger word + light caption** — caption each
   image `pf_<slug>, <short Florence2 caption>`; the LoRA binds to the trigger token.
-- **Plan:** 0.5.0 stage (done) · 0.5.1 auto-caption (Florence2; store captions, likely inject
-  inline so no `.txt` files needed in input) · 0.5.2 `TrainLoraNode` run (non-blocking +
-  reconcile like the dataset), `SaveLoRA` → `{slug}/lora/`, progress/loss monitor. **Validate
-  the training graph with a short (few-step) test run before shipping 0.5.2.**
+- **Training VALIDATED + shipped (0.5.2).** Graph `workflows/lora-train.json`:
+  `CheckpointLoaderSimple` → `LoadImageDataSetFromFolder(folder=pf-<slug>)` →
+  `ImageListToImageBatch` → `VAEEncode` + `CLIPTextEncode(trigger)` → `TrainLoraNode`
+  (offloading=True, bf16, AdamW/MSE) → `SaveLoRA(prefix=<slug>/lora/<trigger>)`. Confirmed by a
+  real 16-step run (status=success). Endpoint `POST /api/projects/{id}/lora/train`;
+  `projects.train_prompt_id`/`train_status`; reconcile in the lora GET.
+- **VRAM:** training OOMs if ComfyUI/Ollama hold the 3090 — the train endpoint unloads Ollama
+  + calls `comfy.free_memory()` (ComfyUI `/free`) first. `offloading=True` in the graph.
+- **LoRA loadability:** `SaveLoRA` writes to the OUTPUT dir (`/builds/<slug>/lora/`), NOT
+  `models/loras` — confirmed (trained lora not in the loras dropdown). User must add
+  `loras: /builds` to ComfyUI `extra_model_paths.yaml` + restart ComfyUI to load them.
+- **Captions:** currently trigger-word-only (validated minimal). **Next: per-image Florence2
+  light captions** (needs `.txt` in input or inline per-image conditioning — TrainLoraNode
+  accepted a single conditioning broadcast over the batch in the test).
+- **Test artifacts left in ComfyUI input:** `pf-uploadtest`, `pf-traintest` (harmless).
 - **Remaining:** 0.5 LoRA trainer · 0.6 pose/expression studio · 0.7 hardening · 1.0 release.
   **Phase 5 next** — training backend TBD (see PROJECT_PLAN: reuse ComfyUI-MCP `train_*`
   flows or a kohya/sd-scripts container). Selected dataset images are `images` rows with

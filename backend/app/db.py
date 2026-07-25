@@ -26,7 +26,10 @@ CREATE TABLE IF NOT EXISTS projects (
     -- how many selected images the dataset is aiming for (Phase B)
     dataset_target     INTEGER NOT NULL DEFAULT 20,
     -- unique token the trained LoRA binds to; '' means derive pf_<slug> (Phase C)
-    trigger_word       TEXT NOT NULL DEFAULT ''
+    trigger_word       TEXT NOT NULL DEFAULT '',
+    -- LoRA training state (Phase C, 0.5.2)
+    train_prompt_id    TEXT NOT NULL DEFAULT '',
+    train_status       TEXT NOT NULL DEFAULT 'none'   -- none | training | done | error
 );
 
 CREATE TABLE IF NOT EXISTS prompt_versions (
@@ -111,6 +114,9 @@ def init_db() -> None:
             conn.execute("ALTER TABLE projects ADD COLUMN dataset_target INTEGER NOT NULL DEFAULT 20")
         if "trigger_word" not in cols:  # pre-0.5.0
             conn.execute("ALTER TABLE projects ADD COLUMN trigger_word TEXT NOT NULL DEFAULT ''")
+        if "train_prompt_id" not in cols:  # pre-0.5.2
+            conn.execute("ALTER TABLE projects ADD COLUMN train_prompt_id TEXT NOT NULL DEFAULT ''")
+            conn.execute("ALTER TABLE projects ADD COLUMN train_status TEXT NOT NULL DEFAULT 'none'")
 
 
 def row_to_dict(row: sqlite3.Row | None) -> dict | None:

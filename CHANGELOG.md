@@ -9,6 +9,35 @@ Every version below is a **published GitHub Release** with a matching
 
 ---
 
+## [0.5.2] — 2026-07-25
+
+**The LoRA actually trains now.** (Phase 5 — released after 0.6.0 because the LoRA and
+Poses phases are being built in parallel; version tags interleave.)
+
+### Added
+- **Train a character LoRA** from the staged dataset, end-to-end in ComfyUI. New
+  **Train** section on the LoRA tab (steps / rank / learning-rate, defaults 500 / 16 /
+  5e-4) and a **Train LoRA** button; live status (`training…` / `done` / `failed`) that
+  polls until the run finishes, then the `.safetensors` appears under **Trained LoRAs**.
+- The training graph (`workflows/lora-train.json`) is the **native ComfyUI `TrainLoraNode`**
+  pipeline — `LoadImageDataSetFromFolder` → `ImageListToImageBatch` → `VAEEncode` +
+  `CLIPTextEncode(trigger)` → `TrainLoraNode` → `SaveLoRA`. **Validated with a real 16-step
+  run** before shipping.
+- **Frees VRAM before training** — unloads the Ollama model and calls ComfyUI `/free`.
+  Without this, training OOMs when ComfyUI/Ollama already hold the 3090 (observed).
+- Endpoint `POST /api/projects/{id}/lora/train`; `projects.train_prompt_id` /
+  `train_status` columns (auto-migrated); `comfy.free_memory()`.
+
+### Notes
+- **Loading the trained LoRA:** `SaveLoRA` writes to the build folder (`<slug>/lora/`), which
+  is ComfyUI's output dir — **not** its `models/loras`, so a trained LoRA won't appear in
+  ComfyUI's loras dropdown until you add a `loras` path to `extra_model_paths.yaml` (see the
+  note in the LoRA tab).
+- Captions are the **trigger word only** for now (the validated minimal path); per-image
+  Florence2 light captions are the next enhancement.
+
+---
+
 ## [0.6.0] — 2026-07-24
 
 **Phase 6 opens: the Pose / Expression studio.** (Built in parallel with the LoRA phase —

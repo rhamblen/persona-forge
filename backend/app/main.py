@@ -946,12 +946,44 @@ async def _dataset_folder_exists(folder: str) -> bool:
         return False
 
 
+async def _reconcile_training(project_id: int) -> None:
+    """Flip a project's train_status once its ComfyUI training prompt finishes."""
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT train_prompt_id, train_status FROM projects WHERE id = ?", (project_id,)
+        ).fetchone()
+    if not row or row["train_status"] != "training" or not row["train_prompt_id"]:
+        return
+    try:
+        hist = await comfy.history_all()
+    except Exception as exc:  # noqa: BLE001
+        logs.warn("integration", f"could not read history to reconcile training: {exc}")
+        return
+    entry = hist.get(row["train_prompt_id"])
+    if not entry:
+        return  # still training, or aged out
+    st = comfy.status_of(entry)
+    if st == "success":
+        with db.connect() as conn:
+            conn.execute("UPDATE projects SET train_status = 'done' WHERE id = ?", (project_id,))
+        logs.info("process", "LoRA training finished", project_id=project_id,
+                  prompt_id=row["train_prompt_id"])
+    elif st == "error":
+        with db.connect() as conn:
+            conn.execute("UPDATE projects SET train_status = 'error' WHERE id = ?", (project_id,))
+        logs.error("process", f"LoRA training failed — {comfy.error_message(entry)}",
+                   project_id=project_id, prompt_id=row["train_prompt_id"])
+
+
 @app.get("/api/projects/{project_id}/lora")
 async def lora_status(project_id: int) -> dict:
+    await _reconcile_training(project_id)
     detail = await get_project(project_id)
     slug = detail["project"]["slug"]
     with db.connect() as conn:
-        proj = conn.execute("SELECT trigger_word FROM projects WHERE id = ?", (project_id,)).fetchone()
+        proj = conn.execute(
+            "SELECT trigger_word, train_status FROM projects WHERE id = ?", (project_id,)
+        ).fetchone()
         selected = conn.execute(
             "SELECT COUNT(*) n FROM images WHERE project_id = ? AND kind = 'dataset' AND selected = 1",
             (project_id,),
@@ -966,7 +998,68 @@ async def lora_status(project_id: int) -> dict:
         "input_folder": folder,
         "staged": await _dataset_folder_exists(folder),
         "loras": loras,
+        "train_status": proj["train_status"] if proj else "none",
     }
+
+
+class LoraTrainRequest(BaseModel):
+    steps: int = Field(default=500, ge=1, le=5000)
+    rank: int = Field(default=16, ge=1, le=128)
+    learning_rate: float = Field(default=0.0005, gt=0, le=0.1)
+
+
+@app.post("/api/projects/{project_id}/lora/train")
+async def lora_train(project_id: int, body: LoraTrainRequest) -> dict:
+    """Train the character LoRA from the staged dataset (native ComfyUI TrainLoraNode)."""
+    detail = await get_project(project_id)
+    version = detail["current_version"] or {}
+    slug = detail["project"]["slug"]
+    folder = _input_folder(slug)
+    with db.connect() as conn:
+        proj = conn.execute("SELECT trigger_word, train_status FROM projects WHERE id = ?",
+                          (project_id,)).fetchone()
+    if proj and proj["train_status"] == "training":
+        raise HTTPException(409, "a training run is already in progress for this persona")
+    if not await _dataset_folder_exists(folder):
+        raise HTTPException(400, "dataset not staged — use 'Stage dataset' first")
+    trigger = (proj["trigger_word"] if proj else "") or default_trigger(slug)
+    checkpoint = version.get("checkpoint") or comfy.DEFAULT_CHECKPOINT
+
+    # Training needs VRAM headroom (an OOM here is the #1 failure). Free ComfyUI's
+    # models and unload the Ollama model first.
+    logs.info("process", "preparing to train LoRA — freeing VRAM",
+              project_id=project_id, trigger=trigger, steps=body.steps, rank=body.rank)
+    try:
+        await ollama.unload()
+    except ollama.OllamaError:
+        pass
+    await comfy.free_memory()
+
+    params = {
+        "checkpoint": checkpoint,
+        "dataset_folder": folder,
+        "trigger": trigger,
+        "steps": body.steps,
+        "rank": body.rank,
+        "learning_rate": body.learning_rate,
+        "seed": version.get("seed") or 0,
+        "output_prefix": f"{slug}/lora/{trigger}",
+    }
+    try:
+        graph = workflows.build_graph("lora-train", params)
+        prompt_id = await comfy.submit(graph)
+    except workflows.WorkflowError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except comfy.ComfyError as exc:
+        raise HTTPException(502, str(exc)) from exc
+
+    with db.connect() as conn:
+        conn.execute("UPDATE projects SET train_prompt_id = ?, train_status = 'training' WHERE id = ?",
+                     (prompt_id, project_id))
+    logs.info("process", f"LoRA training queued ({body.steps} steps, rank {body.rank})",
+              project_id=project_id, prompt_id=prompt_id, checkpoint=checkpoint)
+    return {"status": "training", "prompt_id": prompt_id, "trigger_word": trigger,
+            "steps": body.steps, "rank": body.rank}
 
 
 class LoraTriggerRequest(BaseModel):

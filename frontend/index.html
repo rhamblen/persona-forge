@@ -323,8 +323,40 @@
           </div>
 
           <div class="panel">
+            <div class="panel-head"><h2>Train</h2></div>
+            <div class="lora-train-grid">
+              <label class="field field-narrow">
+                <span class="field-label">Steps</span>
+                <input id="lora-steps" type="number" min="1" max="5000" value="500" />
+              </label>
+              <label class="field field-narrow">
+                <span class="field-label">Rank</span>
+                <input id="lora-rank" type="number" min="1" max="128" value="16" />
+              </label>
+              <label class="field field-narrow">
+                <span class="field-label">Learning rate</span>
+                <input id="lora-lr" type="text" value="0.0005" />
+              </label>
+            </div>
+            <div class="actions">
+              <button class="btn btn-primary" id="lora-train-btn">Train LoRA</button>
+              <span class="lora-train-status small" id="lora-train-status"></span>
+            </div>
+            <p class="muted small">
+              Training frees VRAM first (unloads the Ollama model + ComfyUI's models), then
+              runs on the GPU — a real run of a few hundred steps takes a while. The LoRA
+              appears under “Trained LoRAs” when it finishes. Lower the steps for a quick test.
+            </p>
+          </div>
+
+          <div class="panel">
             <div class="panel-head"><h2>Trained LoRAs</h2></div>
             <div id="lora-list"><p class="muted">None yet.</p></div>
+            <p class="muted small">
+              Saved to <code>&lt;build&gt;/lora/</code>. To load them in ComfyUI for pose
+              generation, add a <code>loras</code> path pointing at the builds root in
+              ComfyUI's <code>extra_model_paths.yaml</code>.
+            </p>
           </div>
         </div>
       </section>

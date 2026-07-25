@@ -271,6 +271,12 @@ code { background: var(--bg-raised); padding: 1px 5px; border-radius: 4px; font-
   border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font: inherit;
   font-family: ui-monospace, Consolas, monospace; }
 .lora-trigger input:focus { outline: none; border-color: var(--accent); }
+.lora-train-grid { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 4px; }
+.lora-train-grid .field-narrow { flex: 0 0 auto; width: 120px; }
+.lora-train-grid input { background: var(--bg-raised); color: var(--text);
+  border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font: inherit; }
+.lora-train-status.ok { color: var(--ok); } .lora-train-status.bad { color: var(--bad); }
+.lora-train-status.warn { color: var(--warn); }
 
 /* ---------- dataset builder (Phase B) ---------- */
 .ds-bar { display: flex; flex-direction: column; gap: 12px; margin-bottom: 12px; }

@@ -90,6 +90,22 @@ async def default_checkpoint() -> str:
         return ""
 
 
+async def free_memory(unload_models: bool = True) -> bool:
+    """Ask ComfyUI to unload models + free VRAM (POST /free). LoRA training needs the
+    headroom — without this it OOMs when ComfyUI/Ollama already hold the GPU."""
+    logs.verbose("integration", "→ ComfyUI POST free (unload models, free VRAM)")
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as c:
+            r = await c.post(f"{COMFYUI_URL}/free",
+                             json={"unload_models": unload_models, "free_memory": True})
+            r.raise_for_status()
+        logs.info("integration", "freed ComfyUI VRAM before training")
+        return True
+    except Exception as exc:  # noqa: BLE001
+        logs.warn("integration", f"could not free ComfyUI VRAM: {exc}")
+        return False
+
+
 async def queue_size() -> int:
     """Running + pending jobs in ComfyUI's queue. -1 if it can't be read."""
     try:
