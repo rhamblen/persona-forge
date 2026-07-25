@@ -9,6 +9,41 @@ Every version below is a **published GitHub Release** with a matching
 
 ---
 
+## [0.6.2] — 2026-07-25
+
+**LoRA-driven poses, a training timer, and clearer export wording.** (Phase 6 — the joint
+LoRA-into-poses deliverable.)
+
+### Added
+- **Pose renders can now load the trained character LoRA.** New `workflows/pose-with-lora.json`
+  (+ manifest): `CheckpointLoaderSimple → LoraLoaderModelOnly → KSampler`, with the project's
+  **trigger word prepended** to the positive prompt. The Poses tab gained a **Character LoRA**
+  selector (with strength) — pick a trained LoRA per project and pose renders stay on-model;
+  leave it on *None* and poses render from the base character as before. Endpoints
+  `GET /api/projects/{id}/pose-config` and `POST /api/projects/{id}/pose-lora`; new
+  `pose_lora` / `pose_lora_strength` columns on `projects`.
+  - The selector flags LoRAs that exist on disk but aren't visible to ComfyUI yet, with a hint
+    to add `persona_forge: { loras: /builds }` to ComfyUI's `extra_model_paths.yaml` and
+    restart — the one manual prerequisite for trained LoRAs to appear in ComfyUI's list.
+- **Training timer + ETA.** The LoRA tab now records a **start time**, and on completion logs
+  the **wall-clock duration** (and s/step) at `info` level — so past run-times are searchable
+  in the log for future reference. While a run is in progress the tab shows **elapsed time and
+  an ETA** derived from the previous run's duration. New `train_started_at` / `train_steps` /
+  `last_train_seconds` / `last_train_steps` columns on `projects`.
+
+### Changed
+- **Export panel relabelled "Export to builds folder"** (was "Export to SillyTavern"). It has
+  always staged sprites into the project's build folder for you to copy into SillyTavern
+  manually; the wording now says so plainly. No behaviour change.
+
+### Notes
+- Training on UR1 shares one RTX 3090 with other GPU containers (ollama, chatterbox-st,
+  immich, a-eye). If those hold VRAM, `TrainLoraNode` can OOM even though ComfyUI frees its own
+  memory first. Stop the aux GPU containers (or let Ollama evict) before a training run until
+  the aux services are moved to the idle RTX 3060.
+
+---
+
 ## [0.6.1] — 2026-07-25
 
 **Export the pose set to SillyTavern sprites.** (Phase 6.)

@@ -29,7 +29,17 @@ CREATE TABLE IF NOT EXISTS projects (
     trigger_word       TEXT NOT NULL DEFAULT '',
     -- LoRA training state (Phase C, 0.5.2)
     train_prompt_id    TEXT NOT NULL DEFAULT '',
-    train_status       TEXT NOT NULL DEFAULT 'none'   -- none | training | done | error
+    train_status       TEXT NOT NULL DEFAULT 'none',   -- none | training | done | error
+    -- Training timing (0.6.2): start clock of the in-progress/most-recent run and the
+    -- duration+steps of the last COMPLETED run — the reference for the next run's ETA.
+    train_started_at   REAL NOT NULL DEFAULT 0,        -- epoch secs when the current run started (0 = none)
+    train_steps        INTEGER NOT NULL DEFAULT 0,     -- steps of the current/most-recent run
+    last_train_seconds REAL NOT NULL DEFAULT 0,        -- wall-clock duration of the last completed run
+    last_train_steps   INTEGER NOT NULL DEFAULT 0,     -- steps of the last completed run
+    -- Phase 6 (0.6.2): the trained LoRA to load into pose renders. Bare filename
+    -- from <slug>/lora/*.safetensors; '' = render poses from the base prompt (no LoRA).
+    pose_lora          TEXT NOT NULL DEFAULT '',
+    pose_lora_strength REAL NOT NULL DEFAULT 1.0
 );
 
 CREATE TABLE IF NOT EXISTS prompt_versions (
@@ -134,6 +144,14 @@ def init_db() -> None:
         if "train_prompt_id" not in cols:  # pre-0.5.2
             conn.execute("ALTER TABLE projects ADD COLUMN train_prompt_id TEXT NOT NULL DEFAULT ''")
             conn.execute("ALTER TABLE projects ADD COLUMN train_status TEXT NOT NULL DEFAULT 'none'")
+        if "pose_lora" not in cols:  # pre-0.6.2
+            conn.execute("ALTER TABLE projects ADD COLUMN pose_lora TEXT NOT NULL DEFAULT ''")
+            conn.execute("ALTER TABLE projects ADD COLUMN pose_lora_strength REAL NOT NULL DEFAULT 1.0")
+        if "train_started_at" not in cols:  # pre-0.6.2
+            conn.execute("ALTER TABLE projects ADD COLUMN train_started_at REAL NOT NULL DEFAULT 0")
+            conn.execute("ALTER TABLE projects ADD COLUMN train_steps INTEGER NOT NULL DEFAULT 0")
+            conn.execute("ALTER TABLE projects ADD COLUMN last_train_seconds REAL NOT NULL DEFAULT 0")
+            conn.execute("ALTER TABLE projects ADD COLUMN last_train_steps INTEGER NOT NULL DEFAULT 0")
 
 
 def row_to_dict(row: sqlite3.Row | None) -> dict | None:

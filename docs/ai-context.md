@@ -128,12 +128,20 @@ LAN; no Claude/Anthropic in the runtime loop.
   reconcile via `poses` table), select→zoom→edit (manual or `ollama.revise()`)→regenerate one.
   Endpoints under `/api/projects/{id}/poses`. Renders base prompt + pose `modifier` via the
   base-character `expression` param; will use the trained LoRA once Phase 5 completes.
-- **0.6.1 (current):** Phase 6 — Export to SillyTavern on the Poses tab. Mattes each rendered
+- **0.6.1:** Phase 6 — Export on the Poses tab. Mattes each rendered
   pose to a transparent PNG (BEN2) named for ST (exact expression names verbatim, else
   slugified, de-duped), staged to `<build>/export/<Character>/`, never auto-copied. New
   `workflows/bg-remove.json` (BEN2 + WAS Image Save prefix_as_filename), `export_jobs` table,
-  `GET/POST /api/projects/{id}/poses/export`. (Built in a parallel session; committed after
-  review — compiles, manifest valid, BEN2 correct.)
+  `GET/POST /api/projects/{id}/poses/export`.
+- **0.6.2 (current):** Phase 6 — **LoRA-driven poses** (the joint deliverable). New
+  `workflows/pose-with-lora.json` (`CheckpointLoaderSimple → LoraLoaderModelOnly → KSampler`,
+  trigger word prepended); Poses tab **Character LoRA** selector (+ strength); endpoints
+  `GET /pose-config`, `POST /pose-lora`; `projects.pose_lora`/`pose_lora_strength`. Pose renders
+  fall back to `base-character` when no LoRA is selected. Graph validated end-to-end
+  (status=success on ComfyUI 0.28.0). Also: **training timer + ETA** (start time + run duration
+  logged at `info`; elapsed/ETA on the LoRA tab; `train_started_at`/`train_steps`/
+  `last_train_seconds`/`last_train_steps` columns), and the export panel relabelled
+  **"Export to builds folder"**.
 - **0.5.1:** logging overhaul — added a `verbose` level (below debug) and
   instrumented the pipeline throughout (not just boot). Log-level convention:
   **verbose** = cross-system handshakes / per-file share copies / polls (integration+local);
@@ -164,6 +172,11 @@ LAN; no Claude/Anthropic in the runtime loop.
   `projects.train_prompt_id`/`train_status`; reconcile in the lora GET.
 - **VRAM:** training OOMs if ComfyUI/Ollama hold the 3090 — the train endpoint unloads Ollama
   + calls `comfy.free_memory()` (ComfyUI `/free`) first. `offloading=True` in the graph.
+  **Known (0.6.2):** UR1's 3090 is *shared* with other GPU containers (ollama, chatterbox-st,
+  immich:cuda, a-eye) which can hold ~13 GB; ComfyUI's free can't evict them, so training OOMs
+  under aux load even though its own free works. Confirmed live (after ComfyUI unload, 3090
+  still showed only ~10.7 GB free). Interim workflow: **stop the aux GPU containers before a
+  training run**; the idle RTX 3060 (12 GB) is the eventual home for them.
 - **LoRA loadability:** `SaveLoRA` writes to the OUTPUT dir (`/builds/<slug>/lora/`), NOT
   `models/loras` — confirmed (trained lora not in the loras dropdown). User must add
   `loras: /builds` to ComfyUI `extra_model_paths.yaml` + restart ComfyUI to load them.
@@ -181,9 +194,13 @@ LAN; no Claude/Anthropic in the runtime loop.
   of the LoRA tab is handed to the Poses/Phase-6 session** as of 2026-07-25 (one stream). The
   remaining LoRA-related work — **wiring the trained LoRA into pose generation** — is Phase-6
   work. See `docs/handover-lora-into-poses.md`.
-- ✅ **Phase 6 (pose/expression studio)** — poses grid/edit/regenerate (0.6.0) + SillyTavern
-  sprite export (0.6.1) done. **In progress:** load the trained LoRA into pose generation.
-- **Remaining:** 0.7 hardening · 1.0 release.
+- ✅ **Phase 6 (pose/expression studio)** — poses grid/edit/regenerate (0.6.0), sprite
+  export (0.6.1), and **LoRA-driven pose generation (0.6.2)** all done. The joint
+  LoRA-into-poses deliverable is complete: pose renders load the project's trained LoRA with
+  the trigger word prepended (`pose-with-lora` workflow), selectable per project.
+- **Remaining:** 0.7 hardening · 1.0 release. Optional Phase-6 polish: reuse-parent-LoRA for
+  clones (`parent_project_id`), training loss/step readout, and moving aux GPU containers off
+  the 3090 so training stops OOMing under load.
 
 ## Track A note (separate from the app)
 

@@ -5,6 +5,14 @@
 const POLL_MS = 15000;
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const fmtDur = (secs) => {  // 95 -> "1m35s", 24 -> "24s", 3800 -> "1h03m20s"
+  const s = Math.round(secs || 0);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60), r = s % 60;
+  if (m < 60) return `${m}m${String(r).padStart(2, "0")}s`;
+  const h = Math.floor(m / 60), rm = m % 60;
+  return `${h}h${String(rm).padStart(2, "0")}m${String(r).padStart(2, "0")}s`;
+};
 
 let state = { projectId: null, versions: [], current: null, checkpoints: [], defaultCheckpoint: "" };
 
@@ -740,12 +748,25 @@ async function loadLora() {
     $("lora-list").innerHTML = d.loras.length
       ? d.loras.map((l) => `<div class="small">${esc(l)}</div>`).join("")
       : '<p class="muted">None yet.</p>';
-    // training state
+    // training state (with live elapsed + ETA from the previous run)
     const ts = d.train_status;
     const st = $("lora-train-status");
-    st.textContent = ts === "training" ? "training… (running on the GPU — this takes a while)"
-      : ts === "done" ? "last run finished ✓"
-      : ts === "error" ? "last run failed — check the logs" : "";
+    const lastNote = d.last_train_seconds
+      ? ` — previous run: ${fmtDur(d.last_train_seconds)}${d.last_train_steps ? ` (${d.last_train_steps} steps)` : ""}`
+      : "";
+    if (ts === "training") {
+      let t = "training… on the GPU";
+      if (d.elapsed_seconds != null) t += ` · ${fmtDur(d.elapsed_seconds)} elapsed`;
+      if (d.remaining_seconds != null) t += ` · ~${fmtDur(d.remaining_seconds)} left (est. from previous run)`;
+      else if (lastNote) t += lastNote;
+      st.textContent = t;
+    } else if (ts === "done") {
+      st.textContent = `last run finished ✓${lastNote}`;
+    } else if (ts === "error") {
+      st.textContent = `last run failed — check the logs${lastNote}`;
+    } else {
+      st.textContent = lastNote ? lastNote.replace(/^ — /, "") : "";
+    }
     st.className = "lora-train-status small " + (ts === "training" ? "warn" : ts === "done" ? "ok" : ts === "error" ? "bad" : "muted");
     $("lora-train-btn").disabled = ts === "training";
     if (ts === "training") startLoraPolling(); else stopLoraPolling();
@@ -833,6 +854,65 @@ async function loadPoses() {
     if (data.generating || exportGenerating) startPosesPolling(); else stopPosesPolling();
   } catch (e) { msg($("poses-msg"), e.message, "bad"); }
 }
+
+async function loadPoseConfig() {
+  if (!state.projectId) { $("pose-lora-panel").hidden = true; return; }
+  try {
+    const d = await api(`/api/projects/${state.projectId}/pose-config`);
+    const sel = $("pose-lora-select");
+    if (document.activeElement !== sel) {
+      const opts = ['<option value="">None — base character (no LoRA)</option>'].concat(
+        d.loras.map((l) =>
+          `<option value="${esc(l.name)}"${l.name === d.selected ? " selected" : ""}>` +
+          `${esc(l.name)}${l.comfy_visible ? "" : " — not in ComfyUI"}</option>`)
+      );
+      sel.innerHTML = opts.join("");
+      sel.value = d.selected || "";
+    }
+    if (document.activeElement !== $("pose-lora-strength")) $("pose-lora-strength").value = d.strength;
+
+    const hint = $("pose-lora-hint");
+    if (!d.loras.length) {
+      hint.innerHTML = d.train_status === "training"
+        ? "Training in progress — the LoRA will appear here when it finishes."
+        : "No trained LoRA yet. Train one on the <strong>LoRA</strong> tab to keep poses on-model; " +
+          "for now poses render from the base character prompt.";
+      hint.className = "hint muted";
+    } else if (d.needs_extra_paths) {
+      hint.innerHTML = "Trained LoRA found on disk but ComfyUI can’t see it yet. Add " +
+        "<code>persona_forge:</code> → <code>loras: /builds</code> to ComfyUI’s " +
+        "<code>extra_model_paths.yaml</code> and restart ComfyUI, then Apply.";
+      hint.className = "hint bad";
+    } else if (d.selected) {
+      hint.innerHTML = `Pose renders load <strong>${esc(d.selected)}</strong> and prepend trigger ` +
+        `<code>${esc(d.trigger_word)}</code>. Regenerate poses after changing this.`;
+      hint.className = "hint ok";
+    } else {
+      hint.innerHTML = `A trained LoRA is available — select it to keep poses on-model ` +
+        `(trigger <code>${esc(d.trigger_word)}</code>).`;
+      hint.className = "hint muted";
+    }
+    $("pose-lora-panel").hidden = false;
+  } catch (e) { /* pose-config is best-effort; don't block the poses grid */ }
+}
+
+$("pose-lora-save").addEventListener("click", async () => {
+  if (!state.projectId) return;
+  const lora = $("pose-lora-select").value;
+  const strength = parseFloat($("pose-lora-strength").value) || 1.0;
+  const btn = $("pose-lora-save");
+  btn.disabled = true;
+  try {
+    await api(`/api/projects/${state.projectId}/pose-lora`, {
+      method: "POST", body: JSON.stringify({ lora, strength }),
+    });
+    msg($("poses-msg"), lora
+      ? `LoRA applied: ${lora}. Regenerate poses to render with it.`
+      : "LoRA cleared — poses will render from the base character.", "ok");
+    loadPoseConfig();
+  } catch (e) { msg($("poses-msg"), e.message, "bad"); }
+  finally { btn.disabled = false; }
+});
 
 function poseStatusBadge(p) {
   if (p.status === "pending") return '<span class="pose-badge b-pending">rendering…</span>';
@@ -1046,7 +1126,7 @@ document.querySelectorAll(".nav-item[data-view]").forEach((a) =>
     if (a.dataset.view === "dataset") loadDataset();
     else stopDatasetPolling();
     if (a.dataset.view === "lora") loadLora();
-    if (a.dataset.view === "poses") loadPoses();
+    if (a.dataset.view === "poses") { loadPoses(); loadPoseConfig(); }
     else stopPosesPolling();
   }));
 
@@ -1088,7 +1168,7 @@ $("project-select").addEventListener("change", (e) => {
   selectedPoseId = null;
   if (!$("view-dataset").hidden) loadDataset();
   if (!$("view-lora").hidden) loadLora();
-  if (!$("view-poses").hidden) loadPoses();
+  if (!$("view-poses").hidden) { loadPoses(); loadPoseConfig(); }
 });
 
 $("generate-btn").addEventListener("click", () => generate());

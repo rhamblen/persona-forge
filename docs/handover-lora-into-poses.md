@@ -1,5 +1,13 @@
 # Handover — LoRA tab folds into Poses/Phase 6 development
 
+> **✅ DELIVERED in v0.6.2 (2026-07-25).** The core joint deliverable below — *wire the trained
+> LoRA into pose generation* — is done: `workflows/pose-with-lora.json`
+> (`CheckpointLoaderSimple → LoraLoaderModelOnly → KSampler`, trigger prepended), a per-project
+> **Character LoRA** selector on the Poses tab, endpoints `GET /pose-config` + `POST /pose-lora`,
+> and `projects.pose_lora`/`pose_lora_strength`. Graph validated end-to-end on ComfyUI 0.28.0.
+> Remaining items here (reuse-parent-LoRA for clones, loss/step readout) stay optional Phase-6
+> polish. The rest of this doc is kept for context.
+
 **Decision (2026-07-25):** further **LoRA-tab work is no longer a separate stream**. It is
 handed to the Poses/Phase-6 session and done *in conjunction* with pose code, because the two
 meet at one point: **pose generation must use the trained LoRA**, which it does not yet. Read

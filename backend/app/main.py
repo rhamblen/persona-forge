@@ -932,6 +932,18 @@ def default_trigger(slug: str) -> str:
     return "pf_" + _TRIGGER_RE.sub("_", slug.lower()).strip("_")
 
 
+def _fmt_dur(seconds: float) -> str:
+    """Human duration for logs/UI: 95 -> '1m35s', 24 -> '24s', 3800 -> '1h3m20s'."""
+    s = int(round(seconds))
+    if s < 60:
+        return f"{s}s"
+    m, s = divmod(s, 60)
+    if m < 60:
+        return f"{m}m{s:02d}s"
+    h, m = divmod(m, 60)
+    return f"{h}h{m:02d}m{s:02d}s"
+
+
 def _input_folder(slug: str) -> str:
     return f"pf-{slug}"
 
@@ -950,7 +962,8 @@ async def _reconcile_training(project_id: int) -> None:
     """Flip a project's train_status once its ComfyUI training prompt finishes."""
     with db.connect() as conn:
         row = conn.execute(
-            "SELECT train_prompt_id, train_status FROM projects WHERE id = ?", (project_id,)
+            "SELECT train_prompt_id, train_status, train_started_at, train_steps "
+            "FROM projects WHERE id = ?", (project_id,)
         ).fetchone()
     if not row or row["train_status"] != "training" or not row["train_prompt_id"]:
         return
@@ -964,10 +977,25 @@ async def _reconcile_training(project_id: int) -> None:
         return  # still training, or aged out
     st = comfy.status_of(entry)
     if st == "success":
+        started = row["train_started_at"] or 0
+        steps = row["train_steps"] or 0
+        duration = max(0.0, time.time() - started) if started else 0.0
         with db.connect() as conn:
-            conn.execute("UPDATE projects SET train_status = 'done' WHERE id = ?", (project_id,))
-        logs.info("process", "LoRA training finished", project_id=project_id,
-                  prompt_id=row["train_prompt_id"])
+            if duration > 0:
+                conn.execute(
+                    "UPDATE projects SET train_status = 'done', last_train_seconds = ?, "
+                    "last_train_steps = ? WHERE id = ?", (duration, steps, project_id))
+            else:
+                conn.execute("UPDATE projects SET train_status = 'done' WHERE id = ?", (project_id,))
+        if duration > 0:
+            per_step = f", {duration / steps:.1f}s/step" if steps else ""
+            logs.info("process",
+                      f"LoRA training finished in {_fmt_dur(duration)} ({steps} steps{per_step})",
+                      project_id=project_id, prompt_id=row["train_prompt_id"],
+                      duration_seconds=round(duration, 1), steps=steps)
+        else:
+            logs.info("process", "LoRA training finished", project_id=project_id,
+                      prompt_id=row["train_prompt_id"])
     elif st == "error":
         with db.connect() as conn:
             conn.execute("UPDATE projects SET train_status = 'error' WHERE id = ?", (project_id,))
@@ -982,7 +1010,8 @@ async def lora_status(project_id: int) -> dict:
     slug = detail["project"]["slug"]
     with db.connect() as conn:
         proj = conn.execute(
-            "SELECT trigger_word, train_status FROM projects WHERE id = ?", (project_id,)
+            "SELECT trigger_word, train_status, train_started_at, train_steps, "
+            "last_train_seconds, last_train_steps FROM projects WHERE id = ?", (project_id,)
         ).fetchone()
         selected = conn.execute(
             "SELECT COUNT(*) n FROM images WHERE project_id = ? AND kind = 'dataset' AND selected = 1",
@@ -992,13 +1021,29 @@ async def lora_status(project_id: int) -> dict:
     folder = _input_folder(slug)
     lora_dir = BUILDS_ROOT / slug / "lora"
     loras = sorted(p.name for p in lora_dir.glob("*.safetensors")) if lora_dir.is_dir() else []
+
+    status = proj["train_status"] if proj else "none"
+    last_secs = (proj["last_train_seconds"] if proj else 0) or 0
+    last_steps = (proj["last_train_steps"] if proj else 0) or 0
+    elapsed = eta = remaining = None
+    if status == "training" and proj and proj["train_started_at"]:
+        elapsed = max(0.0, time.time() - proj["train_started_at"])
+        if last_secs > 0:                       # ETA from the previous completed run
+            eta = last_secs
+            remaining = max(0.0, last_secs - elapsed)
     return {
         "trigger_word": trigger,
         "selected_count": selected,
         "input_folder": folder,
         "staged": await _dataset_folder_exists(folder),
         "loras": loras,
-        "train_status": proj["train_status"] if proj else "none",
+        "train_status": status,
+        "current_steps": (proj["train_steps"] if proj else 0) or 0,
+        "elapsed_seconds": round(elapsed, 1) if elapsed is not None else None,
+        "eta_seconds": round(eta, 1) if eta is not None else None,
+        "remaining_seconds": round(remaining, 1) if remaining is not None else None,
+        "last_train_seconds": round(last_secs, 1) if last_secs else None,
+        "last_train_steps": last_steps or None,
     }
 
 
@@ -1016,8 +1061,9 @@ async def lora_train(project_id: int, body: LoraTrainRequest) -> dict:
     slug = detail["project"]["slug"]
     folder = _input_folder(slug)
     with db.connect() as conn:
-        proj = conn.execute("SELECT trigger_word, train_status FROM projects WHERE id = ?",
-                          (project_id,)).fetchone()
+        proj = conn.execute(
+            "SELECT trigger_word, train_status, last_train_seconds, last_train_steps "
+            "FROM projects WHERE id = ?", (project_id,)).fetchone()
     if proj and proj["train_status"] == "training":
         raise HTTPException(409, "a training run is already in progress for this persona")
     if not await _dataset_folder_exists(folder):
@@ -1053,13 +1099,28 @@ async def lora_train(project_id: int, body: LoraTrainRequest) -> dict:
     except comfy.ComfyError as exc:
         raise HTTPException(502, str(exc)) from exc
 
+    started_at = time.time()
     with db.connect() as conn:
-        conn.execute("UPDATE projects SET train_prompt_id = ?, train_status = 'training' WHERE id = ?",
-                     (prompt_id, project_id))
-    logs.info("process", f"LoRA training queued ({body.steps} steps, rank {body.rank})",
-              project_id=project_id, prompt_id=prompt_id, checkpoint=checkpoint)
+        conn.execute(
+            "UPDATE projects SET train_prompt_id = ?, train_status = 'training', "
+            "train_started_at = ?, train_steps = ? WHERE id = ?",
+            (prompt_id, started_at, body.steps, project_id))
+
+    prev_secs = (proj["last_train_seconds"] if proj else 0) or 0
+    prev_steps = (proj["last_train_steps"] if proj else 0) or 0
+    eta_note = ""
+    if prev_secs > 0:
+        eta_note = (f" — previous run took {_fmt_dur(prev_secs)}"
+                    + (f" for {prev_steps} steps" if prev_steps else "")
+                    + f", so ~{_fmt_dur(prev_secs)} ETA")
+    logs.info("process",
+              f"LoRA training started at {datetime.now().strftime('%H:%M:%S')} "
+              f"({body.steps} steps, rank {body.rank}){eta_note}",
+              project_id=project_id, prompt_id=prompt_id, checkpoint=checkpoint,
+              started_at=started_at, prev_train_seconds=round(prev_secs, 1) or None)
     return {"status": "training", "prompt_id": prompt_id, "trigger_word": trigger,
-            "steps": body.steps, "rank": body.rank}
+            "steps": body.steps, "rank": body.rank,
+            "eta_seconds": prev_secs or None, "prev_steps": prev_steps or None}
 
 
 class LoraTriggerRequest(BaseModel):
@@ -1191,17 +1252,57 @@ async def _reconcile_poses(project_id: int) -> None:
         logs.info("process", f"pose reconcile: {done} finished, {failed} failed", project_id=project_id)
 
 
-async def _queue_pose(conn, project_id: int, slug: str, version: dict, pose_row: Any) -> None:
-    """Submit one pose's render and mark it pending."""
+def _pose_lora_cfg(conn, project_id: int, slug: str) -> dict[str, Any] | None:
+    """Resolve the project's selected pose LoRA into build_graph params, or None.
+
+    Returns None (→ render LoRA-free via base-character) when no LoRA is selected or
+    the selected file has since vanished from disk.
+    """
+    row = conn.execute(
+        "SELECT trigger_word, pose_lora, pose_lora_strength FROM projects WHERE id = ?",
+        (project_id,),
+    ).fetchone()
+    if not row:
+        return None
+    name = (row["pose_lora"] or "").strip()
+    if not name:
+        return None
+    if not (BUILDS_ROOT / slug / "lora" / name).is_file():
+        logs.warn("process", f"selected pose LoRA '{name}' is not on disk — rendering without it",
+                  project_id=project_id)
+        return None
+    trigger = (row["trigger_word"] or "") or default_trigger(slug)
+    return {
+        "lora_name": f"{slug}/lora/{name}",       # relative to extra_model_paths loras root (/builds)
+        "lora_strength": row["pose_lora_strength"] or 1.0,
+        "trigger": trigger,
+    }
+
+
+async def _queue_pose(conn, project_id: int, slug: str, version: dict, pose_row: Any,
+                      lora_cfg: dict | None = None) -> None:
+    """Submit one pose's render and mark it pending.
+
+    With a resolved `lora_cfg` the render goes through `pose-with-lora` (character LoRA
+    loaded, trigger prepended); otherwise it uses the LoRA-free `base-character` graph.
+    """
     params = {
         **_version_prompt_params(version),
         "seed": version.get("seed") or 0,
         "expression": pose_row["modifier"] or None,
         "output_prefix": f"{slug}/images/pose_{pose_row['id']}",
     }
+    if lora_cfg:
+        workflow_id = "pose-with-lora"
+        params["lora_name"] = lora_cfg["lora_name"]
+        params["lora_strength"] = lora_cfg["lora_strength"]
+        params["trigger"] = lora_cfg["trigger"]
+    else:
+        workflow_id = "base-character"
     params = {k: v for k, v in params.items() if v is not None}
-    logs.verbose("process", "queuing pose render", pose_id=pose_row["id"], name=pose_row["name"])
-    graph = workflows.build_graph("base-character", params)
+    logs.verbose("process", "queuing pose render", pose_id=pose_row["id"], name=pose_row["name"],
+                 workflow=workflow_id, lora=lora_cfg["lora_name"] if lora_cfg else None)
+    graph = workflows.build_graph(workflow_id, params)
     prompt_id = await comfy.submit(graph)
     conn.execute("UPDATE poses SET prompt_id = ?, status = 'pending' WHERE id = ?",
                  (prompt_id, pose_row["id"]))
@@ -1333,8 +1434,9 @@ async def pose_generate(project_id: int, pose_id: int) -> dict:
                           (pose_id, project_id)).fetchone()
         if row is None:
             raise HTTPException(404, "pose not found")
+        lora_cfg = _pose_lora_cfg(conn, project_id, slug)
         try:
-            await _queue_pose(conn, project_id, slug, version, row)
+            await _queue_pose(conn, project_id, slug, version, row, lora_cfg)
         except (workflows.WorkflowError, comfy.ComfyError) as exc:
             raise HTTPException(502, str(exc)) from exc
     return {"pose_id": pose_id, "status": "pending"}
@@ -1350,10 +1452,11 @@ async def poses_generate_all(project_id: int) -> dict:
                           (project_id,)).fetchall()
         if not rows:
             raise HTTPException(400, "no poses yet — add some or load a preset first")
+        lora_cfg = _pose_lora_cfg(conn, project_id, slug)
         queued = 0
         for row in rows:
             try:
-                await _queue_pose(conn, project_id, slug, version, row)
+                await _queue_pose(conn, project_id, slug, version, row, lora_cfg)
                 queued += 1
             except (workflows.WorkflowError, comfy.ComfyError) as exc:
                 logs.error("process", f"pose queue failed after {queued}: {exc}", project_id=project_id)
@@ -1362,6 +1465,67 @@ async def poses_generate_all(project_id: int) -> dict:
                 break
     logs.info("process", f"poses: queued {queued} render(s)", project_id=project_id, slug=slug)
     return {"queued": queued}
+
+
+@app.get("/api/projects/{project_id}/pose-config")
+async def pose_config(project_id: int) -> dict:
+    """LoRA options for pose rendering: which trained LoRAs exist, which one is selected,
+    and whether ComfyUI can actually see them (extra_model_paths + restart)."""
+    detail = await get_project(project_id)
+    slug = detail["project"]["slug"]
+    with db.connect() as conn:
+        proj = conn.execute(
+            "SELECT trigger_word, train_status, pose_lora, pose_lora_strength FROM projects WHERE id = ?",
+            (project_id,),
+        ).fetchone()
+    if proj is None:
+        raise HTTPException(404, "project not found")
+
+    lora_dir = BUILDS_ROOT / slug / "lora"
+    files = sorted(p.name for p in lora_dir.glob("*.safetensors")) if lora_dir.is_dir() else []
+    try:
+        comfy_opts = set(await comfy.list_models("loras"))
+    except Exception:  # noqa: BLE001
+        comfy_opts = set()
+
+    def visible(fn: str) -> bool:
+        return f"{slug}/lora/{fn}" in comfy_opts
+
+    return {
+        "trigger_word": (proj["trigger_word"] or "") or default_trigger(slug),
+        "train_status": proj["train_status"],
+        "loras": [{"name": fn, "comfy_visible": visible(fn)} for fn in files],
+        "selected": (proj["pose_lora"] or "").strip(),
+        "strength": proj["pose_lora_strength"] or 1.0,
+        # a trained LoRA exists on disk but ComfyUI can't see any of them → the user still
+        # needs `loras: /builds` in extra_model_paths.yaml + a ComfyUI restart.
+        "needs_extra_paths": bool(files) and not any(visible(fn) for fn in files),
+    }
+
+
+class PoseLoraRequest(BaseModel):
+    lora: str = ""                                          # bare filename, or '' to disable
+    strength: float = Field(default=1.0, ge=0.0, le=2.0)
+
+
+@app.post("/api/projects/{project_id}/pose-lora")
+async def set_pose_lora(project_id: int, body: PoseLoraRequest) -> dict:
+    """Choose the trained LoRA to load into this project's pose renders ('' disables)."""
+    detail = await get_project(project_id)
+    slug = detail["project"]["slug"]
+    name = body.lora.strip()
+    if name and not (BUILDS_ROOT / slug / "lora" / name).is_file():
+        raise HTTPException(404, f"LoRA '{name}' not found in {BUILDS_ROOT / slug / 'lora'}")
+    with db.connect() as conn:
+        cur = conn.execute(
+            "UPDATE projects SET pose_lora = ?, pose_lora_strength = ? WHERE id = ?",
+            (name, body.strength, project_id),
+        )
+        if cur.rowcount == 0:
+            raise HTTPException(404, "project not found")
+    logs.info("process", f"pose LoRA {'set: ' + name if name else 'cleared'}",
+              project_id=project_id, strength=body.strength)
+    return {"pose_lora": name, "pose_lora_strength": body.strength}
 
 
 # --------------------------------------------------------------------------- #

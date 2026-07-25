@@ -389,6 +389,22 @@
                   <span class="ds-genstate muted small" id="poses-genstate"></span>
                 </div>
               </div>
+
+              <div class="panel pose-lora-bar" id="pose-lora-panel" hidden>
+                <div class="pose-lora-row">
+                  <label class="field pose-lora-field">
+                    <span class="field-label">Character LoRA <em>loaded into pose renders</em></span>
+                    <select id="pose-lora-select"></select>
+                  </label>
+                  <label class="field pose-lora-strength">
+                    <span class="field-label">Strength</span>
+                    <input id="pose-lora-strength" type="number" min="0" max="2" step="0.05" value="1.0" />
+                  </label>
+                  <button class="btn" id="pose-lora-save">Apply</button>
+                </div>
+                <p class="hint" id="pose-lora-hint"></p>
+              </div>
+
               <p class="hint" id="poses-msg"></p>
               <div class="poses-grid" id="poses-grid">
                 <p class="muted">No poses yet — add one or load a preset.</p>
@@ -396,16 +412,17 @@
 
               <div class="panel export-panel" id="poses-export">
                 <div class="panel-head">
-                  <h2>Export to SillyTavern</h2>
+                  <h2>Export to builds folder</h2>
                   <span class="muted small" id="poses-export-state"></span>
                 </div>
                 <p class="muted small">
                   Mattes each rendered pose to a transparent PNG (BEN2) and names it for
-                  SillyTavern. Sprites are staged in the build folder — copy them into your
-                  character’s folder yourself; nothing is written to SillyTavern automatically.
+                  SillyTavern, then stages the sprites in this project’s build folder. Nothing is
+                  written to SillyTavern automatically — copy the folder into your character’s
+                  SillyTavern sprite folder yourself.
                 </p>
                 <div class="export-controls">
-                  <button class="btn btn-primary" id="poses-export-btn">Export to SillyTavern</button>
+                  <button class="btn btn-primary" id="poses-export-btn">Export to builds folder</button>
                   <code class="export-folder" id="poses-export-folder"></code>
                 </div>
                 <p class="hint" id="poses-export-msg"></p>
