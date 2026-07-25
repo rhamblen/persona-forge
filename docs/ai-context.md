@@ -3,6 +3,10 @@
 Dense factual map for the next AI session. Not for end users. Read this first, then
 `PROJECT_PLAN.md` for the full spec. Keep this file current **every release**.
 
+> **2026-07-25 — LoRA tab folds into Poses/Phase-6 development** (one stream, not two).
+> The joint next step is wiring the trained LoRA into pose generation. See
+> `docs/handover-lora-into-poses.md`.
+
 ## What it is
 
 Persona Forge is a self-hosted web app that turns a character description into a
