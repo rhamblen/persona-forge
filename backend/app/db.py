@@ -119,6 +119,31 @@ CREATE TABLE IF NOT EXISTS export_jobs (
 );
 
 CREATE INDEX IF NOT EXISTS idx_exportjobs_project ON export_jobs(project_id, status);
+
+-- Phase 7 (0.7.0): the generic background job engine. One row per queued/running
+-- pipeline (kind='lora_build' now; 'lorebook'/'campaign'/'ingest' later). The worker
+-- advances the running job stage-by-stage, reconciling against ComfyUI history, so a
+-- build finishes unattended with the browser closed. `state_json` is the handler's
+-- scratch (e.g. the training prompt_id) and survives a container restart, so an
+-- in-flight job resumes rather than restarting. See jobs.py.
+CREATE TABLE IF NOT EXISTS jobs (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id  INTEGER REFERENCES projects(id) ON DELETE CASCADE,
+    kind        TEXT NOT NULL,
+    status      TEXT NOT NULL DEFAULT 'queued',    -- queued | running | done | error | canceled
+    stage       TEXT NOT NULL DEFAULT '',          -- handler-defined current stage label
+    params_json TEXT NOT NULL DEFAULT '{}',        -- inputs (steps, rank, preset, ...)
+    state_json  TEXT NOT NULL DEFAULT '{}',        -- handler scratch (prompt ids, flags) — resume-safe
+    message     TEXT NOT NULL DEFAULT '',          -- human-readable status / last error
+    progress    REAL NOT NULL DEFAULT 0,           -- 0..1, optional
+    result_json TEXT NOT NULL DEFAULT '{}',        -- outputs (lora filename, pose counts, ...)
+    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    started_at  REAL NOT NULL DEFAULT 0,
+    finished_at REAL NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status, id);
+CREATE INDEX IF NOT EXISTS idx_jobs_project ON jobs(project_id, id);
 """
 
 

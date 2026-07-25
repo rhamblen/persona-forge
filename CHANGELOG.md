@@ -9,6 +9,39 @@ Every version below is a **published GitHub Release** with a matching
 
 ---
 
+## [0.7.0] — 2026-07-25
+
+**Unattended builds: a background job engine.** (Phase 7 — orchestration.)
+
+### Added
+- **Generic background job engine** (`jobs.py` + `jobs` table). A single in-process asyncio
+  worker drains a persisted FIFO, advancing the one running job stage-by-stage until it
+  finishes — so a build runs **unattended with the browser closed**. It's kind-agnostic:
+  handlers register per `kind`, so the lorebook generator, cast/campaign builder, and source
+  ingestion (PROJECT_PLAN Phase E/F/G) plug in later with **zero engine changes**. Jobs are
+  **resume-safe** — all progress lives in the row (`stage` + `state_json`), so a container
+  restart re-reconciles the running job instead of losing it. Serial by design (the GPU is
+  serial); a future `lane` can run non-GPU jobs alongside.
+- **First handler — `lora_build`:** one click runs **train LoRA → auto-apply it → render the
+  first-draft 28 expressions**. If ComfyUI can't see the freshly trained LoRA, the build
+  **restarts ComfyUI** (via the existing scoped docker-socket proxy) to bind it, then renders;
+  if it still can't bind (or container control is off), it **degrades to base-character poses**
+  and says so in the result rather than failing. Reconciles training + poses from ComfyUI
+  history each tick.
+- **Job endpoints:** `POST /api/projects/{id}/jobs` (enqueue; rejects a duplicate active build
+  and an unstaged dataset), `GET /api/projects/{id}/jobs`, `GET /api/jobs`, `GET /api/jobs/{id}`,
+  `POST /api/jobs/{id}/cancel`.
+- **"Build overnight" panel** on the LoRA tab — steps / rank / strength + a live stage/progress
+  bar. Kick it off and close the tab; the server finishes the build.
+
+### Notes
+- The manual **Train** and **Generate all** buttons still work standalone — the job engine
+  reuses the same training/pose code (factored into shared helpers), it doesn't replace them.
+- Deferred to Phase F (per the plan): the multi-character **add-to-queue** cast builder, and
+  concurrency lanes — both ride this same engine.
+
+---
+
 ## [0.6.2] — 2026-07-25
 
 **LoRA-driven poses, a training timer, and clearer export wording.** (Phase 6 — the joint

@@ -360,6 +360,39 @@
               ComfyUI's <code>extra_model_paths.yaml</code>.
             </p>
           </div>
+
+          <div class="panel" id="lora-build-panel">
+            <div class="panel-head"><h2>Build overnight (unattended)</h2></div>
+            <p class="muted small">
+              One click runs the whole thing on the server — <strong>train the LoRA, then
+              auto-generate the first-draft 28 expressions</strong> — so you can close the tab and
+              come back when it's done. Stage your dataset first. If ComfyUI can't see the fresh
+              LoRA, the build restarts it automatically to bind it.
+            </p>
+            <div class="lora-train-grid">
+              <label class="field field-narrow">
+                <span class="field-label">Steps</span>
+                <input id="build-steps" type="number" min="1" max="5000" value="1500" />
+              </label>
+              <label class="field field-narrow">
+                <span class="field-label">Rank</span>
+                <input id="build-rank" type="number" min="1" max="128" value="16" />
+              </label>
+              <label class="field field-narrow">
+                <span class="field-label">LoRA strength</span>
+                <input id="build-strength" type="number" min="0" max="2" step="0.05" value="1.0" />
+              </label>
+            </div>
+            <div class="actions">
+              <button class="btn btn-primary" id="build-btn">Build LoRA + 28 expressions</button>
+              <span class="lora-train-status small" id="build-status"></span>
+            </div>
+            <div class="build-progress" id="build-progress" hidden>
+              <div class="ds-bar-track"><div class="ds-bar-fill" id="build-bar"></div></div>
+              <p class="hint" id="build-msg"></p>
+            </div>
+            <p class="hint" id="lora-build-err"></p>
+          </div>
         </div>
       </section>
 

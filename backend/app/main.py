@@ -8,6 +8,7 @@ generation through ComfyUI via workflow templates + manifests.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import random
@@ -24,7 +25,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import comfy, db, docker_ctl, logs, ollama, workflows
+from . import comfy, db, docker_ctl, jobs, logs, ollama, workflows
 
 COMFYUI_URL = comfy.COMFYUI_URL
 BUILDS_ROOT = Path(os.getenv("BUILDS_ROOT", "/builds"))
@@ -111,6 +112,10 @@ async def _startup() -> None:
     (logs.info if ost.get("reachable") else logs.warn)(
         "integration", f"Ollama {'reachable' if ost.get('reachable') else 'not reachable'} at boot",
         url=ollama.OLLAMA_URL, models=len(ost.get("models", [])))
+
+    # The background job worker — advances builds (train → expressions) unattended,
+    # independent of any open browser. Runs for the life of the container.
+    asyncio.create_task(jobs.run_worker())
 
     logs.info("boot", "startup complete")
 
@@ -1053,9 +1058,18 @@ class LoraTrainRequest(BaseModel):
     learning_rate: float = Field(default=0.0005, gt=0, le=0.1)
 
 
-@app.post("/api/projects/{project_id}/lora/train")
-async def lora_train(project_id: int, body: LoraTrainRequest) -> dict:
-    """Train the character LoRA from the staged dataset (native ComfyUI TrainLoraNode)."""
+class TrainNotReady(RuntimeError):
+    """Precondition for training not met (already running, dataset not staged)."""
+
+
+async def _start_lora_training(project_id: int, steps: int, rank: int,
+                               learning_rate: float) -> dict:
+    """Kick off one LoRA training run and mark the project `training`.
+
+    Shared by the manual endpoint and the `lora_build` job handler. Raises TrainNotReady
+    for precondition failures and workflows.WorkflowError / comfy.ComfyError for submit
+    failures — the callers map those to HTTP or job errors.
+    """
     detail = await get_project(project_id)
     version = detail["current_version"] or {}
     slug = detail["project"]["slug"]
@@ -1065,16 +1079,16 @@ async def lora_train(project_id: int, body: LoraTrainRequest) -> dict:
             "SELECT trigger_word, train_status, last_train_seconds, last_train_steps "
             "FROM projects WHERE id = ?", (project_id,)).fetchone()
     if proj and proj["train_status"] == "training":
-        raise HTTPException(409, "a training run is already in progress for this persona")
+        raise TrainNotReady("a training run is already in progress for this persona")
     if not await _dataset_folder_exists(folder):
-        raise HTTPException(400, "dataset not staged — use 'Stage dataset' first")
+        raise TrainNotReady("dataset not staged — use 'Stage dataset' first")
     trigger = (proj["trigger_word"] if proj else "") or default_trigger(slug)
     checkpoint = version.get("checkpoint") or comfy.DEFAULT_CHECKPOINT
 
     # Training needs VRAM headroom (an OOM here is the #1 failure). Free ComfyUI's
     # models and unload the Ollama model first.
     logs.info("process", "preparing to train LoRA — freeing VRAM",
-              project_id=project_id, trigger=trigger, steps=body.steps, rank=body.rank)
+              project_id=project_id, trigger=trigger, steps=steps, rank=rank)
     try:
         await ollama.unload()
     except ollama.OllamaError:
@@ -1085,26 +1099,21 @@ async def lora_train(project_id: int, body: LoraTrainRequest) -> dict:
         "checkpoint": checkpoint,
         "dataset_folder": folder,
         "trigger": trigger,
-        "steps": body.steps,
-        "rank": body.rank,
-        "learning_rate": body.learning_rate,
+        "steps": steps,
+        "rank": rank,
+        "learning_rate": learning_rate,
         "seed": version.get("seed") or 0,
         "output_prefix": f"{slug}/lora/{trigger}",
     }
-    try:
-        graph = workflows.build_graph("lora-train", params)
-        prompt_id = await comfy.submit(graph)
-    except workflows.WorkflowError as exc:
-        raise HTTPException(400, str(exc)) from exc
-    except comfy.ComfyError as exc:
-        raise HTTPException(502, str(exc)) from exc
+    graph = workflows.build_graph("lora-train", params)
+    prompt_id = await comfy.submit(graph)
 
     started_at = time.time()
     with db.connect() as conn:
         conn.execute(
             "UPDATE projects SET train_prompt_id = ?, train_status = 'training', "
             "train_started_at = ?, train_steps = ? WHERE id = ?",
-            (prompt_id, started_at, body.steps, project_id))
+            (prompt_id, started_at, steps, project_id))
 
     prev_secs = (proj["last_train_seconds"] if proj else 0) or 0
     prev_steps = (proj["last_train_steps"] if proj else 0) or 0
@@ -1115,12 +1124,26 @@ async def lora_train(project_id: int, body: LoraTrainRequest) -> dict:
                     + f", so ~{_fmt_dur(prev_secs)} ETA")
     logs.info("process",
               f"LoRA training started at {datetime.now().strftime('%H:%M:%S')} "
-              f"({body.steps} steps, rank {body.rank}){eta_note}",
+              f"({steps} steps, rank {rank}){eta_note}",
               project_id=project_id, prompt_id=prompt_id, checkpoint=checkpoint,
               started_at=started_at, prev_train_seconds=round(prev_secs, 1) or None)
     return {"status": "training", "prompt_id": prompt_id, "trigger_word": trigger,
-            "steps": body.steps, "rank": body.rank,
+            "steps": steps, "rank": rank,
             "eta_seconds": prev_secs or None, "prev_steps": prev_steps or None}
+
+
+@app.post("/api/projects/{project_id}/lora/train")
+async def lora_train(project_id: int, body: LoraTrainRequest) -> dict:
+    """Train the character LoRA from the staged dataset (native ComfyUI TrainLoraNode)."""
+    try:
+        return await _start_lora_training(project_id, body.steps, body.rank, body.learning_rate)
+    except TrainNotReady as exc:
+        code = 409 if "already in progress" in str(exc) else 400
+        raise HTTPException(code, str(exc)) from exc
+    except workflows.WorkflowError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except comfy.ComfyError as exc:
+        raise HTTPException(502, str(exc)) from exc
 
 
 class LoraTriggerRequest(BaseModel):
@@ -1350,11 +1373,13 @@ class PresetRequest(BaseModel):
     preset: str = "starter"
 
 
-@app.post("/api/projects/{project_id}/poses/preset")
-async def pose_preset(project_id: int, body: PresetRequest) -> dict:
-    items = PRESETS.get(body.preset)
+def _apply_preset(project_id: int, preset: str) -> int:
+    """Add a preset's poses that don't already exist. Returns how many were added.
+    Shared by the endpoint and the `lora_build` job handler. Raises on unknown preset /
+    missing project."""
+    items = PRESETS.get(preset)
     if not items:
-        raise HTTPException(422, f"unknown preset '{body.preset}' (have: {list(PRESETS)})")
+        raise HTTPException(422, f"unknown preset '{preset}' (have: {list(PRESETS)})")
     with db.connect() as conn:
         if conn.execute("SELECT 1 FROM projects WHERE id = ?", (project_id,)).fetchone() is None:
             raise HTTPException(404, "project not found")
@@ -1369,8 +1394,13 @@ async def pose_preset(project_id: int, body: PresetRequest) -> dict:
             conn.execute("INSERT INTO poses (project_id, name, modifier, position) VALUES (?, ?, ?, ?)",
                          (project_id, name, modifier, base + i))
             added += 1
-    logs.info("process", f"pose preset '{body.preset}' applied: +{added}", project_id=project_id)
-    return {"added": added, "preset": body.preset}
+    logs.info("process", f"pose preset '{preset}' applied: +{added}", project_id=project_id)
+    return added
+
+
+@app.post("/api/projects/{project_id}/poses/preset")
+async def pose_preset(project_id: int, body: PresetRequest) -> dict:
+    return {"added": _apply_preset(project_id, body.preset), "preset": body.preset}
 
 
 class PoseUpdate(BaseModel):
@@ -1442,8 +1472,10 @@ async def pose_generate(project_id: int, pose_id: int) -> dict:
     return {"pose_id": pose_id, "status": "pending"}
 
 
-@app.post("/api/projects/{project_id}/poses/generate-all")
-async def poses_generate_all(project_id: int) -> dict:
+async def _queue_all_poses(project_id: int) -> int:
+    """Queue every pose for a project (with the project's LoRA if selected). Returns the
+    count queued. Raises on a total failure (nothing queued). Shared by the endpoint and
+    the `lora_build` job handler."""
     detail = await get_project(project_id)
     version = detail["current_version"] or {}
     slug = detail["project"]["slug"]
@@ -1464,7 +1496,12 @@ async def poses_generate_all(project_id: int) -> dict:
                     raise HTTPException(502, f"could not queue poses: {exc}") from exc
                 break
     logs.info("process", f"poses: queued {queued} render(s)", project_id=project_id, slug=slug)
-    return {"queued": queued}
+    return queued
+
+
+@app.post("/api/projects/{project_id}/poses/generate-all")
+async def poses_generate_all(project_id: int) -> dict:
+    return {"queued": await _queue_all_poses(project_id)}
 
 
 @app.get("/api/projects/{project_id}/pose-config")
@@ -1695,6 +1732,240 @@ async def poses_export(project_id: int) -> dict:
     logs.info("process", f"export queued {queued}/{len(poses)} sprite(s)",
               project_id=project_id, folder=out_path, failed=len(errors))
     return {"queued": queued, "folder": out_path, "errors": errors[:5]}
+
+
+# --------------------------------------------------------------------------- #
+# Job engine (Phase 7, 0.7.0): the `lora_build` handler + generic job endpoints.
+# The engine itself lives in jobs.py; handlers live here because they orchestrate
+# the same train/pose helpers the endpoints use. See jobs.py for the worker.
+# --------------------------------------------------------------------------- #
+
+# How long to wait for ComfyUI to come back + rescan its LoRA folder after a
+# post-training restart before giving up and rendering base-character poses.
+BUILD_BIND_GRACE_SECONDS = float(os.getenv("BUILD_BIND_GRACE_SECONDS", "300"))
+
+
+async def _project_slug(project_id: int) -> str | None:
+    with db.connect() as conn:
+        r = conn.execute("SELECT slug FROM projects WHERE id = ?", (project_id,)).fetchone()
+    return r["slug"] if r else None
+
+
+def _newest_lora_file(slug: str) -> str | None:
+    d = BUILDS_ROOT / slug / "lora"
+    files = sorted(d.glob("*.safetensors"), key=lambda p: p.stat().st_mtime) if d.is_dir() else []
+    return files[-1].name if files else None
+
+
+async def _lora_comfy_visible(slug: str, filename: str) -> bool:
+    try:
+        return f"{slug}/lora/{filename}" in await comfy.list_models("loras")
+    except Exception:  # noqa: BLE001
+        return False
+
+
+class LoraBuildHandler:
+    """Unattended build: train LoRA → bind it (restart ComfyUI if it can't see the new
+    file) → render the expression set. Every step reconciles from ComfyUI history so it
+    resumes after a container restart. Degrades to base-character poses (with a clear
+    note) if ComfyUI can't be made to load the LoRA."""
+
+    async def tick(self, job: dict[str, Any]) -> tuple[str, str]:
+        pid = job["project_id"]
+        params = jobs.params_of(job)
+        state = jobs.state_of(job)
+        stage = job["stage"]
+        slug = await _project_slug(pid)
+        if slug is None:
+            return jobs.ERROR, "project no longer exists"
+
+        # stage 0 — kick off training
+        if stage == "":
+            steps = int(params.get("steps", 500))
+            rank = int(params.get("rank", 16))
+            lr = float(params.get("learning_rate", 0.0005))
+            try:
+                res = await _start_lora_training(pid, steps, rank, lr)
+            except TrainNotReady as exc:
+                return jobs.ERROR, str(exc)
+            except (workflows.WorkflowError, comfy.ComfyError) as exc:
+                return jobs.ERROR, f"could not start training: {exc}"
+            state.update(train_prompt_id=res["prompt_id"], steps=steps)
+            jobs.set_state(job["id"], state)
+            jobs.set_stage(job["id"], "training", f"training LoRA — {steps} steps", 0.05)
+            return jobs.RUNNING, ""
+
+        # stage 1 — wait for training to finish
+        if stage == "training":
+            await _reconcile_training(pid)
+            with db.connect() as conn:
+                row = conn.execute(
+                    "SELECT train_status, train_started_at, last_train_seconds "
+                    "FROM projects WHERE id = ?", (pid,)).fetchone()
+            ts = row["train_status"] if row else "error"
+            if ts == "training":
+                elapsed = time.time() - (row["train_started_at"] or time.time())
+                jobs.set_message(job["id"], f"training LoRA — {_fmt_dur(elapsed)} elapsed", 0.2)
+                return jobs.RUNNING, ""
+            if ts == "error":
+                return jobs.ERROR, "LoRA training failed (see logs)"
+            lora = _newest_lora_file(slug)
+            if not lora:
+                return jobs.ERROR, "training finished but no LoRA file was written"
+            strength = float(params.get("lora_strength", 1.0))
+            with db.connect() as conn:
+                conn.execute("UPDATE projects SET pose_lora = ?, pose_lora_strength = ? WHERE id = ?",
+                             (lora, strength, pid))
+            try:
+                _apply_preset(pid, params.get("preset", "expressions"))
+            except HTTPException as exc:
+                return jobs.ERROR, f"could not load expression preset: {exc.detail}"
+            state.update(lora=lora, train_seconds=round(row["last_train_seconds"] or 0, 1))
+            jobs.set_state(job["id"], state)
+            jobs.set_stage(job["id"], "binding", "making the trained LoRA visible to ComfyUI", 0.5)
+            return jobs.RUNNING, ""
+
+        # stage 2 — bind: ensure ComfyUI can load the new LoRA (restart it if needed)
+        if stage == "binding":
+            lora = state.get("lora", "")
+            if await _lora_comfy_visible(slug, lora):
+                return await self._start_render(job, pid, state, degraded=False)
+            if not state.get("restart_requested"):
+                if docker_ctl.enabled():
+                    try:
+                        await docker_ctl.restart("comfyui")
+                    except docker_ctl.DockerCtlError as exc:
+                        logs.warn("integration", f"could not restart ComfyUI to bind LoRA: {exc}")
+                        return await self._start_render(job, pid, state, degraded=True)
+                    state.update(restart_requested=True, restart_at=time.time())
+                    jobs.set_state(job["id"], state)
+                    jobs.set_message(job["id"], "restarting ComfyUI to load the new LoRA…", 0.55)
+                    return jobs.RUNNING, ""
+                logs.warn("process", "ComfyUI can't see the new LoRA and container control is off "
+                          "— rendering base-character poses", project_id=pid)
+                return await self._start_render(job, pid, state, degraded=True)
+            # already asked for a restart — wait for ComfyUI to come back, then rescan
+            try:
+                await comfy.system_stats()
+                back = True
+            except Exception:  # noqa: BLE001
+                back = False
+            if not back:
+                jobs.set_message(job["id"], "waiting for ComfyUI to restart…", 0.58)
+                return jobs.RUNNING, ""
+            if await _lora_comfy_visible(slug, lora):
+                return await self._start_render(job, pid, state, degraded=False)
+            if time.time() - state.get("restart_at", 0) > BUILD_BIND_GRACE_SECONDS:
+                logs.warn("process", "ComfyUI restarted but still can't see the LoRA "
+                          "— rendering base-character poses", project_id=pid)
+                return await self._start_render(job, pid, state, degraded=True)
+            jobs.set_message(job["id"], "ComfyUI back — waiting for the LoRA to appear…", 0.6)
+            return jobs.RUNNING, ""
+
+        # stage 3 — render the expression set
+        if stage == "rendering":
+            await _reconcile_poses(pid)
+            with db.connect() as conn:
+                rows = conn.execute("SELECT status FROM poses WHERE project_id = ?", (pid,)).fetchall()
+            total = len(rows)
+            done = sum(1 for r in rows if r["status"] == "done")
+            pending = sum(1 for r in rows if r["status"] == "pending")
+            errored = sum(1 for r in rows if r["status"] == "error")
+            if pending == 0:
+                degraded = bool(state.get("degraded"))
+                jobs.set_result(job["id"], {
+                    "lora": state.get("lora"), "lora_bound": not degraded,
+                    "train_seconds": state.get("train_seconds"),
+                    "poses_total": total, "poses_done": done, "poses_error": errored,
+                })
+                note = ("" if not degraded else
+                        " (ComfyUI couldn't load the LoRA — rendered base poses; restart ComfyUI "
+                        "and regenerate to bind it)")
+                return jobs.DONE, f"built LoRA + {done}/{total} expressions{note}"
+            frac = 0.6 + 0.4 * (done / total if total else 0)
+            jobs.set_message(job["id"], f"rendering expressions — {done}/{total}", frac)
+            return jobs.RUNNING, ""
+
+        return jobs.ERROR, f"unknown build stage '{stage}'"
+
+    async def _start_render(self, job: dict[str, Any], pid: int, state: dict[str, Any],
+                            degraded: bool) -> tuple[str, str]:
+        if degraded:
+            with db.connect() as conn:  # drop the LoRA so poses render from the base character
+                conn.execute("UPDATE projects SET pose_lora = '' WHERE id = ?", (pid,))
+            state["degraded"] = True
+        jobs.set_state(job["id"], state)
+        try:
+            queued = await _queue_all_poses(pid)
+        except HTTPException as exc:
+            return jobs.ERROR, f"could not queue expressions: {exc.detail}"
+        jobs.set_stage(job["id"], "rendering",
+                       f"rendering {queued} expressions" + (" (base — LoRA unbound)" if degraded else ""),
+                       0.6)
+        return jobs.RUNNING, ""
+
+
+jobs.register("lora_build", LoraBuildHandler())
+
+
+def _job_dict(job: dict[str, Any]) -> dict[str, Any]:
+    d = dict(job)
+    d["params"] = jobs.params_of(job)
+    d["state"] = jobs.state_of(job)
+    try:
+        d["result"] = json.loads(job.get("result_json") or "{}")
+    except json.JSONDecodeError:
+        d["result"] = {}
+    for k in ("params_json", "state_json", "result_json"):
+        d.pop(k, None)
+    return d
+
+
+class JobCreate(BaseModel):
+    kind: str = "lora_build"
+    params: dict[str, Any] = Field(default_factory=dict)
+
+
+@app.post("/api/projects/{project_id}/jobs", status_code=201)
+async def create_job(project_id: int, body: JobCreate) -> dict:
+    """Enqueue a background job for a project (kind='lora_build' = train → 28 expressions)."""
+    if body.kind not in jobs.HANDLERS:
+        raise HTTPException(422, f"unknown job kind '{body.kind}' (have: {sorted(jobs.HANDLERS)})")
+    detail = await get_project(project_id)  # 404 if missing
+    for j in jobs.list_jobs(project_id):
+        if j["kind"] == body.kind and j["status"] in ("queued", "running"):
+            raise HTTPException(409, f"a {body.kind} job is already {j['status']} for this project")
+    if body.kind == "lora_build":
+        slug = detail["project"]["slug"]
+        if not await _dataset_folder_exists(_input_folder(slug)):
+            raise HTTPException(400, "dataset not staged — stage the dataset before starting a build")
+    return _job_dict(jobs.enqueue(body.kind, project_id, body.params))
+
+
+@app.get("/api/projects/{project_id}/jobs")
+async def list_project_jobs(project_id: int) -> dict:
+    return {"jobs": [_job_dict(j) for j in jobs.list_jobs(project_id)]}
+
+
+@app.get("/api/jobs")
+async def list_all_jobs() -> dict:
+    return {"jobs": [_job_dict(j) for j in jobs.list_jobs(None)]}
+
+
+@app.get("/api/jobs/{job_id}")
+async def get_job(job_id: int) -> dict:
+    j = jobs.get(job_id)
+    if not j:
+        raise HTTPException(404, "job not found")
+    return _job_dict(j)
+
+
+@app.post("/api/jobs/{job_id}/cancel")
+async def cancel_job(job_id: int) -> dict:
+    j = jobs.cancel(job_id)
+    if not j:
+        raise HTTPException(404, "job not found")
+    return _job_dict(j)
 
 
 # --- static frontend -------------------------------------------------------

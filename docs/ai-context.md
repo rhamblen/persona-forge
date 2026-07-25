@@ -198,9 +198,21 @@ LAN; no Claude/Anthropic in the runtime loop.
   export (0.6.1), and **LoRA-driven pose generation (0.6.2)** all done. The joint
   LoRA-into-poses deliverable is complete: pose renders load the project's trained LoRA with
   the trigger word prepended (`pose-with-lora` workflow), selectable per project.
-- **Remaining:** 0.7 hardening · 1.0 release. Optional Phase-6 polish: reuse-parent-LoRA for
-  clones (`parent_project_id`), training loss/step readout, and moving aux GPU containers off
-  the 3090 so training stops OOMing under load.
+- ✅ **Phase 7 (orchestration) — job engine (0.7.0).** Generic in-process background worker
+  (`jobs.py` + `jobs` table): one asyncio loop drains a persisted FIFO, advancing the running
+  job stage-by-stage, **browser-independent + resume-safe** (progress in `stage`+`state_json`).
+  Handlers register per `kind`; first is **`lora_build`** = train → auto-apply LoRA → render 28
+  expressions, restarting ComfyUI (via docker proxy) to bind a fresh LoRA, degrading to base
+  poses if it can't. Endpoints `POST/GET /projects/{id}/jobs`, `GET /jobs`, `GET/POST
+  /jobs/{id}[/cancel]`; "Build overnight" panel on the LoRA tab. Deferred to Phase F: the
+  multi-character **add-to-queue** cast builder + concurrency lanes — both ride this engine
+  (that's the whole point of building it generic). Lorebook/campaign/ingest (Phase E/F/G) also
+  plug in as handlers. Manual Train/Generate-all still work (engine reuses the same helpers).
+- **Remaining:** 0.7.x hardening · 1.0 release. Optional polish: reuse-parent-LoRA for clones
+  (`parent_project_id`), training loss/step readout. **LoRA recipe caveat** (seen on
+  `sweetie-pie`, 2026-07-25): 500 steps + a waist-up-heavy AI-generated dataset gives a weak,
+  waist-up-biased LoRA — the automated default should be ~1500-2500 steps on a dataset with
+  full-body variety.
 
 ## Track A note (separate from the app)
 

@@ -770,6 +770,7 @@ async function loadLora() {
     st.className = "lora-train-status small " + (ts === "training" ? "warn" : ts === "done" ? "ok" : ts === "error" ? "bad" : "muted");
     $("lora-train-btn").disabled = ts === "training";
     if (ts === "training") startLoraPolling(); else stopLoraPolling();
+    loadBuild();
   } catch (e) { msg($("lora-msg"), e.message, "bad"); }
 }
 
@@ -814,6 +815,63 @@ $("lora-train-btn").addEventListener("click", async () => {
     startLoraPolling();
     loadLora();
   } catch (e) { msg($("lora-msg"), e.message, "bad"); btn.disabled = false; }
+});
+
+/* ---------------- unattended build (Phase 7, job engine) ---------------- */
+
+let buildTimer = null;
+function stopBuildPolling() { clearInterval(buildTimer); buildTimer = null; }
+function startBuildPolling() {
+  if (buildTimer) return;
+  buildTimer = setInterval(() => {
+    if ($("view-lora").hidden) return stopBuildPolling();
+    loadBuild();
+  }, 5000);
+}
+
+async function loadBuild() {
+  if (!state.projectId) return;
+  try {
+    const d = await api(`/api/projects/${state.projectId}/jobs`);
+    const build = (d.jobs || []).find((j) => j.kind === "lora_build"); // list is newest-first
+    const st = $("build-status"), prog = $("build-progress"), bar = $("build-bar");
+    const btn = $("build-btn"), m = $("build-msg");
+    if (!build) { st.textContent = ""; st.className = "lora-train-status small muted"; prog.hidden = true; btn.disabled = false; stopBuildPolling(); return; }
+    const active = build.status === "queued" || build.status === "running";
+    btn.disabled = active;
+    st.textContent = build.status === "running" ? `running · ${build.stage || "starting"}`
+      : build.status === "queued" ? "queued"
+      : build.status === "done" ? "done ✓"
+      : build.status === "error" ? "failed"
+      : build.status === "canceled" ? "canceled" : build.status;
+    st.className = "lora-train-status small " + (active ? "warn" : build.status === "done" ? "ok" : build.status === "error" ? "bad" : "muted");
+    prog.hidden = false;
+    bar.style.width = Math.round((build.progress || 0) * 100) + "%";
+    bar.classList.toggle("full", build.status === "done");
+    m.textContent = build.message || "";
+    if (active) startBuildPolling(); else stopBuildPolling();
+  } catch (e) { /* soft — the LoRA tab already surfaces project errors */ }
+}
+
+$("build-btn").addEventListener("click", async () => {
+  if (!state.projectId) return;
+  const params = {
+    steps: parseInt($("build-steps").value, 10) || 1500,
+    rank: parseInt($("build-rank").value, 10) || 16,
+    lora_strength: parseFloat($("build-strength").value) || 1.0,
+    preset: "expressions",
+  };
+  const btn = $("build-btn");
+  btn.disabled = true;
+  msg($("lora-build-err"), "Starting build…");
+  try {
+    await api(`/api/projects/${state.projectId}/jobs`, {
+      method: "POST", body: JSON.stringify({ kind: "lora_build", params }),
+    });
+    msg($("lora-build-err"), "Build started — it runs on the server. You can close the tab and come back.", "ok");
+    startBuildPolling();
+    loadBuild();
+  } catch (e) { msg($("lora-build-err"), e.message, "bad"); btn.disabled = false; }
 });
 
 /* ---------------- poses (Phase D) ---------------- */
@@ -1165,6 +1223,7 @@ $("project-select").addEventListener("change", (e) => {
   stopDatasetPolling();
   stopPosesPolling();
   stopLoraPolling();
+  stopBuildPolling();
   selectedPoseId = null;
   if (!$("view-dataset").hidden) loadDataset();
   if (!$("view-lora").hidden) loadLora();

@@ -5,26 +5,68 @@
 [![Python](https://img.shields.io/badge/python-3.12-brightgreen.svg)](https://www.python.org)
 [![ComfyUI](https://img.shields.io/badge/ComfyUI-required-purple.svg)](https://github.com/comfyanonymous/ComfyUI)
 
-Build **SillyTavern expression sets — face *and* posture** — for your own characters,
-using your own ComfyUI. A guided web app takes you from a prompt to a trained
-per-character LoRA and a full sprite set, with **Ollama** on hand to edit prompts in
-plain language and **full rollback** so an approved prompt is never lost.
+**Forge a whole SillyTavern character from a single description — the persona *and* the face.**
+
+Persona Forge is a guided web app that grows one plain-language idea into a complete
+character: the **written persona** SillyTavern role-plays (a character card — backstory,
+personality, voice, quirks) *and* a **matching visual identity** — a trained per-character
+LoRA and a full **expression + posture** sprite set. It runs on your own ComfyUI, with
+**Ollama** to shape everything in plain language and **full rollback** so nothing you sign
+off is ever lost.
 
 ## Why?
 
-Sometimes when using SillyTavern you want to create your own characters with your own
-images — but you don't want a static image, you want expressions. Live2D and VRM are
-complicated to build, and facial expressions alone are easy to misread or simply not
-notice, especially across 28 of them. Using **posture** as well makes the character far
-more readable.
+A SillyTavern character is really two things that usually get built separately: a
+**persona** (who they are — backstory, personality, how they speak) and a **look** (how
+they appear on screen). Build them apart and they drift — the art stops matching the
+writing, and the writing forgets the art. Persona Forge treats them as **one build from
+one description**: you describe the character once, and both the character card and the
+visual set come out of that single source, staying consistent with each other.
 
-Posture is also why this trains a LoRA rather than just prompting: varying the body
-means re-generating it, and only a per-character LoRA keeps it recognisably the same
-person. (IPAdapter alone was tested and drifts — hair, outfit and proportions wander
-shot to shot.)
+The visual side doesn't stop at a static portrait — you want **expressions**. And facial
+expressions alone are easy to misread or simply not notice, especially across 28 of them,
+so Persona Forge varies **posture** as well, which makes the character far more readable.
+(Live2D and VRM can do this too, but they're complicated to build; this stays 2D sprites.)
+
+Posture is also why this trains a LoRA rather than just prompting: varying the body means
+re-generating it, and only a per-character LoRA keeps it recognisably the same person.
+(IPAdapter alone was tested and drifts — hair, outfit and proportions wander shot to shot.)
+
+**The whole build, from one idea:**
+
+```
+one-line concept
+   │  Ollama drafts a character sheet (persona + looks), you refine it
+   ▼
+Character Studio ──► SillyTavern character card   (the persona ST chats with)
+   │  └─ the "looks" become the visual prompt ─┐
+   ▼                                           ▼
+Prompt Studio → Dataset → per-character LoRA → Expression + posture sprites
+```
 
 ## Features
 
+- **Character Studio** — the front door: start from one line ("a stoic elven blacksmith
+  who secretly writes poetry") and let Ollama draft a full **character sheet** with you —
+  identity, appearance, personality, backstory, behaviour quirks, speech style,
+  relationships, scenario. It produces both a ready-to-import **SillyTavern V3 character
+  card** (`chara_card_v3`; JSON + a PNG card using the character's own portrait) — with a
+  first message, optional **alternate greetings** and **example dialogue**, and the option
+  to **attach a lorebook** — *and* the **looks prompt** that seeds the visual pipeline, so
+  persona and portrait share one identity. A later stage will *generate* a lorebook
+  creatively (text-generation-webui / n8n). _(phase 8 — planned; see
+  [PROJECT_PLAN.md](PROJECT_PLAN.md) §2 "Phase E")_
+- **Campaign / Cast builder** — build a whole **cast** for a shared world (e.g. a *solo
+  D&D game in SillyTavern*): multiple AI-driven characters + a **DM/narrator** sharing one
+  generated **world lorebook**, cross-character relationships, a consistent art style, and
+  **ST group-chat export**. The single-character builder above stays first-class — a
+  campaign just runs it per cast member. _(later / post-1.0; see
+  [PROJECT_PLAN.md](PROJECT_PLAN.md) §2 "Phase F")_
+- **Build from a book** — drop in one or more **PDF / EPUB** books and let the tool read
+  them to extract characters, world and relationships (a local RAG pipeline), then generate
+  **cards + lorebook + campaign** grounded in the source — summarised into behavioural
+  profiles, never copied verbatim. _(later / post-1.0; see
+  [PROJECT_PLAN.md](PROJECT_PLAN.md) §2 "Phase G")_
 - **Prompt Studio** — pick a checkpoint, refine a prompt against live previews (with
   click-to-zoom), then **sign off a baseline** that can never be lost.
 - **AI prompt assistant** — describe a character in plain language and let Ollama author
@@ -38,9 +80,10 @@ shot to shot.)
   can be reused instead of retrained.
 - **Dataset builder** — generate a batch, pick the ones that look like the same person in a
   selectable grid, top up (+10) until you hit your target.
-- **Per-character LoRA training** on your own GPU _(phase 5)_.
+- **Per-character LoRA training** on your own GPU — native ComfyUI training with
+  auto-captioning; validated end to end.
 - **Pose / expression sets** — the 28 SillyTavern expressions with posture variation,
-  tweakable one sprite at a time _(phase 6)_.
+  tweakable one sprite at a time, then **exported as SillyTavern-named transparent PNGs**.
 - **Service control** — Ollama has Connect / Unload (preload the model or free VRAM),
   and when ComfyUI or Ollama are down you can **Start / Restart** their containers from
   the sidebar. Container control goes through a scoped `docker-socket-proxy` (start /
@@ -125,9 +168,13 @@ character's `expressions/` folder stays a deliberate manual step.
 
 ## Status
 
-**Phase 5 of 7** — Prompt Studio and the Dataset builder are usable; the LoRA trainer is
-underway (dataset staging in; captioning + training run next). See the roadmap in
-[PROJECT_PLAN.md](PROJECT_PLAN.md) and the release history in [CHANGELOG.md](CHANGELOG.md).
+Prompt Studio, the Dataset builder, **per-character LoRA training** (validated) and the
+**Pose / expression studio with SillyTavern sprite export** are all working — shipped
+through **v0.6.2**. Next comes hardening (0.7), then **Character Studio (0.8)** — the
+plain-language character-sheet front door described above, which adds the one piece the
+pipeline never produced: the character *card* itself, not just the sprites. See the
+roadmap in [PROJECT_PLAN.md](PROJECT_PLAN.md) and the release history in
+[CHANGELOG.md](CHANGELOG.md).
 
 Versioning is `0.<phase>.<iteration>` — the middle digit is the phase, the last
 increments with each update inside it.

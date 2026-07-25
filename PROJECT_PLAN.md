@@ -89,6 +89,220 @@ variants from a ~1 hr training job into a prompt change.
 - Tweaks use the same NL editing + rollback. **Export** the finished set (correct
   SillyTavern filenames, transparent PNGs).
 
+### Phase E — Character Studio (persona conception — the new front door) ⬜ NOT STARTED (added 2026-07-25)
+
+> Logically this sits **upstream of Phase A**: you conceive the character in plain
+> language first, and *both* the character's **looks** (→ Phase A prompt) and the
+> SillyTavern **character card** (the persona text ST actually chats with) fall out
+> of one coherent source. It is lettered E only because A–D already name the sprite
+> pipeline; in run order it comes first.
+
+**Problem it solves.** Persona Forge currently starts from a *visual* prompt and
+ends at *sprites* — it never produces the **character card** itself. So today the
+user writes the ST persona separately, and the looks and the persona can drift
+apart. Character Studio makes the character's **identity the single source** that
+drives both deliverables ST needs.
+
+**Flow.**
+1. **Seed** — user types a one-line concept ("a stoic elven blacksmith who
+   secretly writes poetry").
+2. **Field elicitation** — Ollama proposes a structured **character sheet** and
+   drafts each field from the seed.
+3. **Draft → refine** — per field: edit by hand, or ask Ollama to expand/rewrite
+   *that one field*. Reuses the existing NL-edit machinery (Replace/Modify, the
+   word-level diff, per-change accept/reject, Modify's verbatim-preservation hint)
+   and the **append-only + rollback** store — now applied per character field.
+4. **Coherence pass** — Ollama sanity-checks the sheet for internal consistency
+   (appearance ↔ species, personality ↔ backstory).
+5. **Two coordinated outputs** (below): the **looks prompt** → seeds Phase A; the
+   **SillyTavern character card** → staged for import.
+
+**The character sheet (fields — "what's required").**
+- **Identity** — name, apparent age, gender/pronouns, species/race, role.
+- **Appearance / looks** — build, height, hair, eyes, skin, distinguishing marks,
+  typical outfit, **art style**. *This is the visual-generation field.*
+- **Personality** — core traits, temperament, values.
+- **Backstory** — origin, formative events, motivations.
+- **Behaviour traits & quirks / mannerisms** — habits, tics, catchphrases.
+- **Speech style / voice** — register (formal/terse/sarcastic) + sample lines.
+- **Relationships** — significant people, allegiances, and stance toward `{{user}}`.
+- **Likes / dislikes, goals, fears.**
+- **Scenario** — the default setting the character is met in.
+- **Greetings & dialogue** — `first_mes` (always authored), plus optional **alternate
+  greetings** (`alternate_greetings[]`) and **example dialogue** (`mes_example`); Ollama
+  drafts each on request.
+- **Lorebook / world info** (optional) — attach or author `character_book` entries
+  (see Output A).
+- Optional: tone/content toggles, tags, creator notes.
+
+**Output A — SillyTavern character card (V3).** SillyTavern accepts **Character Card
+V3**, so target `chara_card_v3` (`spec: "chara_card_v3"`, `spec_version: "3.0"`) — a
+superset of V2. Assemble the sheet into `data.{name, description, personality,
+scenario, first_mes, mes_example, creator_notes, system_prompt,
+post_history_instructions, alternate_greetings[], group_only_greetings[],
+character_book, tags, creator, character_version, nickname, assets, extensions}`.
+Stage into `<slug>/card/` as:
+- **`.json`** (direct ST import), and
+- a **PNG character card** — a portrait with the card embedded in the PNG (ST's native
+  import format; V3 uses the `ccv3` tEXt chunk — a legacy `chara`/V2 chunk can be
+  written alongside for older importers). The portrait is the character's **own**
+  pipeline render (the signed-off Phase A base image), so card and sprites are one face.
+- **Never auto-copied into ST** — same deliberate manual move as the sprites/VRM.
+- Confirm V3 import + the exact tEXt-chunk mechanics against the **running** ST version
+  at build time; the `.json` export is the safe fallback.
+
+**Greetings & dialogue.** `first_mes` is always authored. Because V3 supports them, the
+sheet also offers **alternate greetings** and **example dialogue** (`mes_example`) as
+first-class *optional* fields — Ollama drafts each on request; the user adds/edits/
+removes them freely. (Both exist in V2 too; V3 just makes them standard.)
+
+**Lorebook (`character_book`) — two stages.**
+- **Now (0.8):** the ability to **add / attach** a lorebook — import an existing
+  lorebook / world-info JSON, or hand-author entries (keys → content + insertion
+  settings), embedded as the card's `character_book` so it travels with the character.
+- **Later:** **generate** the lorebook creatively from the character sheet, then let the
+  user curate. Candidate backends (both already on the LAN): a **text-generation-webui**
+  model — a more creative/long-form model than the instruct model used for prompt
+  edits — and/or an **n8n** workflow orchestrating the model calls (fan out per topic:
+  history, factions, locations, artefacts → structured entries). Its own milestone
+  because it adds a new model backend + orchestration (§7).
+
+**Output B — looks prompt → Phase A.** Distil the *appearance* field (+ art style)
+into the **character prompt** and "Send to Prompt Studio," pre-filling Phase A's
+character field so the same persona drives dataset → LoRA → poses → sprites. Honour
+the standing rules: **prose, not tags**; **no expression words in the identity
+prompt** (proven to leak a baked-in smile into `anger`/`grief` — see §9 / Key
+decisions in `../CURRENT_STATE.md`).
+
+**Persistence.** The sheet lives with the project — a new `character` table (field
+versions) + a **`character.json` sidecar** in the build folder beside
+`persona.json`. Reloadable and **cloneable** (reuse the persona-clone machinery:
+vary the persona, keep or diverge the looks).
+
+**Why it belongs here.** It closes the loop from *concept* to *both* things ST
+needs — the chat persona **and** the matching sprite set — from one description,
+entirely on the LAN (Ollama .32, no Claude in the runtime loop).
+
+**Forward-compat for campaigns (Phase F, below).** Store each character so it can
+later **belong to a campaign** and reference a **shared lorebook** + **other
+characters** — don't hard-assume one isolated character per project. The existing
+persona-clone / `parent_project_id` relatedness is the seed of that grouping.
+
+### Phase F — Campaign / Cast builder (multiple AI-driven characters) ⬜ CONCEPT / post-1.0 (added 2026-07-25)
+
+> **Driving use case (user):** run a **solo D&D game in SillyTavern** — one human
+> player, a whole **cast of AI-driven characters** (party + NPCs) plus a
+> **DM/narrator**, all sharing one world. Phase E makes *one* coherent character; a
+> campaign needs *several* that are coherent **with each other** and with a shared
+> world.
+
+**Both modes ship — not one instead of the other.** Character Studio (Phase E) stays a
+first-class **single-character** builder for one-off cards; the Campaign builder (Phase F)
+**reuses it per cast member** and layers the shared world + DM + group export on top. A
+campaign is "many Character-Studio characters + a shared world," so the single-character
+path is never a dead end — it's the engine both modes run on.
+
+**What a campaign adds on top of Character Studio.**
+- **Campaign container** — a top-level grouping over multiple character projects:
+  premise/setting, tone, **ruleset flavour** (e.g. D&D 5e), a **shared art style** (so
+  the whole party's sprites match), and the **shared world lorebook**.
+- **Shared world lorebook** — generate the *world* once (factions, locations, history,
+  plot hooks) and **attach it to every cast member** (and the DM). This is the
+  multi-character payoff of the stage-2 lorebook generator: one world, many cards. In
+  ST it maps to a world-info/lorebook the **group chat** loads.
+- **Cast** — each character is built with Phase E but **inherits** the campaign's art
+  style + world lorebook, and its **relationships** field references *other cast
+  members* (party dynamics, allegiances). Each still gets its own LoRA + sprite set.
+- **DM / Narrator persona** — a special character that runs the game: knows the world +
+  ruleset + how to narrate/adjudicate. May carry no sprites (a narrator) or a distinct
+  "GM" avatar; seeded from a DM template + the campaign world.
+- **Optional RPG stat block** — a per-character structured game-stats section (race,
+  class, level, ability scores, notable abilities/inventory) embedded into the card
+  description and/or a lorebook entry. Play is narrative, but stats aid consistency.
+- **Coherence across the cast** — the Phase E coherence pass extends to cross-character
+  checks: no duplicate names, mutually consistent relationships, everyone agrees on the
+  shared world's facts.
+
+**Export for group play.** Individual **V3 cards** for each cast member + the **shared
+lorebook**, plus optional scaffolding of a SillyTavern **group chat** (party + DM).
+Staged only — never auto-copied into ST.
+
+**Depends on:** the stage-2 **lorebook generator** (for the shared world) — so it lands
+*after* that, post-1.0. (Both likely lean on the same text-generation-webui / n8n
+backend.)
+
+### Phase G — Source ingestion: build from a book (PDF / EPUB) ⬜ CONCEPT / post-1.0 (added 2026-07-25)
+
+> **User idea:** drop in **one or more books** (PDF / EPUB) and have the tool *read* them
+> to build a **lorebook, character cards, and a campaign** grounded in that source
+> material — instead of (or alongside) typing a concept by hand.
+
+**This is an alternative *seed* for Phases E + F**, feeding the same charter-driven
+generator; it adds a document-understanding front end. A book is far larger than any local
+model's context, so this is a **retrieval (RAG) pipeline, not one prompt:**
+1. **Intake & parse** — accept many PDFs/EPUBs per project. Extract clean text
+   (`pypdf` / `pdfplumber` for PDF, `ebooklib` for EPUB; **OCR fallback** (Tesseract) for
+   scanned PDFs). Preserve chapter structure; strip running headers/footers.
+2. **Chunk → embed → index** — split into passages, embed with an **Ollama embedding
+   model** (e.g. `nomic-embed-text`) into a lightweight **vector store** (sqlite-vec /
+   Chroma). This is what lets a whole novel be queried on a small local model.
+3. **Extraction passes (map-reduce over chunks)** — pull **characters, locations,
+   factions, items, magic systems, events / history, relationships, timeline**.
+4. **Consolidate (coreference)** — merge repeated mentions of one entity ("the knight" =
+   "Sir Gawain") into a single **dossier per entity**, each carrying **source citations**
+   (chapter / page) so generation stays grounded and checkable.
+5. **Generate via the charter** — turn dossiers into **V3 cards** (PCs / NPCs / monsters /
+   DM) + **lorebook entries** + a **campaign** setting / scenario, under the four
+   priorities (consistency / behaviour / motivation / interaction), low-token for local
+   models.
+6. **Human curation** — review the extracted entity list, choose which become cards vs.
+   lore, edit before generating; same versioning / rollback ethos as the rest of the tool.
+
+**Transform, don't reproduce.** Cards and lore are **summarised, behavioural profiles with
+citations — never verbatim book text.** This is the user's own private roleplay use, and
+the "motivation over biography / consistency over length" priorities already pull toward
+transformation rather than copying passages.
+
+**Backends:** the PDF / EPUB / OCR parsers above + **Ollama embeddings** + a vector store,
+on top of the **text-generation-webui / n8n** generation backend from the lorebook
+generator. The heaviest piece in the plan — firmly post-1.0.
+
+**Open questions:** parsing / OCR stack for messy scans; embedding model + vector store
+choice; one-book-per-campaign vs. many-books-merged-into-one-world; how much
+auto-generation vs. mandatory human review of extracted entities.
+
+### The AI design charter — the generator's brief (shared by E, F, G) (added 2026-07-25)
+
+The Ollama-driven generator (and the later text-gen-webui / n8n lorebook engine) runs
+under one **expert-designer system prompt** — the persona + principles all Character
+Studio and Campaign output is authored against. User-specified 2026-07-25:
+
+**Role.** An expert **AI Character Designer, World Builder, Dungeon-Master assistant, and
+SillyTavern configuration specialist**, building complete, consistent, immersive
+AI-roleplay environments compatible with SillyTavern.
+
+**It authors:** character cards (V2/V3), NPCs, player characters, monsters, factions,
+locations, items, magic systems, histories, campaign settings, lorebooks / world info,
+relationships, memories, and scenario structures. These split cleanly across the data
+model: **character cards** (PCs / NPCs / monsters / the DM) vs. **lorebook / world-info
+entries** (factions, locations, items, magic systems, histories, campaign settings,
+world-level relationships & memories) — which is exactly why *the world builder is the
+lorebook generator* (Phase F).
+
+**Output is optimised for local LLMs running through Ollama** — tight, structured, low
+token count; this dovetails with "consistency over length" and keeps generations viable
+on the small local models the tool runs.
+
+**Design priorities (in order), enforced on every field and by the coherence pass:**
+1. **Consistency over length** — short and coherent beats long and contradictory.
+2. **Behaviour over description** — how they *act*, not how they read on paper.
+3. **Motivation over biography** — *why* they do things, not a life-events dump.
+4. **Interaction over static information** — written for play at the table, not a wiki.
+
+These echo settled project rules (prose-not-tags; expression words kept out of identity;
+the card is for *play*, not a static portrait), so they become both the generator's
+**system prompt** and the **rubric** the coherence pass scores against.
+
 ## 3. Cross-cutting features
 
 - **Ollama NL assistant** — one bounded job: given the current prompt + a plain-
@@ -323,7 +537,33 @@ complete release. A `VERSION` file at the repo root tracks the current build.
 - **0.6.x — Pose/Expression Studio (Phase D).** LoRA-driven expression/pose set,
   grid, per-sprite tweak (pose OR face) with NL + rollback, **SillyTavern staging**.
 - **0.7.x — Hardening.** GHCR image + Action, `appdata/db` backups, run docs, polish.
+- **0.8.x — Character Studio (Phase E, added 2026-07-25).** Ollama-guided character
+  sheet front end (§2 Phase E): seed → field elicitation → per-field NL refine +
+  rollback → coherence pass. Two outputs: **looks prompt → Phase A**, and a staged
+  **SillyTavern V3 character card** (`chara_card_v3`; JSON + PNG card using the
+  pipeline's own portrait) — with `first_mes`, optional **alternate greetings** +
+  **example dialogue**, and the option to **attach a lorebook** (`character_book`). New
+  `character` table + `character.json` sidecar; clone-aware. Reuses the 0.3.x NL-edit +
+  versioning machinery. (New scope — 1.0 now follows this.)
 - **1.0.0 — Release.**
+- **Later (post-1.0) — Lorebook generator (Phase E, stage 2).** Creatively **generate**
+  a character's lorebook from its sheet, then let the user curate — extending the
+  attach-only support from 0.8. New backend: a **text-generation-webui** model (creative/
+  long-form, distinct from the prompt-edit instruct model) and/or an **n8n** workflow
+  orchestrating the calls. Its own milestone because it adds a model backend +
+  orchestration; deliberately deferred past the 1.0 sprite-pipeline release.
+- **Later (post-1.0) — Campaign / Cast builder (Phase F).** Multiple AI-driven characters
+  sharing one world (the solo-D&D-in-ST use case): campaign container, shared world
+  lorebook attached to the whole cast, cross-character relationships + coherence, a
+  DM/narrator persona, optional RPG stat blocks, and group-chat export. **Single-character
+  Character Studio (0.8) stays a first-class standalone mode** — Campaign mode reuses it
+  per cast member. Builds on the lorebook generator + the shared AI design charter (§2).
+- **Later (post-1.0) — Source ingestion / "build from a book" (Phase G).** Ingest one or
+  more **PDF/EPUB** books and extract characters/world/relationships via a **RAG pipeline**
+  (parse + OCR → Ollama embeddings → vector store → map-reduce extraction → consolidated
+  dossiers with citations), then generate **cards + lorebook + campaign** through the
+  charter. Transform-not-reproduce (private use; summarised behavioural profiles). The
+  most advanced piece; an alternative seed feeding Phases E + F.
 
 ## 8. Open decisions (need your call)
 
@@ -337,6 +577,30 @@ complete release. A `VERSION` file at the repo root tracks the current build.
   coexists with ComfyUI on the GPUs (candidate: a Qwen/Llama instruct variant).
 - **GHCR now or later** — publish images from the start, or source-build on UR1
   until the app stabilises.
+- ~~**Character card spec version (Phase E)**~~ — **decided 2026-07-25: target V3**
+  (`chara_card_v3`), which SillyTavern accepts; it's a superset of V2 and future-proofs
+  the lorebook, alternate greetings, and example dialogue. Keep a **V2/`.json` export as
+  the safe fallback**, and confirm V3 import + the exact PNG tEXt-chunk mechanics
+  (`ccv3`, plus a legacy `chara` chunk for old importers) against the **running** ST
+  version at build time.
+- ~~**How much dialogue Ollama writes (Phase E)**~~ — **decided:** author `first_mes`
+  always; offer **alternate greetings** + **example dialogue** as optional, editable
+  fields Ollama drafts on request.
+- **Campaign data model & ST group export (Phase F, post-1.0)** — how a campaign groups
+  characters and shares one lorebook, and how far to scaffold ST **group chats** vs. just
+  exporting the cards + shared world-info for the user to assemble. Also: does the
+  DM/narrator get its own sprite set or stay text-only, and how much RPG mechanics
+  (stat blocks) to formalise vs. leave narrative.
+- **Source-ingestion stack (Phase G, post-1.0)** — PDF/EPUB + OCR parsing libraries, the
+  embedding model + vector store, one-book-per-campaign vs. many-books-merged, and how
+  much auto-generation vs. mandatory human review of extracted entities. Design rule
+  fixed: **transform/summarise, never reproduce verbatim** source text into cards/lore.
+- **Lorebook generator backend (Phase E stage 2, post-1.0)** — which local backend
+  authors the lorebook creatively: a **text-generation-webui** model, an **n8n**
+  orchestration workflow, or both. Needs a creative/long-form model (distinct from the
+  prompt-edit instruct model) and a decision on where it runs (new service alongside
+  Ollama vs. existing n8n). Attach-only lorebook support (0.8) does **not** depend on
+  this.
 - **Builds root host path & LoRA wiring** (§5.1) — pick the exact UR1 share for the
   builds root, mount it into **both** containers, and decide how ComfyUI is pointed
   at it for LoRA loading (`extra_model_paths.yaml` pointing at the builds root, vs.

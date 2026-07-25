@@ -1,33 +1,29 @@
-# v0.6.2 — LoRA-driven poses, training timer, clearer export
+# v0.7.0 — Unattended builds (background job engine)
 
-Phase 6. The joint **LoRA-into-poses** deliverable, plus a couple of quality-of-life wins.
+Phase 7. The pipeline stops being a click-through-each-step UI and becomes a **walk-away job
+runner**: kick off a build and close the tab — the server finishes it.
 
 ## Added
-- **Pose renders can load the trained character LoRA.** New `pose-with-lora` workflow
-  (`CheckpointLoaderSimple → LoraLoaderModelOnly → KSampler`) with your **trigger word
-  prepended** to the prompt. The Poses tab gained a **Character LoRA** selector (with a
-  strength control): pick a trained LoRA per project and pose/expression variants stay
-  on-model; leave it on *None* and poses render from the base character as before. New
-  endpoints `GET /pose-config` and `POST /pose-lora`.
-  - The selector flags a trained LoRA that exists on disk but isn't visible to ComfyUI yet and
-    tells you to add `persona_forge: { loras: /builds }` to ComfyUI's `extra_model_paths.yaml`
-    and restart — the one manual prerequisite.
-- **Training timer + ETA.** The LoRA tab records a start time and logs the **run duration** (and
-  s/step) at `info` on completion, so past training times are searchable in the log. While a
-  run is going it shows **elapsed time and an ETA** from the previous run.
+- **Generic background job engine.** A single in-process worker drains a persisted job queue,
+  advancing the running job stage-by-stage until done — **browser-independent**. It's
+  kind-agnostic on purpose: the lorebook generator, cast/campaign builder, and source ingestion
+  (Phase E/F/G) plug in later as new handlers with no engine changes. Jobs are **resume-safe** —
+  a container restart re-reconciles the running job rather than losing it.
+- **`lora_build` — the first handler.** One click: **train the LoRA → auto-apply it → render the
+  first-draft 28 expressions.** If ComfyUI can't see the freshly trained LoRA, the build restarts
+  ComfyUI to bind it, then renders; if it still can't bind, it degrades to base-character poses
+  and says so — you always wake up to a finished draft.
+- **"Build overnight" panel** on the LoRA tab (steps / rank / strength + live progress).
+- Job API: `POST/GET /api/projects/{id}/jobs`, `GET /api/jobs`, `GET/POST /api/jobs/{id}[/cancel]`.
 
-## Changed
-- **Export panel is now "Export to builds folder"** (was "Export to SillyTavern"). It always
-  staged sprites into the build folder for you to copy into SillyTavern by hand — the label now
-  says so. No behaviour change.
+## Notes
+- Manual **Train** and **Generate all** still work — the engine reuses the same code.
+- Deferred to Phase F (post-1.0): the multi-character **add-to-queue** cast builder and
+  concurrency lanes — both ride this engine.
+- Reminder: for the build to bind a LoRA, ComfyUI needs `loras: /builds` in its
+  `extra_model_paths.yaml`. The build handles the required restart itself when it can.
 
-## Fixed / Notes
-- Training shares UR1's RTX 3090 with other GPU containers (ollama, chatterbox-st, immich,
-  a-eye). If they hold VRAM, `TrainLoraNode` can OOM even though ComfyUI frees its own memory
-  first. **Stop the aux GPU containers (or let Ollama evict) before a training run** until they
-  are moved to the idle RTX 3060.
-
-**Image:** `ghcr.io/rhamblen/persona-forge:0.6.2`
+**Image:** `ghcr.io/rhamblen/persona-forge:0.7.0`
 
 ## Upgrading
 No compose changes. Pull and restart:
@@ -35,6 +31,3 @@ No compose changes. Pull and restart:
 ```bash
 docker compose pull && docker compose up -d
 ```
-
-To actually load a trained LoRA (training **or** the new LoRA-driven poses), add `loras: /builds`
-to ComfyUI's `extra_model_paths.yaml` and restart ComfyUI so the LoRAs appear in its list.
