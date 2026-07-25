@@ -9,6 +9,32 @@
     "inputs": { "folder": "pf-dataset" },
     "_meta": { "title": "Training dataset (ComfyUI input subfolder)" }
   },
+  "fl2": {
+    "class_type": "Florence2ModelLoader",
+    "inputs": { "model": "Florence-2-large", "precision": "bf16" },
+    "_meta": { "title": "Florence-2 (captioner)" }
+  },
+  "cap": {
+    "class_type": "Florence2Run",
+    "inputs": {
+      "image": ["load", 0],
+      "florence2_model": ["fl2", 0],
+      "text_input": "",
+      "task": "caption",
+      "fill_mask": false
+    },
+    "_meta": { "title": "Caption each image" }
+  },
+  "cat": {
+    "class_type": "StringConcatenate",
+    "inputs": { "string_a": "pf_char", "string_b": ["cap", 2], "delimiter": ", " },
+    "_meta": { "title": "Prefix trigger word" }
+  },
+  "enc": {
+    "class_type": "CLIPTextEncode",
+    "inputs": { "clip": ["ckpt", 1], "text": ["cat", 0] },
+    "_meta": { "title": "Encode per-image caption" }
+  },
   "batch": {
     "class_type": "ImageListToImageBatch",
     "inputs": { "images": ["load", 0] }
@@ -17,17 +43,12 @@
     "class_type": "VAEEncode",
     "inputs": { "pixels": ["batch", 0], "vae": ["ckpt", 2] }
   },
-  "pos": {
-    "class_type": "CLIPTextEncode",
-    "inputs": { "clip": ["ckpt", 1], "text": "pf_char" },
-    "_meta": { "title": "Trigger caption" }
-  },
   "train": {
     "class_type": "TrainLoraNode",
     "inputs": {
       "model": ["ckpt", 0],
       "latents": ["vae", 0],
-      "positive": ["pos", 0],
+      "positive": ["enc", 0],
       "batch_size": 1,
       "grad_accumulation_steps": 1,
       "steps": 500,

@@ -163,9 +163,14 @@ LAN; no Claude/Anthropic in the runtime loop.
 - **LoRA loadability:** `SaveLoRA` writes to the OUTPUT dir (`/builds/<slug>/lora/`), NOT
   `models/loras` — confirmed (trained lora not in the loras dropdown). User must add
   `loras: /builds` to ComfyUI `extra_model_paths.yaml` + restart ComfyUI to load them.
-- **Captions:** currently trigger-word-only (validated minimal). **Next: per-image Florence2
-  light captions** (needs `.txt` in input or inline per-image conditioning — TrainLoraNode
-  accepted a single conditioning broadcast over the batch in the test).
+- **Captions (0.5.3): per-image Florence-2, VALIDATED.** Inline in `lora-train.json`:
+  `Florence2ModelLoader` + `Florence2Run(task=caption)` (maps over the image list) →
+  `StringConcatenate(string_a=trigger, delimiter=", ", string_b=caption)` → per-image
+  `CLIPTextEncode` → `TrainLoraNode`. Confirmed `TrainLoraNode` accepts a per-image
+  conditioning LIST matched to the batched latent. **Gotcha:** `AddTextPrefix` is
+  `INPUT_IS_LIST` and collapses the list (breaks CLIPTextEncode) — use `StringConcatenate`
+  (auto-maps). `SaveImageTextDataSetToFolder` writes to OUTPUT not INPUT, so the two-step
+  captioned-folder path doesn't work — inline captioning avoids it.
 - **Test artifacts left in ComfyUI input:** `pf-uploadtest`, `pf-traintest` (harmless).
 - **Remaining:** 0.5 LoRA trainer · 0.6 pose/expression studio · 0.7 hardening · 1.0 release.
   **Phase 5 next** — training backend TBD (see PROJECT_PLAN: reuse ComfyUI-MCP `train_*`

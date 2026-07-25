@@ -343,9 +343,11 @@
               <span class="lora-train-status small" id="lora-train-status"></span>
             </div>
             <p class="muted small">
-              Training frees VRAM first (unloads the Ollama model + ComfyUI's models), then
-              runs on the GPU — a real run of a few hundred steps takes a while. The LoRA
-              appears under “Trained LoRAs” when it finishes. Lower the steps for a quick test.
+              Each image is auto-captioned with Florence-2 and prefixed with your trigger word,
+              then the LoRA trains on the captioned set. Training frees VRAM first (unloads the
+              Ollama model + ComfyUI's models) and runs on the GPU — a real run of a few hundred
+              steps takes a while. The LoRA appears under “Trained LoRAs” when it finishes; lower
+              the steps for a quick test.
             </p>
           </div>
 

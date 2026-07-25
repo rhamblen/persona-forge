@@ -27,6 +27,25 @@ Every version below is a **published GitHub Release** with a matching
 
 ---
 
+## [0.5.3] — 2026-07-25
+
+**Per-image auto-captioning for training.** (Phase 5.)
+
+### Changed
+- **Training now auto-captions each image with Florence-2** instead of using the trigger
+  word alone. The training graph gained an inline caption stage — `Florence2ModelLoader` +
+  `Florence2Run(task=caption)` per image → `StringConcatenate` prefixes your **trigger word**
+  (`pf_<slug>, <caption>`) → per-image `CLIPTextEncode` → `TrainLoraNode`. This is the
+  "trigger word + light caption" scheme chosen for the project: the LoRA still binds to the
+  trigger, but per-image captions help it separate the character's identity from pose and
+  background. **Validated end-to-end with real runs** (the per-image conditioning is matched
+  to the image batch — confirmed against `TrainLoraNode`).
+- No app/API change — the existing train endpoint already passes the trigger; only the
+  workflow template (`workflows/lora-train.json` + manifest) changed. First training run
+  loads Florence-2 (adds VRAM + a little time; VRAM is freed before training as before).
+
+---
+
 ## [0.5.2] — 2026-07-25
 
 **The LoRA actually trains now.** (Phase 5 — released after 0.6.0 because the LoRA and
