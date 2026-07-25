@@ -9,6 +9,26 @@ Every version below is a **published GitHub Release** with a matching
 
 ---
 
+## [0.7.5] — 2026-07-25
+
+**Delete dataset candidates — purge the unselected, or drop one.** (Phase 7.)
+
+### Added
+- **"Purge unselected" button** on the Dataset tab. After you've cherry-picked the keepers,
+  one click removes **every unselected candidate** — both the DB rows and the image files on
+  `/builds` — leaving just your selected training set. The button shows the live count
+  ("Purge 12 unselected") and hides when nothing is unselected. `POST
+  /api/projects/{id}/dataset/purge`.
+- **Per-candidate delete.** Each dataset thumbnail now has a 🗑 badge (on hover) that deletes
+  that one image (DB row + file), selected or not. `DELETE /api/projects/{id}/dataset/{image_id}`.
+
+### Notes
+- Both actions confirm first and are **irreversible** (the files are unlinked from `/builds`).
+- File deletion is guarded against escaping the builds root and is best-effort — a candidate is
+  always removed from the dataset even if its file was already gone.
+
+---
+
 ## [0.7.4] — 2026-07-25
 
 **Stop a running build from the UI — and actually free the GPU.** (Phase 7.)

@@ -234,6 +234,10 @@ LAN; no Claude/Anthropic in the runtime loop.
   (`comfy.interrupt()` + `comfy.clear_pending()` in `POST /api/jobs/{id}/cancel`) so the GPU frees
   immediately, not just the pipeline. Cooperative job-cancel alone left the in-flight training
   churning the GPU.
+- **0.7.5:** Phase 7 — **delete dataset candidates.** "Purge unselected" button (removes all
+  `selected=0` dataset images — DB rows + files on `/builds`; `POST .../dataset/purge`) + a
+  per-thumbnail 🗑 delete (`DELETE .../dataset/{image_id}`). File delete via `_delete_dataset_file`
+  (guards against escaping `BUILDS_ROOT`, best-effort). Both confirm + irreversible.
 - **Remaining:** 0.7.x hardening · 1.0 release. The **dataset side of the weak-LoRA fix is now
   complete** (0.7.2 pose + 0.7.3 framing/expression). 0.7.x backlog (priority order):
   **(1) raise the automated training-step default to ~1500-2500** (last recipe lever);

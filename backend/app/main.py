@@ -1026,6 +1026,69 @@ async def dataset_target(project_id: int, body: DatasetTargetRequest) -> dict:
     return {"target": body.target}
 
 
+def _delete_dataset_file(subfolder: str, filename: str) -> bool:
+    """Delete one dataset image file from /builds. Guards against a crafted subfolder/filename
+    escaping the builds root before unlinking. Best-effort — returns True if a file was removed."""
+    if not filename:
+        return False
+    path = (BUILDS_ROOT / (subfolder or "") / filename).resolve()
+    try:
+        path.relative_to(BUILDS_ROOT.resolve())  # refuse anything outside /builds
+    except ValueError:
+        logs.warn("local", "refusing to delete outside the builds root", path=str(path))
+        return False
+    try:
+        if path.is_file():
+            path.unlink()
+            return True
+    except OSError as exc:
+        logs.warn("local", f"could not delete dataset file: {exc}", path=str(path))
+    return False
+
+
+@app.post("/api/projects/{project_id}/dataset/purge")
+async def dataset_purge(project_id: int) -> dict:
+    """Delete every UNSELECTED dataset candidate for a project — both the DB rows and the files
+    on /builds. Selected images (the training set) are left untouched. Irreversible."""
+    with db.connect() as conn:
+        proj = conn.execute("SELECT slug FROM projects WHERE id = ?", (project_id,)).fetchone()
+        if proj is None:
+            raise HTTPException(404, "project not found")
+        rows = conn.execute(
+            """SELECT id, filename, subfolder FROM images
+               WHERE project_id = ? AND kind = 'dataset' AND selected = 0""",
+            (project_id,),
+        ).fetchall()
+    files_removed = sum(_delete_dataset_file(r["subfolder"], r["filename"]) for r in rows)
+    with db.connect() as conn:
+        deleted = conn.execute(
+            "DELETE FROM images WHERE project_id = ? AND kind = 'dataset' AND selected = 0",
+            (project_id,),
+        ).rowcount
+    logs.info("process",
+              f"dataset purge: removed {deleted} unselected candidate(s), {files_removed} file(s)",
+              project_id=project_id, slug=proj["slug"])
+    return {"deleted": deleted, "files_removed": files_removed}
+
+
+@app.delete("/api/projects/{project_id}/dataset/{image_id}")
+async def dataset_delete(project_id: int, image_id: int) -> dict:
+    """Delete one dataset candidate (DB row + file on /builds), selected or not. Irreversible."""
+    with db.connect() as conn:
+        row = conn.execute(
+            """SELECT filename, subfolder FROM images
+               WHERE id = ? AND project_id = ? AND kind = 'dataset'""",
+            (image_id, project_id),
+        ).fetchone()
+        if row is None:
+            raise HTTPException(404, "dataset image not found")
+        conn.execute("DELETE FROM images WHERE id = ? AND project_id = ?", (image_id, project_id))
+    removed = _delete_dataset_file(row["subfolder"], row["filename"])
+    logs.info("process", f"dataset: deleted candidate {image_id} (file removed: {removed})",
+              project_id=project_id)
+    return {"deleted": image_id, "file_removed": removed}
+
+
 # --------------------------------------------------------------------------- #
 # LoRA trainer (Phase C) — 0.5.0: trigger word + stage dataset into ComfyUI input
 # --------------------------------------------------------------------------- #

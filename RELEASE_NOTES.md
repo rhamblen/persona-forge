@@ -1,25 +1,22 @@
-# v0.7.4 — Stop a running build
+# v0.7.5 — Delete dataset candidates
 
-Phase 7. A one-click way to stop an in-progress LoRA build — and it now actually frees the GPU.
+Phase 7. Clean up the dataset after cherry-picking: purge everything you didn't select, or drop
+individual pictures.
 
 ## Added
-- **"Stop build" button** on the Build panel (LoRA tab), shown whenever a build is queued or
-  running. Click it (there's a confirm) and the build stops. Until now the only way to stop a
-  build mid-run was to hit the cancel API by hand.
+- **"Purge unselected" button** on the Dataset tab. Once you've picked your keepers, one click
+  removes **every unselected candidate** — DB rows *and* the image files on `/builds` — leaving
+  just your training set. The button shows the live count ("Purge 12 unselected") and disappears
+  when there's nothing unselected. `POST /api/projects/{id}/dataset/purge`.
+- **Per-candidate delete.** Every dataset thumbnail now has a 🗑 badge (appears on hover) to
+  delete that single image — selected or not. `DELETE /api/projects/{id}/dataset/{image_id}`.
 
-## Changed
-- **Stopping a running build now interrupts ComfyUI too.** The job cancel was *cooperative* — it
-  halted the pipeline from advancing, but the training run already submitted to ComfyUI kept
-  churning the GPU until it finished. Stop now also calls ComfyUI `POST /interrupt` and clears
-  its pending queue, so the **GPU is freed right away**. New `comfy.interrupt()` /
-  `comfy.clear_pending()`, wired into `POST /api/jobs/{id}/cancel`. Best-effort: if ComfyUI is
-  unreachable the job is still flagged and the worker finalizes it.
+## Notes
+- Both confirm first and are **irreversible** — the files are unlinked from `/builds`.
+- Deletion is guarded against escaping the builds root and is best-effort: a candidate always
+  leaves the dataset even if its file was already gone.
 
-## Note
-A stopped build lands as **canceled** (or **error** if ComfyUI was interrupted mid-training) —
-both are terminal and harmless; just start a fresh build when ready.
-
-**Image:** `ghcr.io/rhamblen/persona-forge:0.7.4`
+**Image:** `ghcr.io/rhamblen/persona-forge:0.7.5`
 
 ## Upgrading
 No compose changes. Pull and restart:

@@ -667,6 +667,13 @@ function renderDataset(data) {
   $("ds-fill").classList.toggle("full", reached);
   $("ds-genstate").textContent = generating ? `generating… ${counts.pending} left in queue` : "";
 
+  const unselected = counts.candidates - counts.selected;
+  const purge = $("ds-purge");
+  if (purge) {
+    purge.hidden = unselected <= 0;
+    purge.textContent = `Purge ${unselected} unselected`;
+  }
+
   const grid = $("ds-grid");
   if (!images.length) {
     grid.innerHTML = '<p class="muted" id="ds-empty">No candidates yet — hit Generate 30.</p>';
@@ -678,6 +685,7 @@ function renderDataset(data) {
        <img src="${dsImageUrl(img)}" alt="candidate" loading="lazy" />
        <span class="ds-check">✓</span>
        <span class="ds-zoom" role="button" aria-label="Zoom" title="Zoom to examine">⤢</span>
+       <span class="ds-del" role="button" aria-label="Delete" title="Delete this candidate">🗑</span>
      </button>`).join("");
 }
 
@@ -718,6 +726,15 @@ async function datasetGenerate(count) {
   }
 }
 
+async function deleteDatasetImage(id) {
+  if (!state.projectId) return;
+  if (!confirm("Delete this candidate? It's removed from the dataset and from disk — can't be undone.")) return;
+  try {
+    await api(`/api/projects/${state.projectId}/dataset/${id}`, { method: "DELETE" });
+    loadDataset();
+  } catch (e) { msg($("ds-msg"), e.message, "bad"); }
+}
+
 $("ds-grid").addEventListener("click", (e) => {
   const thumb = e.target.closest(".ds-thumb");
   if (!thumb) return;
@@ -727,10 +744,28 @@ $("ds-grid").addEventListener("click", (e) => {
     if (img) openLightbox(img.src);
     return;
   }
+  // The trash badge deletes this one candidate and does NOT toggle selection.
+  if (e.target.closest(".ds-del")) {
+    deleteDatasetImage(parseInt(thumb.dataset.id, 10));
+    return;
+  }
   toggleDatasetSelect(parseInt(thumb.dataset.id, 10), thumb);
 });
 $("ds-generate").addEventListener("click", () => datasetGenerate(30));
 $("ds-more").addEventListener("click", () => datasetGenerate(10));
+$("ds-purge").addEventListener("click", async () => {
+  if (!state.projectId) return;
+  if (!confirm("Delete all unselected candidates? They're removed from the dataset and from disk. Selected images are kept. This can't be undone.")) return;
+  const b = $("ds-purge");
+  b.disabled = true;
+  msg($("ds-msg"), "Purging unselected candidates…");
+  try {
+    const { deleted, files_removed } = await api(`/api/projects/${state.projectId}/dataset/purge`, { method: "POST" });
+    msg($("ds-msg"), `Purged ${deleted} unselected candidate${deleted === 1 ? "" : "s"} (${files_removed} file${files_removed === 1 ? "" : "s"} removed).`, "ok");
+    loadDataset();
+  } catch (e) { msg($("ds-msg"), e.message, "bad"); }
+  finally { b.disabled = false; }
+});
 $("ds-target").addEventListener("change", async () => {
   const target = parseInt($("ds-target").value, 10);
   if (!target || target < 1 || !state.projectId) return;
