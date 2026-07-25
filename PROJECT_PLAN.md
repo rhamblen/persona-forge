@@ -537,6 +537,21 @@ complete release. A `VERSION` file at the repo root tracks the current build.
 - **0.6.x — Pose/Expression Studio (Phase D).** LoRA-driven expression/pose set,
   grid, per-sprite tweak (pose OR face) with NL + rollback, **SillyTavern staging**.
 - **0.7.x — Hardening.** GHCR image + Action, `appdata/db` backups, run docs, polish.
+  Dataset/LoRA-quality backlog (in priority order):
+  1. **Raise the automated training-step default to ~1500–2500.** The last lever of the
+     weak-LoRA recipe (0.7.2 pose variety + 0.7.3 close-ups/expressions fixed the dataset
+     side; step count is what's left). `sweetie-pie` was trained at 500.
+  2. **Custom / editable dataset example prompts (added 2026-07-25).** Beyond the automatic
+     `DATASET_FRAMINGS × DATASET_EXPRESSIONS` rotation, let the user add their **own specific
+     example shots** to a dataset batch — "make sure the LoRA sees *these*." Per-project,
+     editable list (add / modify / remove); each entry is a framing/expression/style modifier
+     appended through the same `expression` suffix (or a full prompt override), optionally with
+     a per-entry count so a wanted example gets N candidates. Use cases: a specific outfit or
+     accessory, a particular angle/pose, or an expression the auto-set doesn't nail. Also
+     surface the built-in framing/expression lists as editable defaults so the whole variety
+     set is user-tunable, not hardcoded. Queued alongside (or in place of) the auto-rotation;
+     reconciles into `images(kind='dataset')` exactly like today, so training picks them up
+     with no trainer change.
 - **0.8.x — Character Studio (Phase E, added 2026-07-25).** Ollama-guided character
   sheet front end (§2 Phase E): seed → field elicitation → per-field NL refine +
   rollback → coherence pass. Two outputs: **looks prompt → Phase A**, and a staged

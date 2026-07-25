@@ -230,8 +230,13 @@ LAN; no Claude/Anthropic in the runtime loop.
   relabelled "Framing, pose & expression variety." **Caveat:** a style prompt that hard-codes
   "full body" can fight close-ups; the app doesn't rewrite prose.
 - **Remaining:** 0.7.x hardening · 1.0 release. The **dataset side of the weak-LoRA fix is now
-  complete** (0.7.2 pose + 0.7.3 framing/expression). Last recipe lever: **raise the automated
-  training-step default to ~1500-2500** (0.7.x). Optional polish: reuse-parent-LoRA for clones
+  complete** (0.7.2 pose + 0.7.3 framing/expression). 0.7.x backlog (priority order):
+  **(1) raise the automated training-step default to ~1500-2500** (last recipe lever);
+  **(2) custom / editable dataset example prompts** (user request 2026-07-25) — per-project
+  user-added example shots on top of the `DATASET_FRAMINGS × DATASET_EXPRESSIONS` auto-rotation
+  (each a modifier via the `expression` suffix, optional per-entry count), plus surfacing the
+  built-in lists as editable defaults; reconciles into `images(kind='dataset')`, no trainer
+  change (see `PROJECT_PLAN.md` §7). Optional polish: reuse-parent-LoRA for clones
   (`parent_project_id`), training loss/step readout.
 
 ## Track A note (separate from the app)
