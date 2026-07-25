@@ -1,5 +1,11 @@
 # AI Context — cold-start orientation
 
+> **Latest session handover:** `docs/handover-2026-07-25.md` — shipped 0.6.2→0.7.1 (LoRA-driven
+> poses, training timer, **generic job engine + `lora_build` overnight build**, prompt-studio
+> fixes), moved aux GPU containers off the 3090, and the open next step: **pose/framing variety
+> in the Dataset Builder** (the fix for weak, pose-locked LoRAs). Read it first.
+
+
 Dense factual map for the next AI session. Not for end users. Read this first, then
 `PROJECT_PLAN.md` for the full spec. Keep this file current **every release**.
 
