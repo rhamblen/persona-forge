@@ -9,6 +9,24 @@ Every version below is a **published GitHub Release** with a matching
 
 ---
 
+## [0.7.8] — 2026-07-26
+
+**Show each LoRA's build date — so you know a rebuild actually took.** (Phase 7.)
+
+### Added
+- **Build date on every trained LoRA.** The LoRA tab now lists each `.safetensors` with its
+  build time (the file's modified time — it bumps on every rebuild), **newest first**, and tags
+  the most recent one **latest**. So after a refresh/retrain you can confirm at a glance that
+  you're on the fresh version.
+- The **Poses** Character-LoRA dropdown shows each LoRA's date in the option, and the selected-
+  LoRA hint reads "…(built <date>)", so you can verify the pose set is using the refreshed LoRA.
+
+### Changed
+- `GET /api/projects/{id}/lora` and `.../pose-config` now return each LoRA as
+  `{name, modified, modified_ts, size, …}` (newest first) instead of a bare name.
+
+---
+
 ## [0.7.7] — 2026-07-26
 
 **Fix: a stopped build could jam all future builds with "a training run is already in progress."**

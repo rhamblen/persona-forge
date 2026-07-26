@@ -1254,6 +1254,29 @@ async def _reconcile_training(project_id: int) -> None:
                    project_id=project_id, prompt_id=row["train_prompt_id"])
 
 
+def _lora_files(slug: str) -> list[dict[str, Any]]:
+    """Trained LoRA files for a project, **newest first**, each with its build date (the file's
+    modified time). The mtime is the reliable 'built on' signal — a rebuild overwrites or adds the
+    file and bumps it — so the user can confirm a refresh actually took and which file is latest."""
+    lora_dir = BUILDS_ROOT / slug / "lora"
+    if not lora_dir.is_dir():
+        return []
+    out: list[dict[str, Any]] = []
+    for p in lora_dir.glob("*.safetensors"):
+        try:
+            stat = p.stat()
+        except OSError:
+            continue
+        out.append({
+            "name": p.name,
+            "modified_ts": stat.st_mtime,  # epoch seconds — client formats in the user's locale
+            "modified": time.strftime("%Y-%m-%d %H:%M", time.localtime(stat.st_mtime)),
+            "size": stat.st_size,
+        })
+    out.sort(key=lambda d: d["modified_ts"], reverse=True)  # newest (freshest build) first
+    return out
+
+
 @app.get("/api/projects/{project_id}/lora")
 async def lora_status(project_id: int) -> dict:
     await _reconcile_training(project_id)
@@ -1270,8 +1293,7 @@ async def lora_status(project_id: int) -> dict:
         ).fetchone()["n"]
     trigger = (proj["trigger_word"] if proj else "") or default_trigger(slug)
     folder = _input_folder(slug)
-    lora_dir = BUILDS_ROOT / slug / "lora"
-    loras = sorted(p.name for p in lora_dir.glob("*.safetensors")) if lora_dir.is_dir() else []
+    loras = _lora_files(slug)  # newest first, each with its build (file-modified) date
 
     status = proj["train_status"] if proj else "none"
     last_secs = (proj["last_train_seconds"] if proj else 0) or 0
@@ -1767,8 +1789,7 @@ async def pose_config(project_id: int) -> dict:
     if proj is None:
         raise HTTPException(404, "project not found")
 
-    lora_dir = BUILDS_ROOT / slug / "lora"
-    files = sorted(p.name for p in lora_dir.glob("*.safetensors")) if lora_dir.is_dir() else []
+    files = _lora_files(slug)  # newest first, with build dates
     try:
         comfy_opts = set(await comfy.list_models("loras"))
     except Exception:  # noqa: BLE001
@@ -1780,12 +1801,12 @@ async def pose_config(project_id: int) -> dict:
     return {
         "trigger_word": (proj["trigger_word"] or "") or default_trigger(slug),
         "train_status": proj["train_status"],
-        "loras": [{"name": fn, "comfy_visible": visible(fn)} for fn in files],
+        "loras": [{**f, "comfy_visible": visible(f["name"])} for f in files],
         "selected": (proj["pose_lora"] or "").strip(),
         "strength": proj["pose_lora_strength"] or 1.0,
         # a trained LoRA exists on disk but ComfyUI can't see any of them → the user still
         # needs `loras: /builds` in extra_model_paths.yaml + a ComfyUI restart.
-        "needs_extra_paths": bool(files) and not any(visible(fn) for fn in files),
+        "needs_extra_paths": bool(files) and not any(visible(f["name"]) for f in files),
     }
 
 

@@ -1,26 +1,25 @@
-# v0.7.7 — Fix: stopped build jamming future builds
+# v0.7.8 — LoRA build dates
 
-Phase 7. A bugfix for the exact symptom you hit: after a stopped build, every new build failed
-instantly with *"a training run is already in progress for this persona."*
+Phase 7. Know which LoRA is the fresh one after a rebuild.
 
-## What was wrong
-A build cancelled during the training stage left the project flagged `train_status = 'training'`
-with no ComfyUI prompt behind it. The reconciler needs a prompt id to clear that flag, so it
-stayed stuck forever — blocking every future build for that persona.
+## Added
+- **Build date on every trained LoRA.** The LoRA tab lists each `.safetensors` with its build
+  time (the file's modified time, which bumps every rebuild), **newest first**, and tags the most
+  recent one **latest**. After a refresh/retrain you can confirm at a glance you're on the fresh
+  version — not a stale one.
+- The **Poses** Character-LoRA dropdown shows each LoRA's date, and the selected-LoRA hint reads
+  "…(built <date>)", so you can verify the pose set is rendering with the refreshed LoRA.
 
-## Fixed
-1. **Auto-heal.** The reconciler now clears an orphaned `training` flag based on ComfyUI reality
-   (a real run always has a prompt id, so a missing one is stale; a vanished prompt is stale once
-   ComfyUI's queue is idle). It runs right before the "already training" check, so simply
-   **clicking Build again self-heals** — you don't even need to open the LoRA tab.
-2. **Stop resets the flag.** Cancelling a running build now takes the project out of `training`
-   as part of the stop, so it can't get stuck again.
+## Changed
+- `GET /api/projects/{id}/lora` and `.../pose-config` now return each LoRA as
+  `{name, modified, modified_ts, size, comfy_visible}` (newest first) instead of a bare name.
 
-## After you deploy
-Your stuck **monster-girl** project clears itself the moment you open its LoRA tab or hit Build.
-Just re-run the build (it's on 113 selected images, dataset already staged).
+## Note
+The date is the file's modified time — reliable and works for LoRAs you've already built. A
+richer *embedded* build stamp (version + steps + dataset size written alongside the file) is a
+possible follow-up.
 
-**Image:** `ghcr.io/rhamblen/persona-forge:0.7.7`
+**Image:** `ghcr.io/rhamblen/persona-forge:0.7.8`
 
 ## Upgrading
 No compose changes. Pull and restart:

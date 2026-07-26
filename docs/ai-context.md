@@ -249,6 +249,12 @@ LAN; no Claude/Anthropic in the runtime loop.
   is already in progress." `_reconcile_training` now auto-heals an orphaned flag from ComfyUI
   reality (null `train_prompt_id` = always stale; vanished prompt = stale once `queue_size()==0`)
   and runs before the gate in `_start_lora_training`; `cancel_job` also resets the flag on stop.
+- **0.7.8:** Phase 7 — **LoRA build dates.** `_lora_files(slug)` returns each `.safetensors`
+  `{name, modified, modified_ts, size}` **newest first** (file mtime = the reliable "built on"
+  signal, bumps on rebuild); used by `GET .../lora` and `.../pose-config`. LoRA tab shows date +
+  "latest" tag; Poses dropdown + selected-hint show it too — so a refresh is verifiable. Possible
+  follow-up: an **embedded build stamp** (sidecar JSON or safetensors `__metadata__`: version,
+  steps, dataset count).
 - **Remaining:** 0.7.x hardening · 1.0 release. The **dataset side of the weak-LoRA fix is now
   complete** (0.7.2 pose + 0.7.3 framing/expression + 0.7.6 targeting/variety). 0.7.x backlog (priority order):
   **(1) raise the automated training-step default to ~1500-2500** (last recipe lever);

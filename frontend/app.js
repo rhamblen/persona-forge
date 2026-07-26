@@ -14,6 +14,11 @@ const fmtDur = (secs) => {  // 95 -> "1m35s", 24 -> "24s", 3800 -> "1h03m20s"
   return `${h}h${String(rm).padStart(2, "0")}m${String(r).padStart(2, "0")}s`;
 };
 
+// epoch seconds -> local date/time string; short = date + HH:MM only.
+const fmtDateTime = (ts) => (ts ? new Date(ts * 1000).toLocaleString() : "");
+const fmtDateShort = (ts) => (ts ? new Date(ts * 1000).toLocaleString([], {
+  year: "2-digit", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "");
+
 let state = { projectId: null, versions: [], current: null, checkpoints: [], defaultCheckpoint: "", defaultNegative: "", versionOrdinals: {} };
 
 // Version rows carry a GLOBAL auto-increment id; the UI numbers them PER PROJECT (v1, v2, …).
@@ -804,7 +809,9 @@ async function loadLora() {
       ? `<span class="ok">yes → input/${esc(d.input_folder)}</span>`
       : `<span class="muted">not staged</span>`;
     $("lora-list").innerHTML = d.loras.length
-      ? d.loras.map((l) => `<div class="small">${esc(l)}</div>`).join("")
+      ? d.loras.map((l, i) => `<div class="small lora-file">${esc(l.name)}` +
+          `<span class="muted"> — built ${esc(l.modified || fmtDateTime(l.modified_ts))}</span>` +
+          `${i === 0 && d.loras.length > 1 ? '<span class="lora-latest">latest</span>' : ""}</div>`).join("")
       : '<p class="muted">None yet.</p>';
     // training state (with live elapsed + ETA from the previous run)
     const ts = d.train_status;
@@ -996,7 +1003,7 @@ async function loadPoseConfig() {
       const opts = ['<option value="">None — base character (no LoRA)</option>'].concat(
         d.loras.map((l) =>
           `<option value="${esc(l.name)}"${l.name === d.selected ? " selected" : ""}>` +
-          `${esc(l.name)}${l.comfy_visible ? "" : " — not in ComfyUI"}</option>`)
+          `${esc(l.name)} — ${esc(fmtDateShort(l.modified_ts))}${l.comfy_visible ? "" : " (not in ComfyUI)"}</option>`)
       );
       sel.innerHTML = opts.join("");
       sel.value = d.selected || "";
@@ -1016,7 +1023,9 @@ async function loadPoseConfig() {
         "<code>extra_model_paths.yaml</code> and restart ComfyUI, then Apply.";
       hint.className = "hint bad";
     } else if (d.selected) {
-      hint.innerHTML = `Pose renders load <strong>${esc(d.selected)}</strong> and prepend trigger ` +
+      const selLora = d.loras.find((x) => x.name === d.selected);
+      const built = selLora ? ` <span class="muted">(built ${esc(selLora.modified || fmtDateTime(selLora.modified_ts))})</span>` : "";
+      hint.innerHTML = `Pose renders load <strong>${esc(d.selected)}</strong>${built} and prepend trigger ` +
         `<code>${esc(d.trigger_word)}</code>. Regenerate poses after changing this.`;
       hint.className = "hint ok";
     } else {
