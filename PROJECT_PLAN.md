@@ -271,6 +271,65 @@ generator. The heaviest piece in the plan — firmly post-1.0.
 choice; one-book-per-campaign vs. many-books-merged-into-one-world; how much
 auto-generation vs. mandatory human review of extracted entities.
 
+### Phase H — Emotional depth: progressive states + LoRA enrichment (added 2026-07-26)
+
+> **Full design: [`docs/emotion-depth.md`](docs/emotion-depth.md).** Summarised here;
+> that doc is the source of truth.
+
+**The reframe.** Emotion is two layers, and collapsing them causes every design mistake:
+the **state layer** (the character's internal condition — `anger 62, trust 85`, with
+memory and progression) and the **sprite layer** (a *projection* of that state onto a
+picture). SillyTavern has no state layer at all — its Expressions extension is a
+**stateless label lookup**, so every message is classified independently and nothing
+progresses. Phase H builds sprite resolution first, then state.
+
+**H1 — Emotion-targeted enrichment (tactical, next phase).** The user's loop: *the basic
+28 as startup, then focus the dataset on one emotion, enrich and grow, then come back to
+the baseline for a different emotion.*
+
+- **Axes × tiers.** Two dimensions — *which* emotion, and *how much*. The 28 ST labels
+  are GoEmotions and **already encode tiers** (annoyance→anger, disappointment→sadness→
+  grief), so grouping them by axis yields most of the ladder free; only ~6–8 top tiers
+  (fury, terror, despair, elation…) are new, as **custom ST expression labels**. The 28
+  stay the baseline and export target — tiers are additive.
+- **Dataset layers.** "Come back to baseline" must be a **selection, not an undo**:
+  `core` (immutable, from Phase B) + `emotion:<axis>` layers. A LoRA build declares which
+  layers it trains on, and **always trains from scratch on their union** — never
+  continued training, which compounds drift. `core` stays exactly reproducible forever.
+- **Body language, not faces.** Rage and despair are posture, fists, tears, dishevelment
+  — not a face repaint. Enrichment batches are **tier prompts × the full framing spread**,
+  a new `mode="emotion"` alongside `faces`/`poses`/`both` in `_dataset_variation()`.
+- **Caption the emotion explicitly** — the standing "expression words out of identity"
+  rule is *why* this works: named emotions stay separable and promptable instead of being
+  absorbed into the trigger word (which would make the character look angry at rest).
+- **Guard rails** against self-amplification: core ≥50% of any training set, one emotion
+  layer ≤~30%, mandatory human curation (the existing Phase B grid), and enrichment
+  generated at reduced LoRA weight.
+- **Selective rebuild.** Poses gain `axis`/`tier`/`lora_build_id`, so after a retrain only
+  that axis's sprites re-render; the rest stay valid and **stale sprites are flagged**.
+  Per-sprite revert, same rollback ethos as prompts.
+- **Merges with the 0.7.x backlog item** "custom/editable dataset example prompts" — same
+  machinery, plus an axis label. Build them together.
+
+**H2 — The emotion state engine (post-1.0).** Emotion as *game state*: 4–5 axes scored
+0–100, bucketed to tiers, with the **sprite derived** from the state rather than asked for.
+The **LLM emits deltas** (`<mood anger="+20" trust="-15"/>`) and the **engine owns the
+state** — applies, clamps, decays, persists — because LLMs judge scenes well and maintain
+counters badly. State is richer than the sprite: `trust 85/anger 70` and `trust 20/anger 70`
+render the same furious sprite but produce different dialogue. Needs a **temperament block**
+(resting values, volatility, decay, ceilings) on the Phase E character sheet — which also
+**decides which tiers get generated**, tying H2 back to H1. Runs in ST on built-ins
+(variables + auto-executed Quick Replies + forced sprite + Author's Note injection); Persona
+Forge **authors that bundle**, staged for manual import, and never runs it.
+
+**Does this displace VRM?** Largely — see the design doc §5. A stock VRM rig has ~5 emotion
+blendshapes against 28+ sprites here, so on emotional legibility the sprite track wins
+outright and far cheaper. VRM keeps continuity, liveness, **lip sync** (real, given
+chatterbox TTS), and 3D presence — but crossfades and an idle bob steal two of those.
+Recommendation: **demote VRM to opt-in/experimental** and collapse the humanoid /
+non-humanoid split — one sprite pipeline for the whole cast. Needs the user's confirmation
+before the parent plan + avatar-strategy memory are rewritten.
+
 ### The AI design charter — the generator's brief (shared by E, F, G) (added 2026-07-25)
 
 The Ollama-driven generator (and the later text-gen-webui / n8n lorebook engine) runs
@@ -552,14 +611,26 @@ complete release. A `VERSION` file at the repo root tracks the current build.
      set is user-tunable, not hardcoded. Queued alongside (or in place of) the auto-rotation;
      reconciles into `images(kind='dataset')` exactly like today, so training picks them up
      with no trainer change.
-- **0.8.x — Character Studio (Phase E, added 2026-07-25).** Ollama-guided character
+- **0.8.x — Emotional depth H1 (Phase H, added 2026-07-26).** ⚠️ *Proposed resequence —
+  this takes 0.8.x and pushes Character Studio to 0.9.x, because H1 extends Phases B/C/D
+  (which exist) and is needed sooner. User's call.* Emotion **axes × tiers** map (the 28
+  regrouped + ~6–8 custom top tiers), editable per project; **dataset layers**
+  (`core` + `emotion:<axis>`, core immutable); `mode="emotion"` enrichment batches (tier
+  body-language prompts × full framing spread, emotion named in captions); a
+  **`lora_builds`** table with layer-selected from-scratch training + rollback; and
+  **per-axis selective sprite rebuild** with staleness flags and per-sprite revert.
+  Absorbs the 0.7.x "custom/editable dataset example prompts" backlog item — same
+  machinery with an axis label. Full design: `docs/emotion-depth.md`.
+- **0.9.x — Character Studio (Phase E, added 2026-07-25).** Ollama-guided character
   sheet front end (§2 Phase E): seed → field elicitation → per-field NL refine +
   rollback → coherence pass. Two outputs: **looks prompt → Phase A**, and a staged
   **SillyTavern V3 character card** (`chara_card_v3`; JSON + PNG card using the
   pipeline's own portrait) — with `first_mes`, optional **alternate greetings** +
   **example dialogue**, and the option to **attach a lorebook** (`character_book`). New
   `character` table + `character.json` sidecar; clone-aware. Reuses the 0.3.x NL-edit +
-  versioning machinery. (New scope — 1.0 now follows this.)
+  versioning machinery. (New scope — 1.0 now follows this.) **Also carries the Phase H
+  temperament block** (resting values, volatility, decay, ceilings) on the character
+  sheet, which decides which emotion tiers a given character needs generated at all.
 - **1.0.0 — Release.**
 - **Later (post-1.0) — Lorebook generator (Phase E, stage 2).** Creatively **generate**
   a character's lorebook from its sheet, then let the user curate — extending the
@@ -567,6 +638,11 @@ complete release. A `VERSION` file at the repo root tracks the current build.
   long-form, distinct from the prompt-edit instruct model) and/or an **n8n** workflow
   orchestrating the calls. Its own milestone because it adds a model backend +
   orchestration; deliberately deferred past the 1.0 sprite-pipeline release.
+- **Later (post-1.0) — Emotion state engine (Phase H2).** Emotion as game state: 4–5 axes,
+  LLM-emitted deltas with the engine owning the score/decay/bucketing, and a generated
+  **STScript + Quick Reply bundle** exported for manual ST import so sprites are driven by
+  state rather than per-message classification. Depends on the H1 tier assets + the Phase E
+  temperament block.
 - **Later (post-1.0) — Campaign / Cast builder (Phase F).** Multiple AI-driven characters
   sharing one world (the solo-D&D-in-ST use case): campaign container, shared world
   lorebook attached to the whole cast, cross-character relationships + coherence, a
@@ -651,6 +727,18 @@ and already shared with ollama+chatterbox):
   prompt-edit instruct model) and a decision on where it runs (new service alongside
   Ollama vs. existing n8n). Attach-only lorebook support (0.8) does **not** depend on
   this.
+- **Phase H sequencing + the VRM question (added 2026-07-26)** — (a) does H1 take **0.8.x**
+  ahead of Character Studio (recommended — it's needed sooner and extends existing phases)?
+  (b) Does emotional depth **displace the VRM track**? Recommendation: demote VRM to
+  opt-in/experimental and run **one sprite pipeline for the whole cast**, since a stock VRM
+  rig has ~5 emotion blendshapes vs. 28+ sprites; VRM's durable edge is **lip sync**, not
+  expression. Confirming (b) means rewriting the parent `PROJECT_PLAN.md` avatar phases and
+  the avatar-strategy memory.
+- **Phase H design details** — cumulative vs. reset default when honing a second emotion
+  (recommend cumulative, layers deselectable); hard-cap vs. warn on the ≤30% layer ratio
+  (recommend warn + show the ratio); the exact **custom-expression-label mechanism on the
+  running ST version**; which 4–5 axes H2 starts with (anger/fear/joy/sadness/trust); and
+  whether temperament lives on the character sheet or its own emotion profile.
 - **Builds root host path & LoRA wiring** (§5.1) — pick the exact UR1 share for the
   builds root, mount it into **both** containers, and decide how ComfyUI is pointed
   at it for LoRA loading (`extra_model_paths.yaml` pointing at the builds root, vs.

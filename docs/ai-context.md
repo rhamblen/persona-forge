@@ -83,6 +83,7 @@ LAN; no Claude/Anthropic in the runtime loop.
 | `docker/.env` | Tracked, non-secret config (the only `.env` git tracks) |
 | `PROJECT_PLAN.md` | Master spec + phased roadmap (this repo's "project brief") |
 | `docs/ui-style.md` | UI design tokens from the user's esp32-shutter-hub card |
+| `docs/emotion-depth.md` | Phase H design: emotion axes×tiers, dataset layers + per-emotion LoRA enrichment, selective sprite rebuild, and the post-1.0 ST emotion state engine |
 | `CHANGELOG.md` / `RELEASE_NOTES.md` | Keep-a-Changelog / current release body (rewritten each release) |
 
 ## API surface
