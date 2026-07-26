@@ -1127,6 +1127,7 @@ $("build-stop").addEventListener("click", async () => {
 
 let posesTimer = null;
 let posesCache = [];
+let posesAxes = [];   // axis groups + per-axis completion, from the emotion map
 let selectedPoseId = null;
 let exportGenerating = false;
 
@@ -1150,6 +1151,7 @@ async function loadPoses() {
   try {
     const data = await api(`/api/projects/${state.projectId}/poses`);
     posesCache = data.poses;
+    posesAxes = data.axes || [];
     renderPosesGrid(data.poses);
     $("poses-genstate").textContent = data.generating
       ? `rendering… ${data.counts.pending} in queue` : "";
@@ -1230,21 +1232,175 @@ function poseStatusBadge(p) {
   return "";
 }
 
+function poseCardHtml(p) {
+  const img = p.filename
+    ? `<img src="${poseImageUrl(p)}" alt="${esc(p.name)}" loading="lazy" />`
+    : '<div class="pose-empty">—</div>';
+  return `<button type="button" class="pose-card${p.id === selectedPoseId ? " sel" : ""}" data-id="${p.id}">
+    <div class="pose-thumb">${img}${poseStatusBadge(p)}</div>
+    <div class="pose-name">${esc(p.name)}</div>
+  </button>`;
+}
+
+// Grouped by emotion axis, tiers in intensity order. The point of grouping is that the
+// baseline review has to answer "which emotion is this persona weak at?" — an
+// alphabetical grid can't show that, a per-axis done/total can.
 function renderPosesGrid(poses) {
   const grid = $("poses-grid");
   if (!poses.length) {
     grid.innerHTML = '<p class="muted">No poses yet — add one or load a preset.</p>';
     return;
   }
-  grid.innerHTML = poses.map((p) => {
-    const img = p.filename
-      ? `<img src="${poseImageUrl(p)}" alt="${esc(p.name)}" loading="lazy" />`
-      : '<div class="pose-empty">—</div>';
-    return `<button type="button" class="pose-card${p.id === selectedPoseId ? " sel" : ""}" data-id="${p.id}">
-      <div class="pose-thumb">${img}${poseStatusBadge(p)}</div>
-      <div class="pose-name">${esc(p.name)}</div>
-    </button>`;
-  }).join("");
+  if (!posesAxes.length) {   // no map metadata (e.g. a starter-pose set) — flat grid
+    grid.innerHTML = poses.map(poseCardHtml).join("");
+    return;
+  }
+  const order = Object.fromEntries(posesAxes.map((a, i) => [a.axis, i]));
+  const buckets = new Map(posesAxes.map((a) => [a.axis, []]));
+  poses.forEach((p) => {
+    const key = buckets.has(p.axis || "") ? (p.axis || "") : "";
+    (buckets.get(key) || buckets.get("") || []).push(p);
+  });
+
+  grid.innerHTML = posesAxes
+    .slice()
+    .sort((a, b) => order[a.axis] - order[b.axis])
+    .map((a) => {
+      const items = (buckets.get(a.axis) || [])
+        // tier ascending = rising intensity; unranked poses fall to the end by name
+        .sort((x, y) => (x.tier || 99) - (y.tier || 99) || x.name.localeCompare(y.name));
+      if (!items.length) return "";
+      const complete = a.done === a.total;
+      return `<div class="pose-group">
+        <div class="pose-group-head">
+          <span class="pose-group-title">${esc(a.label)}</span>
+          ${a.graded ? '<span class="tag" title="a real intensity ladder — tiers rise left to right">graded</span>' : ""}
+          <span class="chip small${complete ? " chip-good" : ""}">${a.done}/${a.total}</span>
+        </div>
+        <div class="poses-grid-inner">${items.map(poseCardHtml).join("")}</div>
+      </div>`;
+    }).join("");
+}
+
+/* ---------------- emotion map editor (Phase H1a) ----------------
+   The shipped map is a default, not a vocabulary: axes and tiers are both fully
+   editable here. Every mutation returns the whole map, so the panel re-renders from the
+   server's answer rather than guessing at local state. */
+
+let mapCache = [];
+
+function mapTierRow(t, axisGraded) {
+  return `<div class="map-tier" data-tier="${t.id}">
+    <span class="map-tier-pos muted small">${t.position}</span>
+    <input class="map-tier-label" value="${esc(t.label)}" title="Sprite filename — must be unique" />
+    <input class="map-tier-mod" value="${esc(t.modifier)}" placeholder="prose: face and posture" />
+    ${t.custom ? '<span class="tag bad-tag" title="SillyTavern cannot classify this label">custom</span>' : ""}
+    <button class="btn btn-ghost map-tier-up" type="button" title="Lower intensity">↑</button>
+    <button class="btn btn-ghost map-tier-down" type="button" title="Higher intensity">↓</button>
+    <button class="btn btn-ghost map-tier-del" type="button" title="Delete tier">✕</button>
+  </div>`;
+}
+
+function renderMap() {
+  const list = $("map-list");
+  if (!mapCache.length) {
+    list.innerHTML = '<p class="muted small">The map is empty. Add an axis, or reset to the shipped default.</p>';
+    return;
+  }
+  list.innerHTML = mapCache.map((a) => `
+    <div class="map-axis" data-axis="${a.id}">
+      <div class="map-axis-head">
+        <input class="map-axis-label" value="${esc(a.label)}" title="Axis name" />
+        <label class="map-graded muted small" title="Is this a real intensity ladder?">
+          <input type="checkbox" class="map-axis-graded" ${a.graded ? "checked" : ""} /> graded
+        </label>
+        <span class="muted small">${a.tiers.length} tier${a.tiers.length === 1 ? "" : "s"}</span>
+        <button class="btn btn-ghost map-axis-del" type="button" title="Delete axis and its tiers">✕</button>
+      </div>
+      <div class="map-tiers">${a.tiers.map((t) => mapTierRow(t, a.graded)).join("")}</div>
+      <div class="map-add-tier">
+        <input class="map-new-label" placeholder="new tier label (e.g. fury)" />
+        <input class="map-new-mod" placeholder="prose: face and posture" />
+        <button class="btn map-tier-add" type="button">Add tier</button>
+      </div>
+    </div>`).join("");
+  wireMapHandlers();
+}
+
+async function mapCall(path, opts) {
+  const res = await api(path, opts);
+  if (res.axes) { mapCache = res.axes; renderMap(); }
+  return res;
+}
+
+function wireMapHandlers() {
+  const list = $("map-list");
+  list.querySelectorAll(".map-axis").forEach((el) => {
+    const id = el.dataset.axis;
+    const save = async (body) => {
+      try { await mapCall(`/api/emotion-map/axes/${id}`, { method: "PATCH", body: JSON.stringify(body) }); msg($("map-msg"), "Saved.", "ok"); }
+      catch (e) { msg($("map-msg"), e.message, "bad"); }
+    };
+    // commit on blur/Enter rather than per keystroke — one request per edit, not per letter
+    const lbl = el.querySelector(".map-axis-label");
+    lbl.addEventListener("change", () => save({ label: lbl.value.trim() }));
+    el.querySelector(".map-axis-graded").addEventListener("change", (ev) => save({ graded: ev.target.checked }));
+    el.querySelector(".map-axis-del").addEventListener("click", async () => {
+      const a = mapCache.find((x) => String(x.id) === id);
+      const n = a ? a.tiers.length : 0;
+      if (!confirm(`Delete the "${a ? a.label : "this"}" axis and its ${n} tier${n === 1 ? "" : "s"}?\n\nPoses already rendered are kept — they just move to "Ungrouped".`)) return;
+      try { await mapCall(`/api/emotion-map/axes/${id}`, { method: "DELETE" }); msg($("map-msg"), "Axis deleted.", "ok"); }
+      catch (e) { msg($("map-msg"), e.message, "bad"); }
+    });
+    el.querySelector(".map-tier-add").addEventListener("click", async () => {
+      const label = el.querySelector(".map-new-label").value.trim();
+      if (!label) { msg($("map-msg"), "Give the tier a label.", "bad"); return; }
+      try {
+        await mapCall("/api/emotion-map/tiers", {
+          method: "POST",
+          body: JSON.stringify({ axis_id: Number(id), label, modifier: el.querySelector(".map-new-mod").value.trim() }),
+        });
+        msg($("map-msg"), `Added ${label}.`, "ok");
+      } catch (e) { msg($("map-msg"), e.message, "bad"); }
+    });
+  });
+
+  list.querySelectorAll(".map-tier").forEach((el) => {
+    const id = el.dataset.tier;
+    const patch = async (body) => {
+      try { await mapCall(`/api/emotion-map/tiers/${id}`, { method: "PATCH", body: JSON.stringify(body) }); msg($("map-msg"), "Saved.", "ok"); }
+      catch (e) { msg($("map-msg"), e.message, "bad"); }
+    };
+    const lbl = el.querySelector(".map-tier-label");
+    const mod = el.querySelector(".map-tier-mod");
+    lbl.addEventListener("change", () => patch({ label: lbl.value.trim() }));
+    mod.addEventListener("change", () => patch({ modifier: mod.value }));
+    const cur = mapCache.flatMap((a) => a.tiers).find((t) => String(t.id) === id);
+    const move = async (dir) => {
+      try { await mapCall(`/api/emotion-map/tiers/${id}/move?direction=${dir}`, { method: "POST" }); }
+      catch (e) { msg($("map-msg"), e.message, "bad"); }
+    };
+    el.querySelector(".map-tier-up").addEventListener("click", () => move("up"));
+    el.querySelector(".map-tier-down").addEventListener("click", () => move("down"));
+    el.querySelector(".map-tier-del").addEventListener("click", async () => {
+      const warn = cur && !cur.custom
+        ? `\n\n"${cur.label}" is one of SillyTavern's own 28 labels — ST's classifier can still ask for it, and a missing sprite falls back to neutral.`
+        : "";
+      if (!confirm(`Delete the "${cur ? cur.label : "this"}" tier?${warn}`)) return;
+      try { await mapCall(`/api/emotion-map/tiers/${id}`, { method: "DELETE" }); msg($("map-msg"), "Tier deleted.", "ok"); }
+      catch (e) { msg($("map-msg"), e.message, "bad"); }
+    });
+  });
+}
+
+async function openMap() {
+  msg($("map-msg"), "");
+  $("map-modal").hidden = false;
+  $("map-list").innerHTML = '<p class="muted small">Loading…</p>';
+  try {
+    mapCache = (await api("/api/emotion-map")).axes;
+    renderMap();
+  } catch (e) { $("map-list").innerHTML = `<p class="bad">${esc(e.message)}</p>`; }
 }
 
 function selectPose(id) {
@@ -1407,6 +1563,33 @@ $("poses-generate-all").addEventListener("click", posesGenerateAll);
 $("poses-add").addEventListener("click", addPose);
 $("poses-preset-starter").addEventListener("click", () => posesPreset("starter"));
 $("poses-preset-expr").addEventListener("click", () => posesPreset("expressions"));
+$("poses-preset-tiered").addEventListener("click", () => posesPreset("expressions-tiered"));
+
+$("poses-map-btn").addEventListener("click", openMap);
+$("map-close").addEventListener("click", async () => {
+  $("map-modal").hidden = true;
+  await loadPoses();   // an edited map changes grouping + labels, so re-read the grid
+});
+$("map-modal").addEventListener("click", (e) => { if (e.target === $("map-modal")) $("map-close").click(); });
+$("map-axis-add").addEventListener("click", async () => {
+  const label = $("map-axis-label").value.trim();
+  if (!label) { msg($("map-msg"), "Name the axis first.", "bad"); return; }
+  try {
+    await mapCall("/api/emotion-map/axes", {
+      method: "POST",
+      body: JSON.stringify({ label, graded: $("map-axis-graded").value === "1" }),
+    });
+    $("map-axis-label").value = "";
+    msg($("map-msg"), `Added ${label}.`, "ok");
+  } catch (e) { msg($("map-msg"), e.message, "bad"); }
+});
+$("map-reset").addEventListener("click", async () => {
+  if (!confirm("Discard every edit and restore the shipped emotion map?\n\nPoses you have already created are kept — only the map changes.")) return;
+  try {
+    const r = await mapCall("/api/emotion-map/reset", { method: "POST" });
+    msg($("map-msg"), `Restored the default map (${r.tiers} tiers).`, "ok");
+  } catch (e) { msg($("map-msg"), e.message, "bad"); }
+});
 $("pose-ed-close").addEventListener("click", closePoseEditor);
 $("pose-ed-save").addEventListener("click", () => savePose(false));
 $("pose-ed-regen").addEventListener("click", () => savePose(true));

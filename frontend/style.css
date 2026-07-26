@@ -236,6 +236,22 @@ body.no-scroll { overflow: hidden; }
 .lib-row:last-child { border-bottom: none; }
 .lib-main { flex: 1; min-width: 0; font-size: 13px; }
 
+/* ---------- emotion map editor (Phase H1a) ---------- */
+.map-axis { border-bottom: 1px solid var(--line); padding: 10px 12px; }
+.map-axis:last-child { border-bottom: none; }
+.map-axis-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+.map-axis-head .map-axis-label { flex: 1; font-weight: 600; }
+.map-graded { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+.map-tiers { padding-left: 10px; border-left: 2px solid var(--line); }
+.map-tier { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+.map-tier-pos { width: 14px; flex: none; text-align: right; }
+.map-tier-label { width: 130px; flex: none; }
+.map-tier-mod { flex: 1; min-width: 0; }
+.map-tier .btn, .map-axis-head .btn { padding: 2px 8px; }
+.map-add-tier { display: flex; gap: 6px; margin: 8px 0 2px 12px; }
+.map-add-tier .map-new-label { width: 130px; flex: none; }
+.map-add-tier .map-new-mod { flex: 1; min-width: 0; }
+
 /* misc */
 dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; }
 dt { color: var(--text-dim); } dd { margin: 0; word-break: break-word; }
@@ -277,6 +293,14 @@ code { background: var(--bg-raised); padding: 1px 5px; border-radius: 4px; font-
   .poses-editor { position: sticky; top: 16px; }
 }
 .poses-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 10px; }
+/* Grouped by emotion axis (Phase H1a): the outer grid becomes a single column of
+   groups, each holding its own card grid, so tiers read left-to-right as rising
+   intensity within one axis. */
+.poses-grid:has(.pose-group) { display: block; }
+.poses-grid-inner { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 10px; }
+.pose-group { margin-bottom: 18px; }
+.pose-group-head { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; }
+.pose-group-title { font-size: 13px; font-weight: 600; color: var(--text); }
 .pose-card { padding: 0; border: 1px solid var(--line); border-radius: var(--radius);
   overflow: hidden; cursor: pointer; background: var(--bg-panel); text-align: left; }
 .pose-card:hover { border-color: var(--accent); }

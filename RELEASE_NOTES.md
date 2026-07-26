@@ -1,28 +1,61 @@
-# v0.8.1 — Base-model neutrality
+# v0.8.2 — The emotion map
 
-A small follow-up to [v0.8.0](https://github.com/rhamblen/persona-forge/releases/tag/v0.8.0).
-The project isn't committed to a single checkpoint family, so nothing in the concept-LoRA work
-should read as if it is.
+**Phase H1a.** Emotion is two dimensions, not one: *which* emotion (**axis**) and *how much*
+(**tier**). This release adds that structure — and makes it yours to change.
 
-## Changed
-- The library's **Base model** field is relabelled — *"which checkpoint family it was trained
-  for"* — with a broader placeholder (`sdxl, sd1.5, pony, illustrious`) instead of naming one
-  model. It was always free text capable of holding entries for several families; the copy just
-  didn't say so.
-- Documentation and code comments no longer treat one checkpoint as the assumed target.
+## The happy accident
 
-## No behaviour change
-The 0.8.0 stack was already model-agnostic — `base_model` is free text per library entry and the
-checkpoint is per prompt version, so nothing assumed a family. This release corrects wording, not
-logic. Your library and any saved stacks are unaffected.
+SillyTavern's 28 expression labels are the GoEmotions set, and several already come graded:
 
-## Still open
-**Concept-LoRA sourcing is deliberately deferred** rather than pinned to a checkpoint family. Once
-the picture settles, the natural refinement is to surface or filter library entries against the
-current version's checkpoint, instead of leaving compatibility to the eye. See the open decisions
-in `PROJECT_PLAN.md` and `docs/emotion-depth.md`.
+- annoyance → **anger** → *fury*
+- disappointment → **sadness** → **grief** → *despair*
+- amusement → **joy** → **excitement** → *elation*
 
-**Image:** `ghcr.io/rhamblen/persona-forge:0.8.1`
+So grouping the 28 by axis gives you most of the intensity ladder for free. Only the top tiers
+are new — 7 of them: **fury, terror, despair, elation, devotion, revulsion, humiliation**. The
+28 stay the baseline and the export target; tiers are purely additive.
+
+## It's a default, not a vocabulary
+
+The shipped map is a starting point. Everything is editable, at every level:
+
+- **Axes** — add your own (Exhaustion, Resolve, whatever your cast needs), rename, delete, and
+  mark whether they're a real intensity ladder.
+- **Tiers** — add, relabel, reorder along the ladder, delete, and rewrite the prose that drives
+  the render.
+- **Reset to default** whenever you want the shipped map back.
+
+A stoic character doesn't need a rage tier; a monster may need axes no human has. Open
+**Emotion map…** on the Poses tab.
+
+## Added
+- **Grouped poses grid** — poses now render grouped by axis with tiers in rising-intensity
+  order, each group showing **done/total**. That's the real point: the baseline review has to
+  answer *"which emotion is this persona weak at?"*, and an alphabetical grid of 28 can't.
+- **"+ intensity tiers" preset** — the 28 plus the graded top tiers, in one click.
+- Prose modifiers that describe **posture as well as face**. Rage and despair are body
+  language; a face-only repaint can't render them, which is exactly why this pipeline trains a
+  per-character LoRA.
+
+## Notes
+- **The map is authoritative.** Poses resolve against the current map by name, so renaming an
+  axis or reordering a ladder re-groups the grid at once rather than showing whatever was true
+  when the pose was created. A pose whose label has left the map keeps its last grouping.
+- **`graded` is honest.** Anger and Sadness are ladders. Cognition ("confusion → surprise") is
+  not — those axes are groupings, and they say so. Later enrichment will only offer "hone the
+  intensity" where an intensity actually exists.
+- **Custom tiers are flagged.** SillyTavern's classifier can never emit `fury` — custom labels
+  need the planned state engine, or a manual trigger, to ever appear. Whether a label is one of
+  ST's own 28 is a fixed external contract, tracked separately from your editable map.
+- Deleting a tier or axis never touches rendered images — those poses just move to "Ungrouped".
+- Tier labels must be unique: they become sprite filenames, and a clash would silently overwrite
+  an export.
+
+## Upgrade notes
+Automatic. The map seeds on first boot, and existing poses are tagged with their axis by name.
+An edited map is never overwritten by a later start.
+
+**Image:** `ghcr.io/rhamblen/persona-forge:0.8.2`
 
 ## Upgrading
 No compose changes. Pull and restart:

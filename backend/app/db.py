@@ -180,6 +180,40 @@ CREATE TABLE IF NOT EXISTS concept_loras (
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_concept_loras_file ON concept_loras(filename);
+
+-- Phase H1a (0.8.2): the emotion map — axes (*which* emotion) × tiers (*how much*).
+-- Seeded from the shipped default in main.py on first boot, then fully editable: the
+-- default is a starting point, not a fixed vocabulary. Stored as two tables rather than
+-- a JSON blob so axes and tiers get stable ids for rename/reorder/delete, and so a tier
+-- label can carry a UNIQUE constraint (it becomes a sprite filename, so collisions
+-- would silently overwrite an export).
+--
+-- `graded` marks an axis that is a real intensity ladder (annoyance→anger→fury) as
+-- opposed to a grouping of unrelated states (confusion/curiosity/surprise). Later
+-- enrichment should only offer "hone the intensity" on graded axes.
+CREATE TABLE IF NOT EXISTS emotion_axes (
+    id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    axis     TEXT NOT NULL UNIQUE,              -- slug, e.g. 'anger'
+    label    TEXT NOT NULL,                     -- display, e.g. 'Anger'
+    position INTEGER NOT NULL DEFAULT 0,
+    graded   INTEGER NOT NULL DEFAULT 1
+);
+
+-- `label` is the SillyTavern expression / sprite filename stem, hence UNIQUE.
+-- `builtin` = one of ST's own 28 GoEmotions labels, so the UI can warn before removing
+-- one (ST's classifier can still emit it; a missing sprite falls back to neutral). Its
+-- inverse — a "custom" tier ST will never classify, needing the Phase H2 state engine to
+-- ever fire — is derived rather than stored, so the two can't drift apart.
+CREATE TABLE IF NOT EXISTS emotion_tiers (
+    id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    axis_id  INTEGER NOT NULL REFERENCES emotion_axes(id) ON DELETE CASCADE,
+    label    TEXT NOT NULL UNIQUE,
+    position INTEGER NOT NULL DEFAULT 0,        -- 1-based tier within the axis
+    modifier TEXT NOT NULL DEFAULT '',          -- prose prompt suffix (face AND posture)
+    builtin  INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_emotion_tiers_axis ON emotion_tiers(axis_id, position);
 """
 
 
@@ -220,6 +254,11 @@ def init_db() -> None:
             conn.execute("ALTER TABLE prompt_versions ADD COLUMN style_lora_strength REAL NOT NULL DEFAULT 1.0")
         if "lora_stack_json" not in vcols:  # pre-0.8.0
             conn.execute("ALTER TABLE prompt_versions ADD COLUMN lora_stack_json TEXT NOT NULL DEFAULT '[]'")
+
+        pcols = {r["name"] for r in conn.execute("PRAGMA table_info(poses)")}
+        if "axis" not in pcols:  # pre-0.8.2 — grouping the grid by emotion axis
+            conn.execute("ALTER TABLE poses ADD COLUMN axis TEXT NOT NULL DEFAULT ''")
+            conn.execute("ALTER TABLE poses ADD COLUMN tier INTEGER NOT NULL DEFAULT 0")
 
 
 def row_to_dict(row: sqlite3.Row | None) -> dict | None:

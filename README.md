@@ -125,9 +125,12 @@ Prompt Studio, the Dataset builder, **per-character LoRA training** (validated) 
 **Pose / expression studio with SillyTavern sprite export** are all working, followed by
 hardening through **v0.7.x**. **v0.8.0 starts Phase H — emotional depth**, beginning with
 the **concept LoRA stack**: overlay third-party pose/gesture LoRAs on top of your own
-character LoRA to reach postures it can't produce alone. Still ahead in Phase H are
-emotion axes + intensity tiers, per-emotion dataset enrichment, and selective sprite
-rebuild — see [docs/emotion-depth.md](docs/emotion-depth.md). **Character Studio** (the
+character LoRA to reach postures it can't produce alone, and **v0.8.2 adds the emotion
+map** — expression sprites organised as *axes* (which emotion) × *intensity tiers* (how
+much), with the poses grid grouped so a weak emotion is visible at a glance. The shipped
+map is a default: every axis and tier is editable. Still ahead in Phase H are per-emotion
+dataset enrichment and selective sprite rebuild — see
+[docs/emotion-depth.md](docs/emotion-depth.md). **Character Studio** (the
 plain-language character-sheet front door that produces the character *card*, not just the
 sprites) follows at 0.9. See the roadmap in [PROJECT_PLAN.md](PROJECT_PLAN.md) and the
 release history in [CHANGELOG.md](CHANGELOG.md).

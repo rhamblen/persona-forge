@@ -9,6 +9,54 @@ Every version below is a **published GitHub Release** with a matching
 
 ---
 
+## [0.8.2] — 2026-07-26
+
+**The emotion map — axes × intensity tiers, fully editable.** (Phase H1a.)
+
+Emotion is two dimensions, not one: *which* emotion (**axis**) and *how much* (**tier**).
+SillyTavern's 28 labels are the GoEmotions set and several already come graded
+(annoyance→anger, disappointment→sadness→grief), so grouping them by axis yields most of
+the ladder for free — only the top tiers are new. The shipped map is a **default, not a
+vocabulary**: every axis and tier can be renamed, reordered, added or deleted.
+
+### Added
+- **Emotion map** (`emotion_axes` + `emotion_tiers`, seeded on first boot): 10 axes over
+  35 tiers — the 28 ST labels regrouped, plus 7 new top tiers (**fury, terror, despair,
+  elation, devotion, revulsion, humiliation**).
+- **Full CRUD** at `/api/emotion-map` — add/rename/regrade/delete axes, add/relabel/
+  reorder/delete tiers and rewrite their prose modifiers, plus **reset to default**.
+  Tier reordering is a dedicated swap endpoint that renumbers the axis 1..N, because
+  writing a raw position creates ties and makes "move up" depend on row id.
+- **Poses grid grouped by axis**, tiers in rising-intensity order, each group showing
+  **done/total**. This is the point of the grouping: the baseline review has to answer
+  *"which emotion is this persona weak at?"*, and an alphabetical grid can't.
+- **"+ intensity tiers" preset** (`expressions-tiered`) — the 28 plus the graded top tiers.
+- `poses.axis` / `poses.tier`, backfilled by name on boot for existing poses.
+
+### Changed
+- `EXPRESSIONS_28` and the pose presets are now **derived from the map** rather than
+  hand-listed, so they can't drift from it. `_sprite_stem` keeps any map label verbatim as
+  the export filename, so a custom tier exports as `fury.png` exactly like `anger.png`.
+- **Prose modifiers describe posture as well as face** — rage and despair are body
+  language, and a face-only repaint can't render them.
+
+### Notes
+- **The map is authoritative; a pose's stored axis/tier is only a fallback.** Poses resolve
+  against the current map by name on read, so renaming an axis or reordering a ladder
+  re-groups the grid immediately instead of showing values captured at creation time. A
+  pose whose label has since left the map keeps its last known grouping.
+- `graded` marks a real intensity ladder. Cognition / Composure / Other are honest
+  groupings, not ladders — "confusion → surprise" is not a progression. Later enrichment
+  should only offer "hone the intensity" on graded axes.
+- **Custom tiers are marked as such**: SillyTavern's own classifier can never emit them, so
+  they need the Phase H2 state engine (or a manual trigger) to ever appear. Whether a label
+  is one of ST's 28 is a fixed external contract, tracked separately from the editable map.
+- Deleting a tier or axis leaves rendered poses alone — they simply group under
+  "Ungrouped". Tier labels are UNIQUE because they become sprite filenames.
+- **Verified** against a live ComfyUI: seeding + idempotent reseed, migration, the full CRUD
+  surface with its 409/404/400 cases, reorder with boundary no-ops, reset, grid grouping,
+  and the map→grid propagation, driven in a browser.
+
 ## [0.8.1] — 2026-07-26
 
 **Base-model neutrality.** (Phase H.) The project isn't committed to a single checkpoint

@@ -504,7 +504,9 @@
                   <button class="btn btn-primary" id="poses-generate-all">Generate all</button>
                   <button class="btn" id="poses-add">+ Add pose</button>
                   <button class="chip" id="poses-preset-starter" title="Add a starter set of body poses">Starter set</button>
-                  <button class="chip" id="poses-preset-expr" title="Add the 28 SillyTavern expressions">28 expressions</button>
+                  <button class="chip" id="poses-preset-expr" title="Add SillyTavern's 28 expression labels">28 expressions</button>
+                  <button class="chip" id="poses-preset-tiered" title="The 28 plus the graded top tiers (fury, terror, despair…)">+ intensity tiers</button>
+                  <button class="chip" id="poses-map-btn" title="Edit the emotion axes and tiers">Emotion map…</button>
                   <span class="ds-genstate muted small" id="poses-genstate"></span>
                 </div>
               </div>
@@ -670,6 +672,53 @@
       <p class="hint" id="lib-msg"></p>
       <div class="actions">
         <button class="btn" id="lib-close" type="button">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- emotion map editor (Phase H1a) — axes × intensity tiers -->
+  <div class="modal-backdrop" id="map-modal" hidden>
+    <div class="modal modal-wide">
+      <h2>Emotion map</h2>
+      <p class="muted small">
+        Emotion is two dimensions: <strong>which</strong> emotion (axis) and <strong>how much</strong>
+        (tier). The shipped map groups SillyTavern's 28 labels by axis — several are already graded
+        (annoyance → anger) — and adds the missing top tiers. <strong>It is only a starting point:
+        rename, reorder, add or delete anything.</strong>
+        A tier's label is its sprite filename; its prose note drives the render and should describe
+        <em>posture as well as face</em>, since rage and despair are body language.
+      </p>
+      <p class="muted small">
+        <span class="tag">graded</span> marks a real intensity ladder.
+        <span class="tag bad-tag">custom</span> marks a label SillyTavern's own classifier can never
+        emit — it needs the planned state engine, or a manual trigger, to ever appear.
+      </p>
+
+      <div id="map-list" class="lib-list"></div>
+
+      <details class="gen-settings">
+        <summary>Add an axis</summary>
+        <div class="field-row">
+          <label class="field">
+            <span class="field-label">Axis name</span>
+            <input id="map-axis-label" placeholder="e.g. Exhaustion" />
+          </label>
+          <label class="field field-narrow">
+            <span class="field-label">Graded <em>an intensity ladder?</em></span>
+            <select id="map-axis-graded">
+              <option value="1">yes</option>
+              <option value="0">no</option>
+            </select>
+          </label>
+          <button class="btn" id="map-axis-add" type="button">Add axis</button>
+        </div>
+      </details>
+
+      <p class="hint" id="map-msg"></p>
+      <div class="actions">
+        <button class="btn btn-ghost" id="map-reset" type="button"
+                title="Discard all edits and restore the shipped default">Reset to default</button>
+        <button class="btn" id="map-close" type="button">Close</button>
       </div>
     </div>
   </div>

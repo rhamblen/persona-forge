@@ -62,6 +62,13 @@ intensity yields most of the ladder for free — only the top tiers are missing:
 
 Consequences:
 
+> **Shipped 0.8.2 — and the table below is only the default.** The map lives in the DB
+> (`emotion_axes` / `emotion_tiers`), seeded from this table on first boot and editable at
+> every level: add or delete axes, relabel and reorder tiers, rewrite the prose, reset to
+> default. A stoic character needs no rage tier; a monster may need axes no human has.
+> Axes also carry `graded`, marking the ones that are a *real* intensity ladder — Cognition
+> and Composure below are groupings, not progressions, and say so.
+
 - **The 28 stay the baseline and the export target.** Nothing about today's Phase D
   changes; tiers are *additive*.
 - **A full ladder is ~6–8 new sprites**, not a new set of 28. Cheap.
@@ -386,7 +393,7 @@ if enrichment never ships.
 
 | Stage | Scope | When |
 |---|---|---|
-| **H1a** | Axis/tier map + custom tier labels, editable per project; **baseline grid grouped by axis** so weakness is visible (§2.2) | next phase |
+| **H1a** | Axis/tier map + custom tier labels, fully editable; **baseline grid grouped by axis** so weakness is visible (§2.2) | ✅ **shipped 0.8.2** |
 | **H1b** | **LoRA stack + concept-LoRA library** (§2.4) — chained core `LoraLoader`s, per-entry weights, trigger words, compatibility. *Independently useful: better poses from day one, no enrichment required.* | ✅ **shipped 0.8.0** |
 | **H1c** | Dataset layers + `mode="emotion"` enrichment batches, behind the **baseline gate** (§2.2). Absorbs the editable-examples backlog item. | next phase |
 | **H1d** | `lora_builds` versioning + layer-selected from-scratch training + rollback | next phase |

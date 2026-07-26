@@ -1,5 +1,15 @@
 # AI Context — cold-start orientation
 
+> **2026-07-26 — v0.8.2: the emotion map (H1a).** `emotion_axes` + `emotion_tiers`, seeded
+> from `DEFAULT_EMOTION_AXES` on first boot and **fully editable** (`/api/emotion-map` CRUD +
+> reset; tier reorder is a swap endpoint that renumbers 1..N). 10 axes / 35 tiers = ST's 28
+> regrouped + 7 custom top tiers. `EXPRESSIONS_28`, `presets()` and `_sprite_stem` are now all
+> **derived from the map** — no hand-maintained lists. `poses.axis`/`poses.tier` added and
+> backfilled by name, but **the map is authoritative**: `poses_list` re-resolves each pose
+> against the current map by name, so an edited map re-groups the grid immediately.
+> `_ST_BUILTIN_28` is a fixed external contract (what ST's classifier can emit), deliberately
+> separate from the editable map; `custom` is derived as `not builtin`, never stored.
+
 > **2026-07-26 — v0.8.0 starts Phase H (emotional depth).** Design lives in
 > `docs/emotion-depth.md`; read it before touching LoRA/dataset/pose code. Shipped in 0.8.0:
 > the **concept LoRA stack** (H1b) — `prompt_versions.lora_stack_json` + a `concept_loras`
@@ -105,6 +115,11 @@ LAN; no Claude/Anthropic in the runtime loop.
   /api/concept-loras/{id}`. Global (not per project). List annotates each row with
   `available` (whether ComfyUI still sees the file). The per-version *stack* is not here —
   it rides on the prompt version as `lora_stack_json`.
+- **Emotion map (0.8.2):** `GET /api/emotion-map`; `POST/PATCH/DELETE
+  /api/emotion-map/axes[/{id}]`; `POST/PATCH/DELETE /api/emotion-map/tiers[/{id}]`;
+  `POST /api/emotion-map/tiers/{id}/move?direction=up|down`; `POST /api/emotion-map/reset`.
+  Every mutation returns the whole map, so the UI re-renders from the server's answer.
+  `GET /api/projects/{id}/poses` now also returns `axes` (per-axis done/total) for grouping.
 - **AI assistant:** `GET /api/ai/status` (reachable/loaded), `POST /api/ai/warm`,
   `/api/ai/unload`, `/api/ai/suggest-prompt` (`{instruction, mode: replace|modify, character, style, negative}`).
 - **Container control:** `GET /api/containers/status`, `POST /api/containers/{key}/start`,
@@ -308,7 +323,14 @@ LAN; no Claude/Anthropic in the runtime loop.
   live ComfyUI 0.28.0** (graphs, CRUD, versioning/rollback, guard, browser interactions); no image
   rendered as part of that. Note `logs.info(category=...)` collides with the logger's own first
   param — pass `kind=` instead.
-- **Remaining:** rest of **Phase H1** (axes×tiers, dataset layers + emotion enrichment behind the
+- **0.8.1:** base-model neutrality — the concept-LoRA work no longer reads as if one checkpoint
+  family is the target (wording only; `base_model` was always free text per entry).
+- **0.8.2:** **Phase H1a — the emotion map.** See the header note. Key design calls: the map is
+  DB-backed and editable (the shipped table is a *default*, not a vocabulary); `graded` separates
+  real intensity ladders from mere groupings; the map is authoritative over `poses.axis/tier`;
+  tier labels are UNIQUE because they are sprite filenames; reorder is a swap+renumber, not a
+  raw position write (which would create ties broken by row id).
+- **Remaining:** rest of **Phase H1** (dataset layers + emotion enrichment behind the
   baseline gate, `lora_builds` versioning, per-axis selective rebuild — see `docs/emotion-depth.md`)
   · Character Studio at **0.9** · 1.0 release. The **dataset side of the weak-LoRA fix is now
   complete** (0.7.2 pose + 0.7.3 framing/expression + 0.7.6 targeting/variety).

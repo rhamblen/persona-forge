@@ -83,6 +83,8 @@ async def _startup() -> None:
     try:
         db.init_db()
         logs.info("boot", "database ready", path=str(db.DB_PATH))
+        seed_emotion_map()   # first boot only; an edited map is never overwritten
+        backfill_pose_axes()
     except Exception as exc:  # noqa: BLE001
         logs.error("boot", f"database init failed: {exc}")
         raise
@@ -1761,18 +1763,196 @@ STARTER_POSES = [
     ("Walking", "walking forward, mid-stride, dynamic"),
 ]
 
-# The 28 SillyTavern expression sprites (the export target).
-EXPRESSIONS_28 = [
+# --------------------------------------------------------------------------- #
+# Emotion axes × intensity tiers (Phase H1a). See docs/emotion-depth.md.
+#
+# Emotion is two dimensions, not one: *which* emotion (axis) and *how much* (tier).
+# SillyTavern's 28 labels are the GoEmotions set, and several axes already come graded
+# — annoyance→anger, disappointment→sadness→grief — so grouping the 28 by axis yields
+# most of the ladder for free. Only the top tiers are new (`custom: True`), and they are
+# single lowercase words so `_sprite_stem` exports them verbatim, like the built-in 28.
+#
+# `graded` marks the axes that are a genuine intensity ladder. The rest (cognition,
+# composure, other) are groupings for the grid's benefit — honest about the fact that
+# "confusion → surprise" is not an intensity progression. Later enrichment stages should
+# only offer "hone the intensity" on graded axes.
+#
+# Modifiers are prose (project convention) and deliberately describe **posture as well as
+# face**: rage and despair are body language, and a face-only repaint can't render them —
+# which is the whole reason this pipeline trains a per-character LoRA.
+# --------------------------------------------------------------------------- #
+
+# SillyTavern's own 28 expression labels (the GoEmotions set). This is a **fixed external
+# contract**, not part of the editable map: it is what ST's classifier can emit and what
+# its sprite folder expects. The map may drop or regroup these freely — the flag only
+# tells the UI "ST knows this one", so a custom tier can be shown as needing the Phase H2
+# state engine to ever fire.
+_ST_BUILTIN_28 = frozenset({
     "admiration", "amusement", "anger", "annoyance", "approval", "caring", "confusion",
     "curiosity", "desire", "disappointment", "disapproval", "disgust", "embarrassment",
     "excitement", "fear", "gratitude", "grief", "joy", "love", "nervousness", "neutral",
     "optimism", "pride", "realization", "relief", "remorse", "sadness", "surprise",
+})
+
+DEFAULT_EMOTION_AXES: list[dict[str, Any]] = [
+    {"axis": "anger", "label": "Anger", "graded": True, "tiers": [
+        ("annoyance", "annoyed, slight frown, jaw tight, arms loosely folded, weight shifted to one hip", False),
+        ("anger", "angry, furrowed brow, jaw set, shoulders squared, fists at their sides", False),
+        ("fury", "furious, shouting, leaning forward aggressively, one fist clenched and raised", True),
+    ]},
+    {"axis": "fear", "label": "Fear", "graded": True, "tiers": [
+        ("nervousness", "nervous, worried eyes, hands fidgeting, shoulders drawn slightly inward", False),
+        ("fear", "afraid, wide eyes, leaning back, hands raised defensively", False),
+        ("terror", "terrified, screaming, recoiling, arms thrown up to shield the face", True),
+    ]},
+    {"axis": "sadness", "label": "Sadness", "graded": True, "tiers": [
+        ("disappointment", "disappointed, downcast eyes, faint frown, shoulders dropped", False),
+        ("sadness", "sad, teary eyes, head lowered, arms hanging limply", False),
+        ("grief", "grieving, crying openly, face buried in one hand, body curled inward", False),
+        ("despair", "in despair, hollow expression, slumped down, head bowed, arms slack", True),
+    ]},
+    {"axis": "joy", "label": "Joy", "graded": True, "tiers": [
+        ("amusement", "amused, small grin, eyebrows raised, relaxed easy posture", False),
+        ("joy", "joyful, bright smile, head up, open welcoming posture", False),
+        ("excitement", "excited, beaming, up on their toes, hands raised", False),
+        ("elation", "elated, laughing with head thrown back, arms flung wide, mid-celebration", True),
+    ]},
+    {"axis": "affection", "label": "Affection", "graded": True, "tiers": [
+        ("approval", "approving, small satisfied smile, a slight nod", False),
+        ("caring", "caring, warm gentle expression, reaching out with one hand", False),
+        ("admiration", "admiring, eyes bright and fixed, hands clasped together", False),
+        ("love", "loving, soft tender smile, leaning in close", False),
+        ("devotion", "devoted, gazing with total sincerity, one hand pressed over their heart", True),
+    ]},
+    {"axis": "disgust", "label": "Disgust", "graded": True, "tiers": [
+        ("disapproval", "disapproving, flat stare, lips pressed thin, arms crossed", False),
+        ("disgust", "disgusted, nose wrinkled, lip curled, leaning away", False),
+        ("revulsion", "revolted, recoiling hard, a hand clamped over the mouth, turning away", True),
+    ]},
+    {"axis": "shame", "label": "Shame", "graded": True, "tiers": [
+        ("embarrassment", "embarrassed, blushing, glancing away, one hand rubbing the back of the neck", False),
+        ("remorse", "remorseful, pained expression, head bowed, hands clasped", False),
+        ("humiliation", "humiliated, face burning, curled in on themselves, hiding their face", True),
+    ]},
+    {"axis": "cognition", "label": "Cognition", "graded": False, "tiers": [
+        ("confusion", "confused, brow knitted, head tilted, one hand half-raised in question", False),
+        ("curiosity", "curious, eyebrows lifted, leaning in with interest", False),
+        ("realization", "struck by a realization, eyes widening, straightening up", False),
+        ("surprise", "surprised, eyes wide, mouth open, drawing back sharply", False),
+    ]},
+    {"axis": "composure", "label": "Composure", "graded": False, "tiers": [
+        ("neutral", "neutral expression, calm, relaxed natural stance", False),
+        ("relief", "relieved, eyes closed, exhaling, shoulders finally dropping", False),
+        ("optimism", "optimistic, hopeful open expression, chin up, looking ahead", False),
+        ("pride", "proud, chin raised, confident smile, hands on hips", False),
+    ]},
+    {"axis": "other", "label": "Other", "graded": False, "tiers": [
+        ("desire", "wanting, intent half-lidded gaze, leaning subtly forward", False),
+        ("gratitude", "grateful, warm sincere smile, a small bow of the head", False),
+    ]},
 ]
 
-PRESETS = {
-    "starter": STARTER_POSES,
-    "expressions": [(e.capitalize(), f"{e} facial expression") for e in EXPRESSIONS_28],
-}
+
+def seed_emotion_map(force: bool = False) -> int:
+    """Write the shipped default into the DB. No-op if a map already exists.
+
+    The default is a *starting point*, not the vocabulary: everything below is editable
+    through /api/emotion-map, and `force` (the reset action) restores this baseline.
+    """
+    with db.connect() as conn:
+        if not force and conn.execute("SELECT 1 FROM emotion_axes LIMIT 1").fetchone():
+            return 0
+        conn.execute("DELETE FROM emotion_axes")   # tiers cascade
+        n = 0
+        for pos, group in enumerate(DEFAULT_EMOTION_AXES, start=1):
+            cur = conn.execute(
+                "INSERT INTO emotion_axes (axis, label, position, graded) VALUES (?, ?, ?, ?)",
+                (group["axis"], group["label"], pos, 1 if group["graded"] else 0),
+            )
+            axis_id = cur.lastrowid
+            for tier, (label, modifier, custom) in enumerate(group["tiers"], start=1):
+                # `custom` in the default table is a readability aid; the DB stores the
+                # authoritative fact — whether SillyTavern itself knows the label.
+                conn.execute(
+                    """INSERT INTO emotion_tiers (axis_id, label, position, modifier, builtin)
+                       VALUES (?, ?, ?, ?, ?)""",
+                    (axis_id, label, tier, modifier, 1 if label in _ST_BUILTIN_28 else 0),
+                )
+                n += 1
+    logs.info("boot", f"emotion map seeded from the shipped default ({n} tiers)", reset=force or None)
+    return n
+
+
+def backfill_pose_axes() -> int:
+    """Tag untagged poses with the axis/tier their name matches.
+
+    Poses created before 0.8.2 carry no axis, and so would all pile into 'Ungrouped'.
+    Runs on boot and after a map edit; only touches rows whose axis is still blank, so a
+    deliberately re-grouped pose is never clobbered.
+    """
+    idx = expression_index()
+    if not idx:
+        return 0
+    with db.connect() as conn:
+        rows = conn.execute("SELECT id, name FROM poses WHERE axis = ''").fetchall()
+        n = 0
+        for r in rows:
+            meta = idx.get((r["name"] or "").strip().lower())
+            if not meta:
+                continue
+            conn.execute("UPDATE poses SET axis = ?, tier = ? WHERE id = ?",
+                         (meta["axis"], meta["tier"], r["id"]))
+            n += 1
+    if n:
+        logs.info("boot", f"tagged {n} existing pose(s) with their emotion axis")
+    return n
+
+
+def emotion_map() -> list[dict[str, Any]]:
+    """The current map, nested axes -> tiers, in display order."""
+    with db.connect() as conn:
+        axes = conn.execute("SELECT * FROM emotion_axes ORDER BY position, id").fetchall()
+        tiers = conn.execute("SELECT * FROM emotion_tiers ORDER BY position, id").fetchall()
+    by_axis: dict[int, list[dict]] = {}
+    for t in tiers:
+        row = dict(t)
+        row["builtin"] = bool(row["builtin"])
+        row["custom"] = not row["builtin"]   # derived, never stored
+        by_axis.setdefault(t["axis_id"], []).append(row)
+    return [{**dict(a), "graded": bool(a["graded"]), "tiers": by_axis.get(a["id"], [])} for a in axes]
+
+
+def expression_index() -> dict[str, dict[str, Any]]:
+    """label -> {axis, tier, modifier, custom} — the lookup used when a pose is created."""
+    out: dict[str, dict[str, Any]] = {}
+    for group in emotion_map():
+        for t in group["tiers"]:
+            out[t["label"]] = {
+                "axis": group["axis"], "tier": t["position"],
+                "modifier": t["modifier"], "custom": bool(t["custom"]),
+            }
+    return out
+
+
+def expression_labels(include_custom: bool = True) -> list[str]:
+    """Every sprite label in the map, in axis/tier order.
+
+    `include_custom=False` gives the SillyTavern built-ins only — the labels ST's own
+    classifier can actually emit. Custom tiers (fury, terror, …) need the Phase H2 state
+    engine or a manual trigger to ever show up, so the two lists are not interchangeable.
+    """
+    return [t["label"] for g in emotion_map() for t in g["tiers"]
+            if include_custom or not t["custom"]]
+
+
+def presets() -> dict[str, list[tuple[str, str]]]:
+    """Pose presets. Built from the DB each call so an edited map takes effect at once."""
+    idx = expression_index()
+    return {
+        "starter": STARTER_POSES,
+        "expressions": [(e.capitalize(), idx[e]["modifier"]) for e in expression_labels(False)],
+        "expressions-tiered": [(e.capitalize(), idx[e]["modifier"]) for e in expression_labels(True)],
+    }
 
 
 def _pose_dict(row: Any) -> dict:
@@ -1898,7 +2078,37 @@ async def poses_list(project_id: int) -> dict:
         ).fetchall()
     poses = [_pose_dict(r) for r in rows]
     pending = sum(1 for p in poses if p["status"] == "pending")
+
+    # The map is authoritative, the stored axis/tier only a fallback: resolve each pose
+    # against the *current* map by name, so renaming an axis or reordering an intensity
+    # ladder re-groups the grid at once instead of leaving it on the values captured when
+    # the pose was created. Poses whose label has since left the map keep their last
+    # known grouping rather than silently jumping to "Ungrouped".
+    idx = expression_index()
+    for p in poses:
+        meta = idx.get((p["name"] or "").strip().lower())
+        if meta:
+            p["axis"], p["tier"] = meta["axis"], meta["tier"]
+
+    # Axis metadata + per-axis completion. This is what makes a weak axis visible: the
+    # baseline review is supposed to answer "which emotion is this persona bad at?", and
+    # an alphabetical grid can't.
+    groups = [{"axis": a["axis"], "label": a["label"], "position": a["position"],
+               "graded": a["graded"], "total": 0, "done": 0}
+              for a in emotion_map()]
+    by_axis = {g["axis"]: g for g in groups}
+    ungrouped = {"axis": "", "label": "Ungrouped", "position": 9999,
+                 "graded": False, "total": 0, "done": 0}
+    for p in poses:
+        g = by_axis.get(p.get("axis") or "", ungrouped)
+        g["total"] += 1
+        if p["status"] == "done":
+            g["done"] += 1
+    if ungrouped["total"]:
+        groups.append(ungrouped)
+
     return {"poses": poses, "generating": pending > 0,
+            "axes": [g for g in groups if g["total"]],
             "counts": {"total": len(poses), "pending": pending,
                        "done": sum(1 for p in poses if p["status"] == "done")}}
 
@@ -1915,13 +2125,205 @@ async def pose_add(project_id: int, body: PoseCreate) -> dict:
             raise HTTPException(404, "project not found")
         pos = conn.execute("SELECT COALESCE(MAX(position), 0) + 1 m FROM poses WHERE project_id = ?",
                            (project_id,)).fetchone()["m"]
+        # If the name matches a label in the emotion map, inherit its axis/tier so the
+        # pose lands in the right group — and its modifier, when none was supplied.
+        meta = expression_index().get(body.name.strip().lower(), {})
         cur = conn.execute(
-            "INSERT INTO poses (project_id, name, modifier, position) VALUES (?, ?, ?, ?)",
-            (project_id, body.name.strip(), body.modifier.strip(), pos),
+            "INSERT INTO poses (project_id, name, modifier, position, axis, tier) VALUES (?, ?, ?, ?, ?, ?)",
+            (project_id, body.name.strip(), body.modifier.strip() or meta.get("modifier", ""),
+             pos, meta.get("axis", ""), meta.get("tier", 0)),
         )
         row = conn.execute("SELECT * FROM poses WHERE id = ?", (cur.lastrowid,)).fetchone()
     logs.info("process", f"pose added: {body.name}", project_id=project_id, pose_id=cur.lastrowid)
     return _pose_dict(row)
+
+
+# --------------------------------------------------------------------------- #
+# emotion map CRUD (Phase H1a) — the shipped default is a starting point, not the
+# vocabulary. Axes and tiers are both editable: rename, reorder, add, delete, and
+# rewrite the prose modifier that drives the render.
+# --------------------------------------------------------------------------- #
+
+_SLUG_RE = re.compile(r"[^a-z0-9]+")
+
+
+def _slug(text: str) -> str:
+    return _SLUG_RE.sub("_", text.strip().lower()).strip("_")
+
+
+class AxisIn(BaseModel):
+    label: str = Field(min_length=1, max_length=40)
+    axis: str | None = None            # defaults to a slug of the label
+    graded: bool = True
+
+
+class AxisPatch(BaseModel):
+    label: str | None = None
+    graded: bool | None = None
+    position: int | None = None
+
+
+class TierIn(BaseModel):
+    axis_id: int
+    label: str = Field(min_length=1, max_length=40)
+    modifier: str = ""
+    position: int | None = None        # defaults to the end of the axis
+
+
+class TierPatch(BaseModel):
+    label: str | None = None
+    modifier: str | None = None
+    position: int | None = None
+    axis_id: int | None = None         # move a tier to a different axis
+
+
+@app.get("/api/emotion-map")
+async def emotion_map_get() -> dict:
+    m = emotion_map()
+    return {
+        "axes": m,
+        "counts": {
+            "axes": len(m),
+            "tiers": sum(len(a["tiers"]) for a in m),
+            "custom": sum(1 for a in m for t in a["tiers"] if t["custom"]),
+        },
+    }
+
+
+@app.post("/api/emotion-map/reset")
+async def emotion_map_reset() -> dict:
+    """Restore the shipped default, discarding every edit. Poses already created are
+    untouched — this only changes what future presets offer and how the grid groups."""
+    n = seed_emotion_map(force=True)
+    return {"reset": True, "tiers": n, "axes": emotion_map()}
+
+
+@app.post("/api/emotion-map/axes", status_code=201)
+async def axis_add(body: AxisIn) -> dict:
+    axis = _slug(body.axis or body.label)
+    if not axis:
+        raise HTTPException(400, "axis name must contain a letter or digit")
+    with db.connect() as conn:
+        if conn.execute("SELECT 1 FROM emotion_axes WHERE axis = ?", (axis,)).fetchone():
+            raise HTTPException(409, f"an axis '{axis}' already exists")
+        pos = conn.execute("SELECT COALESCE(MAX(position), 0) + 1 m FROM emotion_axes").fetchone()["m"]
+        conn.execute("INSERT INTO emotion_axes (axis, label, position, graded) VALUES (?, ?, ?, ?)",
+                     (axis, body.label.strip(), pos, 1 if body.graded else 0))
+    logs.info("process", f"emotion axis '{body.label}' added")
+    return {"axes": emotion_map()}
+
+
+@app.patch("/api/emotion-map/axes/{axis_id}")
+async def axis_update(axis_id: int, body: AxisPatch) -> dict:
+    fields = {k: v for k, v in body.model_dump().items() if v is not None}
+    if "graded" in fields:
+        fields["graded"] = 1 if fields["graded"] else 0
+    if not fields:
+        raise HTTPException(400, "nothing to update")
+    with db.connect() as conn:
+        if conn.execute("SELECT 1 FROM emotion_axes WHERE id = ?", (axis_id,)).fetchone() is None:
+            raise HTTPException(404, "axis not found")
+        sets = ", ".join(f"{k} = ?" for k in fields)
+        conn.execute(f"UPDATE emotion_axes SET {sets} WHERE id = ?", (*fields.values(), axis_id))
+    return {"axes": emotion_map()}
+
+
+@app.delete("/api/emotion-map/axes/{axis_id}")
+async def axis_delete(axis_id: int) -> dict:
+    """Remove an axis and its tiers. Existing poses keep their rendered images and their
+    `axis` string — they just group under 'Ungrouped' from here on."""
+    with db.connect() as conn:
+        row = conn.execute("SELECT * FROM emotion_axes WHERE id = ?", (axis_id,)).fetchone()
+        if row is None:
+            raise HTTPException(404, "axis not found")
+        n = conn.execute("SELECT COUNT(*) c FROM emotion_tiers WHERE axis_id = ?", (axis_id,)).fetchone()["c"]
+        conn.execute("DELETE FROM emotion_axes WHERE id = ?", (axis_id,))
+    logs.info("process", f"emotion axis '{row['label']}' deleted", tiers_removed=n)
+    return {"deleted": axis_id, "tiers_removed": n, "axes": emotion_map()}
+
+
+@app.post("/api/emotion-map/tiers", status_code=201)
+async def tier_add(body: TierIn) -> dict:
+    # the label becomes a sprite filename, so normalise it to a clean lowercase token
+    label = _slug(body.label)
+    if not label:
+        raise HTTPException(400, "tier label must contain a letter or digit")
+    with db.connect() as conn:
+        if conn.execute("SELECT 1 FROM emotion_axes WHERE id = ?", (body.axis_id,)).fetchone() is None:
+            raise HTTPException(404, "axis not found")
+        if conn.execute("SELECT 1 FROM emotion_tiers WHERE label = ?", (label,)).fetchone():
+            raise HTTPException(409, f"a tier '{label}' already exists — labels are sprite filenames")
+        pos = body.position or conn.execute(
+            "SELECT COALESCE(MAX(position), 0) + 1 m FROM emotion_tiers WHERE axis_id = ?",
+            (body.axis_id,)).fetchone()["m"]
+        conn.execute(
+            """INSERT INTO emotion_tiers (axis_id, label, position, modifier, builtin)
+               VALUES (?, ?, ?, ?, ?)""",
+            (body.axis_id, label, pos, body.modifier.strip(),
+             1 if label in _ST_BUILTIN_28 else 0))
+    logs.info("process", f"emotion tier '{label}' added")
+    return {"axes": emotion_map()}
+
+
+@app.patch("/api/emotion-map/tiers/{tier_id}")
+async def tier_update(tier_id: int, body: TierPatch) -> dict:
+    fields = {k: v for k, v in body.model_dump().items() if v is not None}
+    if "label" in fields:
+        fields["label"] = _slug(fields["label"])
+        if not fields["label"]:
+            raise HTTPException(400, "tier label must contain a letter or digit")
+        fields["builtin"] = 1 if fields["label"] in _ST_BUILTIN_28 else 0
+    if not fields:
+        raise HTTPException(400, "nothing to update")
+    with db.connect() as conn:
+        if conn.execute("SELECT 1 FROM emotion_tiers WHERE id = ?", (tier_id,)).fetchone() is None:
+            raise HTTPException(404, "tier not found")
+        if "label" in fields and conn.execute(
+                "SELECT 1 FROM emotion_tiers WHERE label = ? AND id != ?",
+                (fields["label"], tier_id)).fetchone():
+            raise HTTPException(409, f"a tier '{fields['label']}' already exists")
+        sets = ", ".join(f"{k} = ?" for k in fields)
+        conn.execute(f"UPDATE emotion_tiers SET {sets} WHERE id = ?", (*fields.values(), tier_id))
+    return {"axes": emotion_map()}
+
+
+@app.post("/api/emotion-map/tiers/{tier_id}/move")
+async def tier_move(tier_id: int, direction: str = "up") -> dict:
+    """Swap a tier with its neighbour, then renumber the axis 1..N.
+
+    A dedicated swap rather than a raw `position` write: setting a position directly
+    creates ties (two tiers claiming 2), and the resulting order then depends on row id,
+    which is not what "move up" should mean on an intensity ladder.
+    """
+    if direction not in ("up", "down"):
+        raise HTTPException(400, "direction must be 'up' or 'down'")
+    with db.connect() as conn:
+        row = conn.execute("SELECT * FROM emotion_tiers WHERE id = ?", (tier_id,)).fetchone()
+        if row is None:
+            raise HTTPException(404, "tier not found")
+        siblings = conn.execute(
+            "SELECT id FROM emotion_tiers WHERE axis_id = ? ORDER BY position, id",
+            (row["axis_id"],)).fetchall()
+        ids = [r["id"] for r in siblings]
+        i = ids.index(tier_id)
+        j = i - 1 if direction == "up" else i + 1
+        if 0 <= j < len(ids):
+            ids[i], ids[j] = ids[j], ids[i]
+        for pos, tid in enumerate(ids, start=1):
+            conn.execute("UPDATE emotion_tiers SET position = ? WHERE id = ?", (pos, tid))
+    return {"axes": emotion_map()}
+
+
+@app.delete("/api/emotion-map/tiers/{tier_id}")
+async def tier_delete(tier_id: int) -> dict:
+    with db.connect() as conn:
+        row = conn.execute("SELECT * FROM emotion_tiers WHERE id = ?", (tier_id,)).fetchone()
+        if row is None:
+            raise HTTPException(404, "tier not found")
+        conn.execute("DELETE FROM emotion_tiers WHERE id = ?", (tier_id,))
+    logs.info("process", f"emotion tier '{row['label']}' deleted",
+              was_builtin=bool(row["builtin"]) or None)
+    return {"deleted": tier_id, "was_builtin": bool(row["builtin"]), "axes": emotion_map()}
 
 
 class PresetRequest(BaseModel):
@@ -1932,9 +2334,11 @@ def _apply_preset(project_id: int, preset: str) -> int:
     """Add a preset's poses that don't already exist. Returns how many were added.
     Shared by the endpoint and the `lora_build` job handler. Raises on unknown preset /
     missing project."""
-    items = PRESETS.get(preset)
+    all_presets = presets()
+    items = all_presets.get(preset)
     if not items:
-        raise HTTPException(422, f"unknown preset '{preset}' (have: {list(PRESETS)})")
+        raise HTTPException(422, f"unknown preset '{preset}' (have: {list(all_presets)})")
+    idx = expression_index()
     with db.connect() as conn:
         if conn.execute("SELECT 1 FROM projects WHERE id = ?", (project_id,)).fetchone() is None:
             raise HTTPException(404, "project not found")
@@ -1946,8 +2350,12 @@ def _apply_preset(project_id: int, preset: str) -> int:
         for i, (name, modifier) in enumerate(items, start=1):
             if name in existing:
                 continue
-            conn.execute("INSERT INTO poses (project_id, name, modifier, position) VALUES (?, ?, ?, ?)",
-                         (project_id, name, modifier, base + i))
+            meta = idx.get(name.lower(), {})
+            conn.execute(
+                """INSERT INTO poses (project_id, name, modifier, position, axis, tier)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (project_id, name, modifier, base + i,
+                 meta.get("axis", ""), meta.get("tier", 0)))
             added += 1
     logs.info("process", f"pose preset '{preset}' applied: +{added}", project_id=project_id)
     return added
@@ -2125,16 +2533,19 @@ async def set_pose_lora(project_id: int, body: PoseLoraRequest) -> dict:
 # the build folder only — never auto-copied into ST (deliberate manual step).
 # --------------------------------------------------------------------------- #
 
-_EXPR_SET = set(EXPRESSIONS_28)
 _SPRITE_RE = re.compile(r"[^a-z0-9]+")
 _FOLDER_RE = re.compile(r"[^A-Za-z0-9 _-]+")
 
 
-def _sprite_stem(pose_name: str) -> str:
-    """The filename stem a pose exports under. An exact SillyTavern expression name
-    (e.g. 'joy') is kept verbatim so ST recognises it; anything else is slugified."""
+def _sprite_stem(pose_name: str, labels: set[str] | None = None) -> str:
+    """The filename stem a pose exports under. A label from the emotion map (e.g. 'joy',
+    or a custom tier like 'fury') is kept verbatim so SillyTavern can match it; anything
+    else is slugified.
+
+    Pass `labels` when exporting a whole set — otherwise this reads the map per pose.
+    """
     low = pose_name.strip().lower()
-    if low in _EXPR_SET:
+    if low in (labels if labels is not None else set(expression_labels())):
         return low
     return _SPRITE_RE.sub("_", low).strip("_") or "pose"
 
@@ -2250,8 +2661,9 @@ async def poses_export(project_id: int) -> dict:
     logs.info("process", f"exporting {len(poses)} pose(s) → transparent sprites in {out_path}",
               project_id=project_id, folder=out_path)
     queued, errors, used = 0, [], {}
+    sprite_labels = set(expression_labels())   # read the map once for the whole batch
     for p in poses:
-        stem = _sprite_stem(p["name"])
+        stem = _sprite_stem(p["name"], sprite_labels)
         seen = used.get(stem, 0)
         used[stem] = seen + 1
         if seen:  # two poses map to the same name — don't let them overwrite each other
