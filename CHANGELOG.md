@@ -9,6 +9,28 @@ Every version below is a **published GitHub Release** with a matching
 
 ---
 
+## [0.7.10] — 2026-07-26
+
+**A1111-style sampler controls in the Prompt Studio.** (Phase 7.)
+
+### Added
+- **"Generation settings" panel under the Studio form** — a collapsible block exposing
+  **Steps**, **CFG**, **Sampler**, and **Scheduler**, so you can tune the preview render the way
+  Automatic1111's *Steps* / *CFG* / *Sampling method* controls let you. Defaults match the
+  workflow (28 / 5.0 / `euler_ancestral` / `normal`), so leaving it collapsed changes nothing.
+- Inline tip that `euler_ancestral` peaks around 28 steps, and to pair `dpmpp_2m` with `karras`
+  for sharper detail from higher step counts.
+
+### Notes
+- **Frontend-only change.** The `base-character` / `base-character-lora` manifests and the
+  `/generate` endpoint already accepted these params — this just surfaces controls for them.
+- **Ephemeral by design.** The four settings affect the **current preview run only**; they are
+  deliberately kept out of the saved version (no schema change, not in the version diff). Persisting
+  them per version remains a possible future step.
+- Not yet verified against a live ComfyUI run.
+
+---
+
 ## [0.7.9] — 2026-07-26
 
 **Use an external style/detail LoRA in the Prompt Studio.** (Phase 7.)

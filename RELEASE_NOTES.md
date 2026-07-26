@@ -1,32 +1,29 @@
-# v0.7.9 — Style LoRAs in the Prompt Studio
+# v0.7.10 — Sampler controls in the Prompt Studio
 
-Phase 7. Apply an external style/detail LoRA on top of the checkpoint while you compose a persona.
+Phase 7. An Automatic1111-style set of sampler controls for the preview render, so you can dial in
+refinement without editing the workflow.
 
 ## Added
-- **Style LoRA picker in the Prompt Studio.** A new *Style LoRA* dropdown (populated from
-  ComfyUI's `loras` folder) plus a strength slider sit under the Checkpoint field. Pick one and
-  Generate renders the checkpoint **with that LoRA loaded**; leave it on *none* and nothing
-  changes — it's the same checkpoint-only render as before.
-- The choice is **saved per version** (`style_lora` + `style_lora_strength`), so it lives in the
-  append-only history, shows up in the version diff, and rolls back with everything else.
-- **Dataset generation honours it too** — when a version has a Style LoRA selected, the training
-  dataset is rendered through it, so the look you dialled in actually makes it into the trained
-  character LoRA instead of vanishing at build time.
+- **"Generation settings" panel** under the Studio form — a collapsible block with **Steps**,
+  **CFG**, **Sampler**, and **Scheduler**. These are the same knobs A1111 puts front-and-centre
+  (*Steps* / *CFG scale* / *Sampling method* / *Schedule type*). It starts collapsed and defaults to
+  the workflow's own values (28 / 5.0 / `euler_ancestral` / `normal`), so nothing changes until you
+  open it and reach for a control.
+- A one-line tip in the panel: `euler_ancestral` peaks around 28 steps, and pairing `dpmpp_2m` with
+  `karras` is the combo that actually rewards higher step counts with sharper detail.
 
 ## How it works
-- A new `base-character-lora` workflow loads the LoRA through a **full `LoraLoader`** (model **and**
-  CLIP), so text-encoder-side style LoRAs behave correctly. Studio and dataset generation upgrade
-  from `base-character` to `base-character-lora` automatically when a LoRA is set, and render
-  identically to before when none is. One strength drives both the model and CLIP sides.
-- This is distinct from the **Poses** tab's *character* LoRA (a model-only `LoraLoaderModelOnly`
-  patch of your own trained identity) — that path is unchanged.
+- Purely a **frontend** addition. The `base-character` and `base-character-lora` manifests already
+  declared `steps` / `cfg` / `sampler` / `scheduler`, and `POST /generate` already forwarded any
+  workflow params — this release just adds the UI controls that send them.
+- The settings are **ephemeral**: they apply to the **current preview run only** and are kept out of
+  `formValues()`, so they never touch the saved prompt version, the version diff, or rollback. No
+  database or schema change.
 
-## Changed
-- `POST /api/projects/{id}/generate` accepts optional `style_lora` / `style_lora_strength`.
-- `prompt_versions` gains `style_lora` (TEXT) and `style_lora_strength` (REAL) columns; older
-  databases are migrated automatically on boot (existing versions default to no LoRA).
+## Not yet verified
+- The controls are wired end-to-end in code but haven't been exercised against a live ComfyUI run.
 
-**Image:** `ghcr.io/rhamblen/persona-forge:0.7.9`
+**Image:** `ghcr.io/rhamblen/persona-forge:0.7.10`
 
 ## Upgrading
 No compose changes. Pull and restart:

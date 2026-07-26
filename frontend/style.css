@@ -109,6 +109,22 @@ textarea:focus, input:focus, select:focus { outline: none; border-color: var(--a
 
 .hint { min-height: 18px; margin: 10px 0 0; font-size: 12px; color: var(--text-dim); }
 .hint.ok { color: var(--ok); } .hint.bad { color: var(--bad); }
+.hint code { background: var(--bg-raised); border: 1px solid var(--line); border-radius: 4px;
+  padding: 0 4px; font-size: 11px; }
+
+/* collapsible generation settings */
+.gen-settings { border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--bg-panel); margin-bottom: 12px; }
+.gen-settings > summary { cursor: pointer; padding: 9px 12px; font-size: 13px; font-weight: 600;
+  color: var(--text); list-style: none; user-select: none; }
+.gen-settings > summary::-webkit-details-marker { display: none; }
+.gen-settings > summary::before { content: "▸"; display: inline-block; margin-right: 8px;
+  color: var(--text-dim); transition: transform .15s ease; }
+.gen-settings[open] > summary::before { transform: rotate(90deg); }
+.gen-settings > summary em { font-weight: 400; font-style: normal; color: var(--text-dim); font-size: 12px; }
+.gen-settings > .field-row, .gen-settings > .hint { padding: 0 12px; }
+.gen-settings > .field-row { margin-top: 4px; flex-wrap: wrap; }
+.gen-settings > .hint { padding-bottom: 12px; }
 
 /* preview */
 .panel-preview .preview { display: grid; place-items: center; min-height: 320px;

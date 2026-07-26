@@ -265,6 +265,16 @@ LAN; no Claude/Anthropic in the runtime loop.
   `prompt_versions.style_lora`/`style_lora_strength` (auto-migrated). Studio gets a *Style LoRA*
   dropdown (`/api/models?kind=loras`) + strength slider under Checkpoint. Distinct from the Poses
   tab's model-only *character* LoRA. **Not yet verified against a live ComfyUI run.**
+- **0.7.10:** Phase 7 — **A1111-style sampler controls in the Prompt Studio.** New collapsible
+  "Generation settings" block (`<details class="gen-settings">` in `index.html`) exposing Steps /
+  CFG / Sampler / Scheduler, defaults 28 / 5.0 / `euler_ancestral` / `normal`. **Frontend-only** —
+  the `base-character`/`base-character-lora` manifests + `/generate` already accepted these params;
+  `genSettings()` in `app.js` reads the four fields and `Object.assign`s them into the generate
+  params. **Ephemeral by design:** kept out of `formValues()`, so they never touch the saved
+  version / diff / rollback (no schema change). Not yet verified against a live ComfyUI run. Sampler/
+  scheduler `<option>`s are a curated static list (canonical ComfyUI enum names), not fetched from
+  `/object_info`. Possible follow-up: **persist per version** (steps/cfg/sampler/scheduler columns,
+  the fuller "reproducible baseline" option we deferred).
 - **Remaining:** 0.7.x hardening · 1.0 release. The **dataset side of the weak-LoRA fix is now
   complete** (0.7.2 pose + 0.7.3 framing/expression + 0.7.6 targeting/variety).
 - **Future infra (HARDWARE-GATED, added 2026-07-26):** user is swapping UR1's RTX 3060 → a second

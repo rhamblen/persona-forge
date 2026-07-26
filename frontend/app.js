@@ -208,6 +208,18 @@ function formValues() {
   };
 }
 
+// Ephemeral sampler tuning for the Studio preview (Steps/CFG/Sampler/Scheduler). The
+// backend + manifest already accept these; they are kept out of formValues() so they
+// affect only the current run and are never persisted to a prompt version.
+function genSettings() {
+  return {
+    steps: parseInt($("f-steps").value || "28", 10),
+    cfg: parseFloat($("f-cfg").value || "5.0"),
+    sampler: $("f-sampler").value,
+    scheduler: $("f-scheduler").value,
+  };
+}
+
 /* ---------------- version history (VCS-style) ---------------- */
 
 function diffSummary(v, parent) {
@@ -289,6 +301,9 @@ async function generate() {
     // The two LoRA fields are request-level, not base-character workflow params — the
     // backend upgrades to base-character-lora when a LoRA is set.
     const { style_lora, style_lora_strength, ...params } = formValues();
+    // Sampler tuning is ephemeral (per-run only) — merged into the workflow params here,
+    // deliberately NOT part of formValues() so it never touches version save/diff.
+    Object.assign(params, genSettings());
     const res = await api(`/api/projects/${state.projectId}/generate`, {
       method: "POST",
       body: JSON.stringify({ workflow: "base-character", params, style_lora, style_lora_strength }),
