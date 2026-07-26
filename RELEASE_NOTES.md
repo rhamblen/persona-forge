@@ -1,25 +1,32 @@
-# v0.7.8 — LoRA build dates
+# v0.7.9 — Style LoRAs in the Prompt Studio
 
-Phase 7. Know which LoRA is the fresh one after a rebuild.
+Phase 7. Apply an external style/detail LoRA on top of the checkpoint while you compose a persona.
 
 ## Added
-- **Build date on every trained LoRA.** The LoRA tab lists each `.safetensors` with its build
-  time (the file's modified time, which bumps every rebuild), **newest first**, and tags the most
-  recent one **latest**. After a refresh/retrain you can confirm at a glance you're on the fresh
-  version — not a stale one.
-- The **Poses** Character-LoRA dropdown shows each LoRA's date, and the selected-LoRA hint reads
-  "…(built <date>)", so you can verify the pose set is rendering with the refreshed LoRA.
+- **Style LoRA picker in the Prompt Studio.** A new *Style LoRA* dropdown (populated from
+  ComfyUI's `loras` folder) plus a strength slider sit under the Checkpoint field. Pick one and
+  Generate renders the checkpoint **with that LoRA loaded**; leave it on *none* and nothing
+  changes — it's the same checkpoint-only render as before.
+- The choice is **saved per version** (`style_lora` + `style_lora_strength`), so it lives in the
+  append-only history, shows up in the version diff, and rolls back with everything else.
+- **Dataset generation honours it too** — when a version has a Style LoRA selected, the training
+  dataset is rendered through it, so the look you dialled in actually makes it into the trained
+  character LoRA instead of vanishing at build time.
+
+## How it works
+- A new `base-character-lora` workflow loads the LoRA through a **full `LoraLoader`** (model **and**
+  CLIP), so text-encoder-side style LoRAs behave correctly. Studio and dataset generation upgrade
+  from `base-character` to `base-character-lora` automatically when a LoRA is set, and render
+  identically to before when none is. One strength drives both the model and CLIP sides.
+- This is distinct from the **Poses** tab's *character* LoRA (a model-only `LoraLoaderModelOnly`
+  patch of your own trained identity) — that path is unchanged.
 
 ## Changed
-- `GET /api/projects/{id}/lora` and `.../pose-config` now return each LoRA as
-  `{name, modified, modified_ts, size, comfy_visible}` (newest first) instead of a bare name.
+- `POST /api/projects/{id}/generate` accepts optional `style_lora` / `style_lora_strength`.
+- `prompt_versions` gains `style_lora` (TEXT) and `style_lora_strength` (REAL) columns; older
+  databases are migrated automatically on boot (existing versions default to no LoRA).
 
-## Note
-The date is the file's modified time — reliable and works for LoRAs you've already built. A
-richer *embedded* build stamp (version + steps + dataset size written alongside the file) is a
-possible follow-up.
-
-**Image:** `ghcr.io/rhamblen/persona-forge:0.7.8`
+**Image:** `ghcr.io/rhamblen/persona-forge:0.7.9`
 
 ## Upgrading
 No compose changes. Pull and restart:

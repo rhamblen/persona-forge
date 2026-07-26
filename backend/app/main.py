@@ -513,6 +513,8 @@ class VersionCreate(BaseModel):
     negative: str | None = None
     checkpoint: str | None = None
     seed: int | None = None
+    style_lora: str | None = None
+    style_lora_strength: float | None = None
     source: str = "manual"          # manual | ollama
     note: str = ""
 
@@ -552,14 +554,19 @@ async def create_version(project_id: int, body: VersionCreate) -> dict:
             "negative": body.negative if body.negative is not None else parent["negative"],
             "checkpoint": body.checkpoint if body.checkpoint is not None else parent["checkpoint"],
             "seed": body.seed if body.seed is not None else parent["seed"],
+            "style_lora": body.style_lora if body.style_lora is not None else parent["style_lora"],
+            "style_lora_strength": (body.style_lora_strength if body.style_lora_strength is not None
+                                    else parent["style_lora_strength"]),
         }
         cur = conn.execute(
             """INSERT INTO prompt_versions
-               (project_id, parent_id, character, style, negative, checkpoint, seed, source, note)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               (project_id, parent_id, character, style, negative, checkpoint, seed,
+                style_lora, style_lora_strength, source, note)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 project_id, parent["id"], merged["character"], merged["style"],
                 merged["negative"], merged["checkpoint"], merged["seed"],
+                merged["style_lora"], merged["style_lora_strength"],
                 body.source, body.note,
             ),
         )
@@ -686,6 +693,10 @@ class GenerateRequest(BaseModel):
     workflow: str = "base-character"
     params: dict[str, Any] = Field(default_factory=dict)
     wait: bool = True
+    # Optional external style/detail LoRA for the Studio preview. `None` = fall back to
+    # the current version's saved LoRA; "" = force checkpoint-only for this run.
+    style_lora: str | None = None
+    style_lora_strength: float | None = None
 
 
 @app.post("/api/projects/{project_id}/generate")
@@ -706,10 +717,18 @@ async def generate(project_id: int, body: GenerateRequest) -> dict:
     params = {k: v for k, v in params.items() if v is not None}
     params.update(body.params)  # explicit params win
 
-    logs.info("process", f"generation requested ({body.workflow})",
+    # A selected style LoRA upgrades base-character -> base-character-lora. Prefer the
+    # value sent with the request; fall back to whatever the saved version carries.
+    lora_name = body.style_lora if body.style_lora is not None else version.get("style_lora")
+    lora_strength = (body.style_lora_strength if body.style_lora_strength is not None
+                     else version.get("style_lora_strength"))
+    workflow_id, lora_params = _resolve_style_lora(body.workflow, lora_name, lora_strength)
+    params.update(lora_params)
+
+    logs.info("process", f"generation requested ({workflow_id})",
               project_id=project_id, slug=slug, version_id=version.get("id"))
     try:
-        graph = workflows.build_graph(body.workflow, params)
+        graph = workflows.build_graph(workflow_id, params)
         prompt_id = await comfy.submit(graph)
     except workflows.WorkflowError as exc:
         raise HTTPException(400, str(exc)) from exc
@@ -908,6 +927,27 @@ def _version_prompt_params(version: dict[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in params.items() if v is not None}
 
 
+def _resolve_style_lora(
+    base_workflow: str, lora_name: str | None, strength: float | None
+) -> tuple[str, dict[str, Any]]:
+    """Given a Studio-family base workflow and a chosen style LoRA, return the workflow
+    to actually run plus any LoRA params to inject.
+
+    An empty/absent LoRA (or a non-Studio base workflow) is a no-op: the base workflow
+    runs unchanged (checkpoint-only). A selected LoRA upgrades `base-character` to
+    `base-character-lora`, applying one strength to both the model and CLIP sides.
+    """
+    name = (lora_name or "").strip()
+    if not name or base_workflow != "base-character":
+        return base_workflow, {}
+    s = 1.0 if strength is None else float(strength)
+    return "base-character-lora", {
+        "lora_name": name,
+        "lora_strength_model": s,
+        "lora_strength_clip": s,
+    }
+
+
 async def _reconcile_dataset(project_id: int) -> None:
     """Pull finished queued images into the images table as kind='dataset'."""
     with db.connect() as conn:
@@ -980,6 +1020,12 @@ async def dataset_generate(project_id: int, body: DatasetGenerateRequest) -> dic
     base = _version_prompt_params(version)
     vary = body.pose_variety
 
+    # Carry the version's style LoRA into the dataset so the trained character reflects
+    # the look chosen in the Studio (upgrades base-character -> base-character-lora).
+    ds_workflow, lora_params = _resolve_style_lora(
+        "base-character", version.get("style_lora"), version.get("style_lora_strength"))
+    base = {**base, **lora_params}
+
     # Continue the variation rotation across successive batches (Generate 30, then +10 more)
     # so coverage stays even instead of restarting at the first framing each time.
     offset = 0
@@ -1005,7 +1051,7 @@ async def dataset_generate(project_id: int, body: DatasetGenerateRequest) -> dic
                 variation = _dataset_variation(offset + i, body.mode)
                 params["expression"] = variation
             try:
-                graph = workflows.build_graph("base-character", params)
+                graph = workflows.build_graph(ds_workflow, params)
                 logs.verbose("process", f"queuing dataset image {i + 1}/{count}",
                              seed=seed, variation=variation)
                 prompt_id = await comfy.submit(graph)

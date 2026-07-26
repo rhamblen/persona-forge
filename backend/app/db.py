@@ -51,6 +51,10 @@ CREATE TABLE IF NOT EXISTS prompt_versions (
     negative    TEXT NOT NULL DEFAULT '',
     checkpoint  TEXT NOT NULL DEFAULT '',
     seed        INTEGER NOT NULL DEFAULT 0,
+    -- Prompt Studio (0.7.9): optional external style/detail LoRA applied on top of the
+    -- checkpoint via a full LoraLoader. '' = render checkpoint-only (base-character).
+    style_lora          TEXT NOT NULL DEFAULT '',
+    style_lora_strength REAL NOT NULL DEFAULT 1.0,
     -- 'manual' | 'ollama' | 'initial'
     source      TEXT NOT NULL DEFAULT 'manual',
     note        TEXT NOT NULL DEFAULT '',
@@ -177,6 +181,11 @@ def init_db() -> None:
             conn.execute("ALTER TABLE projects ADD COLUMN train_steps INTEGER NOT NULL DEFAULT 0")
             conn.execute("ALTER TABLE projects ADD COLUMN last_train_seconds REAL NOT NULL DEFAULT 0")
             conn.execute("ALTER TABLE projects ADD COLUMN last_train_steps INTEGER NOT NULL DEFAULT 0")
+
+        vcols = {r["name"] for r in conn.execute("PRAGMA table_info(prompt_versions)")}
+        if "style_lora" not in vcols:  # pre-0.7.9
+            conn.execute("ALTER TABLE prompt_versions ADD COLUMN style_lora TEXT NOT NULL DEFAULT ''")
+            conn.execute("ALTER TABLE prompt_versions ADD COLUMN style_lora_strength REAL NOT NULL DEFAULT 1.0")
 
 
 def row_to_dict(row: sqlite3.Row | None) -> dict | None:

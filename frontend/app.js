@@ -19,7 +19,7 @@ const fmtDateTime = (ts) => (ts ? new Date(ts * 1000).toLocaleString() : "");
 const fmtDateShort = (ts) => (ts ? new Date(ts * 1000).toLocaleString([], {
   year: "2-digit", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "");
 
-let state = { projectId: null, versions: [], current: null, checkpoints: [], defaultCheckpoint: "", defaultNegative: "", versionOrdinals: {} };
+let state = { projectId: null, versions: [], current: null, checkpoints: [], styleLoras: [], defaultCheckpoint: "", defaultNegative: "", versionOrdinals: {} };
 
 // Version rows carry a GLOBAL auto-increment id; the UI numbers them PER PROJECT (v1, v2, …).
 // API calls still use the real id — only the label is the ordinal.
@@ -130,6 +130,33 @@ async function loadCheckpoints() {
   }
 }
 
+async function loadStyleLoras() {
+  const sel = $("f-style-lora");
+  try {
+    const { models } = await api("/api/models?kind=loras");
+    state.styleLoras = models || [];
+    const opts = ['<option value="">— none (checkpoint only) —</option>']
+      .concat(state.styleLoras.map((m) => `<option value="${esc(m)}">${esc(m)}</option>`));
+    sel.innerHTML = opts.join("");
+    sel.value = "";
+  } catch {
+    state.styleLoras = [];
+    sel.innerHTML = '<option value="">— none (checkpoint only) —</option>';
+  }
+  syncLoraStrengthVisibility();
+}
+
+function syncLoraStrengthVisibility() {
+  const on = !!$("f-style-lora").value;
+  $("f-style-lora-strength-wrap").hidden = !on;
+}
+
+function setLoraStrength(v) {
+  const s = Number.isFinite(v) ? v : 1.0;
+  $("f-style-lora-strength").value = s;
+  $("f-style-lora-strength-val").textContent = s.toFixed(2);
+}
+
 async function loadPromptDefaults() {
   try {
     const d = await api("/api/prompt-defaults");
@@ -160,6 +187,11 @@ function fillForm(v) {
   // resolved default rather than letting the browser show option 0 (photoreal).
   if (v.checkpoint && state.checkpoints.includes(v.checkpoint)) $("f-checkpoint").value = v.checkpoint;
   else if (state.defaultCheckpoint) $("f-checkpoint").value = state.defaultCheckpoint;
+  // Style LoRA — only select it if it's still present in ComfyUI; otherwise fall back to none.
+  const lora = v.style_lora || "";
+  $("f-style-lora").value = (lora && state.styleLoras.includes(lora)) ? lora : "";
+  setLoraStrength(v.style_lora_strength ?? 1.0);
+  syncLoraStrengthVisibility();
   $("current-version-chip").textContent = `${verLabel(v.id)}${v.signed_off ? " · signed off" : ""}`;
   $("current-version-chip").className = "chip" + (v.signed_off ? " chip-good" : "");
 }
@@ -171,6 +203,8 @@ function formValues() {
     negative: $("f-negative").value,
     checkpoint: $("f-checkpoint").value,
     seed: parseInt($("f-seed").value || "0", 10),
+    style_lora: $("f-style-lora").value,
+    style_lora_strength: parseFloat($("f-style-lora-strength").value || "1"),
   };
 }
 
@@ -178,7 +212,7 @@ function formValues() {
 
 function diffSummary(v, parent) {
   if (!parent) return '<span class="muted">initial version</span>';
-  const changed = ["character", "style", "negative", "checkpoint", "seed"]
+  const changed = ["character", "style", "negative", "checkpoint", "seed", "style_lora", "style_lora_strength"]
     .filter((k) => String(v[k]) !== String(parent[k]));
   if (!changed.length) return '<span class="muted">no field changes</span>';
   return changed.map((k) => `<span class="tag">${k}</span>`).join(" ");
@@ -252,9 +286,12 @@ async function generate() {
   msg($("studio-msg"), "Generating… (first run loads the checkpoint, ~30–60s)");
   $("preview").innerHTML = '<div class="spinner"></div>';
   try {
+    // The two LoRA fields are request-level, not base-character workflow params — the
+    // backend upgrades to base-character-lora when a LoRA is set.
+    const { style_lora, style_lora_strength, ...params } = formValues();
     const res = await api(`/api/projects/${state.projectId}/generate`, {
       method: "POST",
-      body: JSON.stringify({ workflow: "base-character", params: formValues() }),
+      body: JSON.stringify({ workflow: "base-character", params, style_lora, style_lora_strength }),
     });
     const img = res.images?.[0];
     if (img) {
@@ -1315,6 +1352,8 @@ $("project-select").addEventListener("change", (e) => {
 
 $("generate-btn").addEventListener("click", () => generate());
 $("reroll-seed").addEventListener("click", () => { $("f-seed").value = Math.floor(Math.random() * 2 ** 31); });
+$("f-style-lora").addEventListener("change", syncLoraStrengthVisibility);
+$("f-style-lora-strength").addEventListener("input", (e) => setLoraStrength(parseFloat(e.target.value)));
 
 $("save-version-btn").addEventListener("click", async () => {
   try { const v = await saveVersion(); msg($("studio-msg"), `Saved as ${verLabel(v.id)}.`, "ok"); }
@@ -1326,8 +1365,9 @@ $("signoff-btn").addEventListener("click", async () => {
     // capture any unsaved edits first so the baseline matches what's on screen
     const cur = state.current || {};
     const f = formValues();
-    const dirty = ["character", "style", "negative", "checkpoint"].some((k) => f[k] !== (cur[k] ?? "")) ||
-                  f.seed !== cur.seed;
+    const dirty = ["character", "style", "negative", "checkpoint", "style_lora"].some((k) => f[k] !== (cur[k] ?? "")) ||
+                  f.seed !== cur.seed ||
+                  f.style_lora_strength !== (cur.style_lora_strength ?? 1.0);
     const v = dirty ? await saveVersion("signed-off baseline") : cur;
     await signOff(v.id);
   } catch (e) { msg($("studio-msg"), e.message, "bad"); }
@@ -1391,6 +1431,7 @@ $("np-create").addEventListener("click", async () => {
   showView("prompt");
   await refreshStatus();
   await loadCheckpoints();
+  await loadStyleLoras();
   await loadPromptDefaults();
   await loadProjects().catch((e) => msg($("studio-msg"), e.message, "bad"));
   setInterval(refreshStatus, POLL_MS);

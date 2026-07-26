@@ -78,6 +78,7 @@ LAN; no Claude/Anthropic in the runtime loop.
 | `backend/app/workflows.py` | Workflow templates + parameter manifests (node IDs not hardcoded) |
 | `frontend/index.html`, `app.js`, `style.css` | The SPA (no build step); served as static files |
 | `workflows/base-character.json` + `.manifest.json` | The base-character API graph + its manifest |
+| `workflows/base-character-lora.json` + `.manifest.json` | Studio variant with a full `LoraLoader` (model+CLIP) for an external style LoRA; auto-selected when a version has `style_lora` set (0.7.9) |
 | `docker/docker-compose.yml` | The stack: persona-forge + docker-socket-proxy + networks |
 | `docker/.env` | Tracked, non-secret config (the only `.env` git tracks) |
 | `PROJECT_PLAN.md` | Master spec + phased roadmap (this repo's "project brief") |
@@ -255,6 +256,15 @@ LAN; no Claude/Anthropic in the runtime loop.
   "latest" tag; Poses dropdown + selected-hint show it too — so a refresh is verifiable. Possible
   follow-up: an **embedded build stamp** (sidecar JSON or safetensors `__metadata__`: version,
   steps, dataset count).
+- **0.7.9:** Phase 7 — **style LoRAs in the Prompt Studio.** New `workflows/base-character-lora.json`
+  (`CheckpointLoaderSimple → LoraLoader (model+CLIP) → KSampler`, CLIP encoders read the LoRA's clip
+  too). `_resolve_style_lora(base, name, strength)` upgrades `base-character` → `base-character-lora`
+  when a version has `style_lora` set (one strength → both model+clip); no-op otherwise. Used by
+  both `generate()` (optional `style_lora`/`style_lora_strength` on the request) **and**
+  `dataset_generate()` (so the style reaches the trained character LoRA). Persisted per version:
+  `prompt_versions.style_lora`/`style_lora_strength` (auto-migrated). Studio gets a *Style LoRA*
+  dropdown (`/api/models?kind=loras`) + strength slider under Checkpoint. Distinct from the Poses
+  tab's model-only *character* LoRA. **Not yet verified against a live ComfyUI run.**
 - **Remaining:** 0.7.x hardening · 1.0 release. The **dataset side of the weak-LoRA fix is now
   complete** (0.7.2 pose + 0.7.3 framing/expression + 0.7.6 targeting/variety).
 - **Future infra (HARDWARE-GATED, added 2026-07-26):** user is swapping UR1's RTX 3060 → a second

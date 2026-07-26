@@ -67,8 +67,10 @@ Prompt Studio → Dataset → per-character LoRA → Expression + posture sprite
   **cards + lorebook + campaign** grounded in the source — summarised into behavioural
   profiles, never copied verbatim. _(later / post-1.0; see
   [PROJECT_PLAN.md](PROJECT_PLAN.md) §2 "Phase G")_
-- **Prompt Studio** — pick a checkpoint, refine a prompt against live previews (with
-  click-to-zoom), then **sign off a baseline** that can never be lost.
+- **Prompt Studio** — pick a checkpoint (and optionally a **style/detail LoRA** with a
+  strength slider), refine a prompt against live previews (with click-to-zoom), then
+  **sign off a baseline** that can never be lost. A selected style LoRA is saved with the
+  version and carried into dataset generation, so it reaches the trained character.
 - **AI prompt assistant** — describe a character in plain language and let Ollama author
   the character / style / negative fields, or **Modify** an existing prompt ("give her
   freckles and a longer coat"). Suggestions are editable with a one-click undo; prose,

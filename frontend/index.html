@@ -163,6 +163,17 @@
                 <button class="btn btn-ghost" id="reroll-seed" title="Random seed">🎲</button>
               </div>
 
+              <div class="field-row">
+                <label class="field">
+                  <span class="field-label">Style LoRA <em>optional — applied on top of the checkpoint</em></span>
+                  <select id="f-style-lora"></select>
+                </label>
+                <label class="field field-narrow" id="f-style-lora-strength-wrap" hidden>
+                  <span class="field-label">Strength <span id="f-style-lora-strength-val" class="chip small">1.00</span></span>
+                  <input id="f-style-lora-strength" type="range" min="0" max="2" step="0.05" value="1" />
+                </label>
+              </div>
+
               <div class="actions">
                 <button class="btn btn-primary" id="generate-btn">Generate</button>
                 <button class="btn" id="save-version-btn">Save as new version</button>

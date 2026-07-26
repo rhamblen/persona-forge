@@ -9,6 +9,30 @@ Every version below is a **published GitHub Release** with a matching
 
 ---
 
+## [0.7.9] — 2026-07-26
+
+**Use an external style/detail LoRA in the Prompt Studio.** (Phase 7.)
+
+### Added
+- **Style LoRA picker in the Prompt Studio.** A *Style LoRA* dropdown (from ComfyUI's `loras`
+  folder) plus a strength slider under the Checkpoint field. Selecting one makes Generate render
+  the checkpoint **with that LoRA loaded**; *none* renders checkpoint-only exactly as before.
+- The selection is **saved per version** (`style_lora` + `style_lora_strength`) — part of the
+  append-only history, surfaced in the version diff, and restored on rollback.
+- **Dataset generation applies it too**, so the style carries into the trained character LoRA
+  instead of being lost when the dataset is built.
+
+### Changed
+- New `base-character-lora` workflow: loads the LoRA via a **full `LoraLoader`** (model + CLIP, so
+  text-encoder-side style LoRAs work). Studio and dataset generation upgrade `base-character` →
+  `base-character-lora` automatically when a LoRA is set; behaviour is identical when none is.
+  Distinct from the Poses tab's model-only *character* LoRA path, which is unchanged.
+- `POST /api/projects/{id}/generate` accepts optional `style_lora` / `style_lora_strength`.
+- `prompt_versions` gains `style_lora` (TEXT) + `style_lora_strength` (REAL); older DBs migrate
+  automatically on boot (existing versions default to no LoRA).
+
+---
+
 ## [0.7.8] — 2026-07-26
 
 **Show each LoRA's build date — so you know a rebuild actually took.** (Phase 7.)
