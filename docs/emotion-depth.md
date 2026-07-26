@@ -449,9 +449,12 @@ one quality bar. *Strategic call — needs the user's confirmation before the pa
 
 - **Cumulative vs. reset default** — does honing grief keep the anger layer in (v3) or
   start from core (v3′)? Recommendation: **cumulative by default**, layers deselectable.
-- **Concept-LoRA sourcing** — which pose/gesture LoRAs to install for the NoobAI-XL
-  checkpoint, and whether the library ships a curated starter set or stays
-  bring-your-own. Compatibility is the gating question, not quality.
+- **Concept-LoRA sourcing** — which pose/gesture LoRAs to install, and whether the library
+  ships a curated starter set or stays bring-your-own. **Deferred (user, 2026-07-26): the
+  project isn't committed to one base model**, so don't pin sourcing to a checkpoint
+  family yet. The `base_model` field per library entry already handles a mixed library;
+  the natural refinement, once the picture settles, is to surface or filter entries
+  against the current version's checkpoint rather than leaving it to the eye.
 - **Does the stack ever stay on at render time?** The teacher-LoRA pattern drops it after
   training, but for a pose the character LoRA never absorbs, keeping it stacked during
   sprite render is legitimate. Recommendation: allow it, record it on the pose so the

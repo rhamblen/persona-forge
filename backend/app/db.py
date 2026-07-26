@@ -161,9 +161,10 @@ CREATE INDEX IF NOT EXISTS idx_jobs_project ON jobs(project_id, id);
 -- opposed to the per-character LoRA that carries *who*. Global, not per project — the
 -- whole point is that one is reused across every character.
 --
--- `base_model` is compatibility, not decoration: an SD1.5 pose LoRA will not load on an
--- SDXL/NoobAI checkpoint, so it is checked before a stack is submitted rather than
--- discovered as a ComfyUI error. `trigger_words` are appended to the positive prompt
+-- `base_model` is compatibility, not decoration: a LoRA only loads on the checkpoint family
+-- it was trained for (an SD1.5 LoRA will not load on an SDXL one). Free text, because the
+-- project is not committed to a single base model — the library is expected to hold entries
+-- for several. `trigger_words` are appended to the positive prompt
 -- when the entry is enabled — most concept LoRAs are inert without them.
 CREATE TABLE IF NOT EXISTS concept_loras (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,

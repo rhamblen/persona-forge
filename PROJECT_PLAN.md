@@ -763,11 +763,15 @@ and already shared with ollama+chatterbox):
   rig has ~5 emotion blendshapes vs. 28+ sprites; VRM's durable edge is **lip sync**, not
   expression. Confirming (b) means rewriting the parent `PROJECT_PLAN.md` avatar phases and
   the avatar-strategy memory.
-- **Concept-LoRA sourcing (Phase H1b)** — which third-party pose/gesture LoRAs to install
-  for the **NoobAI-XL** checkpoint, and whether the library ships a curated starter set or
-  stays bring-your-own. Base-model compatibility is the gating question, not quality. Also:
-  does a concept LoRA ever stay stacked at *render* time (recommend yes, allowed and
-  recorded on the pose for reproducibility) or only during enrichment generation?
+- **Concept-LoRA sourcing (Phase H1b)** — which third-party pose/gesture LoRAs to install, and
+  whether the library ships a curated starter set or stays bring-your-own. **Deferred
+  2026-07-26 — the project may use any of several base models, so this is explicitly not
+  pinned to one checkpoint family yet.** The shipped library is already model-agnostic
+  (`base_model` is free text per entry, the checkpoint is per version); once the picture
+  settles, the refinement is to surface/filter entries against the current version's
+  checkpoint instead of leaving compatibility to the eye. Also: does a concept LoRA ever stay
+  stacked at *render* time (recommend yes, allowed and recorded on the pose for
+  reproducibility) or only during enrichment generation?
 - **Phase H design details** — cumulative vs. reset default when honing a second emotion
   (recommend cumulative, layers deselectable); hard-cap vs. warn on the ≤30% layer ratio
   (recommend warn + show the ratio); the exact **custom-expression-label mechanism on the

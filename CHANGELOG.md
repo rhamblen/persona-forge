@@ -9,6 +9,26 @@ Every version below is a **published GitHub Release** with a matching
 
 ---
 
+## [0.8.1] — 2026-07-26
+
+**Base-model neutrality.** (Phase H.) The project isn't committed to a single checkpoint
+family, so nothing in the concept-LoRA work should read as if it is.
+
+### Changed
+- The library's **Base model** field is relabelled ("which checkpoint family it was trained
+  for") with a broader placeholder (`sdxl, sd1.5, pony, illustrious`) instead of naming one
+  model. It was always free text holding entries for several families — the copy just didn't
+  say so.
+
+### Notes
+- **No behaviour change.** The 0.8.0 stack was already model-agnostic: `base_model` is free
+  text per library entry and the checkpoint is per prompt version, so nothing assumed a
+  family. This corrects documentation and UI copy only.
+- **Concept-LoRA sourcing is explicitly deferred** rather than pinned to one checkpoint —
+  see the open decisions in `PROJECT_PLAN.md` / `docs/emotion-depth.md`. The eventual
+  refinement is to surface or filter library entries against the current version's
+  checkpoint instead of leaving compatibility to the eye.
+
 ## [0.8.0] — 2026-07-26
 
 **Concept LoRA stack — overlay pose/gesture LoRAs on any render.** (Phase H, stage 1b —
