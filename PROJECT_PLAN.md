@@ -580,6 +580,41 @@ complete release. A `VERSION` file at the repo root tracks the current build.
   charter. Transform-not-reproduce (private use; summarised behavioural profiles). The
   most advanced piece; an alternative seed feeding Phases E + F.
 
+### Future infrastructure — dedicated training GPU / parallel builds ⬜ HARDWARE-GATED (added 2026-07-26)
+
+**Trigger: the user is swapping UR1's RTX 3060 (12 GB) for a second RTX 3090 (24 GB), giving
+2× RTX 3090 24 GB.** That makes the following viable (it is *not* today — with only one
+training-class GPU, training and generation contend for the same VRAM, and the 3060 is too small
+and already shared with ollama+chatterbox):
+
+- **Goal.** Run a LoRA build (train → first poses) on a **dedicated training GPU** while the main
+  ComfyUI stays free for generation — so you can preview pictures, build a dataset, and queue the
+  next character *while a build runs*. This is the real fix for the whole "background / concurrent
+  builds" and "gen a picture while the build trains" thread (see §9 notes below).
+- **Recommended approach (lowest risk): a second ComfyUI instance as the trainer.** Stand up a
+  second `stable-diffusion-ComfyUI`-style container pinned to **GPU 2** via
+  `NVIDIA_VISIBLE_DEVICES` (CDI form), **reusing the already-validated `lora-train.json` graph**
+  (Florence-2 captioning, `SaveLoRA` → `/builds`) — no re-doing the training recipe. Persona Forge
+  gains a **`TRAIN_COMFYUI_URL`** env: route **training + dataset staging** to the trainer
+  instance, keep **generation** on the main instance. Models are shared through the same mount, so
+  no duplicate downloads. Move ollama/chatterbox onto whichever card is *not* the trainer.
+- **Alternatives.** (a) A dedicated **kohya / sd-scripts / ai-toolkit** trainer container — more
+  capable (resume, sample previews, bucketing) but means re-validating captioning/dataset/format;
+  worth it only if we outgrow ComfyUI training. (b) **RunPod cloud burst** — training on a rented
+  GPU, local 3090s untouched; per-run cost, already an integration in the toolchain. Good as an
+  overflow/ad-hoc path even after the second 3090 lands.
+- **Rides the existing job engine.** The `lora_build` handler already orchestrates train→poses;
+  pointing its ComfyUI calls at `TRAIN_COMFYUI_URL` is the core change. With a dedicated trainer,
+  the serial-GPU constraint that made the engine one-job-at-a-time can relax into **lanes**
+  (a GPU-2 training lane + a GPU-1 generation lane) — the `jobs` table already has room for a
+  `lane` column (see `jobs.py`). This is also the enabler for the Phase F multi-character
+  **add-to-queue** cast builder.
+- **Related smaller lever (no hardware needed):** ComfyUI queue **front-insert** (`/prompt`
+  `front: true`) lets a quick picture jump ahead of *pending* work (e.g. during the pose-render
+  stage). It cannot preempt a *running* prompt (ComfyUI has no pause; `/interrupt` aborts), so it
+  does not help during the single long training prompt — which is exactly why the dedicated
+  training GPU is the real answer.
+
 ## 8. Open decisions (need your call)
 
 - ~~**Name**~~ — decided: **Persona Forge**.

@@ -256,7 +256,14 @@ LAN; no Claude/Anthropic in the runtime loop.
   follow-up: an **embedded build stamp** (sidecar JSON or safetensors `__metadata__`: version,
   steps, dataset count).
 - **Remaining:** 0.7.x hardening · 1.0 release. The **dataset side of the weak-LoRA fix is now
-  complete** (0.7.2 pose + 0.7.3 framing/expression + 0.7.6 targeting/variety). 0.7.x backlog (priority order):
+  complete** (0.7.2 pose + 0.7.3 framing/expression + 0.7.6 targeting/variety).
+- **Future infra (HARDWARE-GATED, added 2026-07-26):** user is swapping UR1's RTX 3060 → a second
+  **RTX 3090 24 GB** (→ 2× 3090). Unlocks a **dedicated training GPU**: a 2nd ComfyUI instance
+  pinned to GPU 2 (reuse `lora-train.json`) as the trainer via a PF `TRAIN_COMFYUI_URL`, main
+  ComfyUI stays free for generation → **true parallel builds + generation** (the real fix for
+  background/concurrent builds + gen-while-training). Job engine can then relax serial→`lane`s.
+  Alternatives: kohya trainer, RunPod burst. Not viable today (one training-class GPU; 3060 too
+  small). Full spec: `PROJECT_PLAN.md` §7 "Future infrastructure — dedicated training GPU". 0.7.x backlog (priority order):
   **(1) raise the automated training-step default to ~1500-2500** (last recipe lever);
   **(2) custom / editable dataset example prompts** (user request 2026-07-25) — per-project
   user-added example shots on top of the `DATASET_FRAMINGS × DATASET_EXPRESSIONS` auto-rotation
