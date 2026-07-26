@@ -287,6 +287,27 @@ progresses. Phase H builds sprite resolution first, then state.
 28 as startup, then focus the dataset on one emotion, enrich and grow, then come back to
 the baseline for a different emotion.*
 
+- **Baseline gate — no focused build before a basic build.** Enrichment is a *correction*
+  applied to something you have already looked at, so the Hone panel stays disabled until
+  LoRA v1 is trained from a signed-off `core` **and** the 28 baseline sprites are rendered
+  and reviewed. Reviewing that baseline (grouped **by axis**, not alphabetically) is what
+  identifies the weak axis worth honing.
+- **The LoRA stack — a secondary overlay tool (user request, 2026-07-26).** Distinguish the
+  **character LoRA** (trained here, one per character, carries *who*) from **concept LoRAs**
+  (third-party, stacked, carry *what the body is doing* — arm movement, sitting positions,
+  gestures). The Prompt/Pose studios gain a **stack editor** (N LoRAs, per-entry model/CLIP
+  strength, reorder, toggle, auto-appended trigger words, saved per version so it rolls
+  back) over a small **concept-LoRA library** recording base-model compatibility (an SD1.5
+  pose LoRA won't load on NoobAI-XL), triggers, weight range, and category.
+  `base-character-lora.json`'s single `LoraLoader` generalises to a **chain of core
+  `LoraLoader` nodes spliced programmatically** — core nodes only, since `custom_nodes` is
+  read-only over SMB on UR1.
+  **This is the piece that makes enrichment safe:** a concept LoRA is *external signal*, so
+  the pattern is a **teacher LoRA** — stack it to generate shots the character LoRA can't
+  produce alone, curate, train v2 on them, then **drop it at render time**. That turns
+  enrichment from "recycle my own output" into "absorb a capability." It's also
+  **independently useful from day one** (better poses with no enrichment at all), which is
+  why it's the first thing to build.
 - **Axes × tiers.** Two dimensions — *which* emotion, and *how much*. The 28 ST labels
   are GoEmotions and **already encode tiers** (annoyance→anger, disappointment→sadness→
   grief), so grouping them by axis yields most of the ladder free; only ~6–8 top tiers
@@ -302,9 +323,11 @@ the baseline for a different emotion.*
 - **Caption the emotion explicitly** — the standing "expression words out of identity"
   rule is *why* this works: named emotions stay separable and promptable instead of being
   absorbed into the trigger word (which would make the character look angry at rest).
-- **Guard rails** against self-amplification: core ≥50% of any training set, one emotion
-  layer ≤~30%, mandatory human curation (the existing Phase B grid), and enrichment
-  generated at reduced LoRA weight.
+- **Guard rails** against self-amplification: prefer **external signal** (a stacked concept
+  LoRA, ControlNet-posed shots, real reference) over pure self-feed; core ≥50% of any
+  training set; one emotion layer ≤~30%; mandatory human curation (the existing Phase B
+  grid); and enrichment generated at reduced character-LoRA weight so the stack has room
+  to act.
 - **Selective rebuild.** Poses gain `axis`/`tier`/`lora_build_id`, so after a retrain only
   that axis's sprites re-render; the rest stay valid and **stale sprites are flagged**.
   Per-sprite revert, same rollback ethos as prompts.
@@ -613,12 +636,17 @@ complete release. A `VERSION` file at the repo root tracks the current build.
      with no trainer change.
 - **0.8.x — Emotional depth H1 (Phase H, added 2026-07-26).** ⚠️ *Proposed resequence —
   this takes 0.8.x and pushes Character Studio to 0.9.x, because H1 extends Phases B/C/D
-  (which exist) and is needed sooner. User's call.* Emotion **axes × tiers** map (the 28
-  regrouped + ~6–8 custom top tiers), editable per project; **dataset layers**
-  (`core` + `emotion:<axis>`, core immutable); `mode="emotion"` enrichment batches (tier
-  body-language prompts × full framing spread, emotion named in captions); a
-  **`lora_builds`** table with layer-selected from-scratch training + rollback; and
-  **per-axis selective sprite rebuild** with staleness flags and per-sprite revert.
+  (which exist) and is needed sooner. User's call.* In dependency order: **(a)** emotion
+  **axes × tiers** map (the 28 regrouped + ~6–8 custom top tiers), editable per project,
+  with the baseline grid grouped by axis; **(b)** the **LoRA stack + concept-LoRA library**
+  — chained core `LoraLoader`s, per-entry weights, trigger words, compatibility *(build
+  this first: it improves every generation immediately and is what makes enrichment add
+  external signal rather than recycle output)*; **(c)** **dataset layers**
+  (`core` + `emotion:<axis>`, core immutable) + `mode="emotion"` enrichment batches (tier
+  body-language prompts × full framing spread, emotion named in captions), **behind the
+  baseline gate** — no focused build until the basic 28 are built and reviewed;
+  **(d)** a **`lora_builds`** table with layer-selected from-scratch training + rollback;
+  **(e)** **per-axis selective sprite rebuild** with staleness flags and per-sprite revert.
   Absorbs the 0.7.x "custom/editable dataset example prompts" backlog item — same
   machinery with an axis label. Full design: `docs/emotion-depth.md`.
 - **0.9.x — Character Studio (Phase E, added 2026-07-25).** Ollama-guided character
@@ -734,6 +762,11 @@ and already shared with ollama+chatterbox):
   rig has ~5 emotion blendshapes vs. 28+ sprites; VRM's durable edge is **lip sync**, not
   expression. Confirming (b) means rewriting the parent `PROJECT_PLAN.md` avatar phases and
   the avatar-strategy memory.
+- **Concept-LoRA sourcing (Phase H1b)** — which third-party pose/gesture LoRAs to install
+  for the **NoobAI-XL** checkpoint, and whether the library ships a curated starter set or
+  stays bring-your-own. Base-model compatibility is the gating question, not quality. Also:
+  does a concept LoRA ever stay stacked at *render* time (recommend yes, allowed and
+  recorded on the pose for reproducibility) or only during enrichment generation?
 - **Phase H design details** — cumulative vs. reset default when honing a second emotion
   (recommend cumulative, layers deselectable); hard-cap vs. warn on the ≤30% layer ratio
   (recommend warn + show the ratio); the exact **custom-expression-label mechanism on the
