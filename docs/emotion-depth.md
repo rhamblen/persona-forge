@@ -387,7 +387,7 @@ if enrichment never ships.
 | Stage | Scope | When |
 |---|---|---|
 | **H1a** | Axis/tier map + custom tier labels, editable per project; **baseline grid grouped by axis** so weakness is visible (§2.2) | next phase |
-| **H1b** | **LoRA stack + concept-LoRA library** (§2.4) — chained core `LoraLoader`s, per-entry weights, trigger words, compatibility. *Independently useful: better poses from day one, no enrichment required.* | next phase |
+| **H1b** | **LoRA stack + concept-LoRA library** (§2.4) — chained core `LoraLoader`s, per-entry weights, trigger words, compatibility. *Independently useful: better poses from day one, no enrichment required.* | ✅ **shipped 0.8.0** |
 | **H1c** | Dataset layers + `mode="emotion"` enrichment batches, behind the **baseline gate** (§2.2). Absorbs the editable-examples backlog item. | next phase |
 | **H1d** | `lora_builds` versioning + layer-selected from-scratch training + rollback | next phase |
 | **H1e** | Per-axis selective sprite rebuild + staleness + per-sprite revert | next phase |

@@ -256,6 +256,117 @@ async def models(kind: str = "checkpoints") -> dict:
     return {"kind": kind, "models": models, "default": default}
 
 
+# --------------------------------------------------------------------------- #
+# concept-LoRA library (Phase H1b) — pose/gesture/expression LoRAs that carry *what
+# the body is doing*, reused across every character, as opposed to the per-character
+# LoRA that carries *who*. Global on purpose: reuse is the whole point.
+# --------------------------------------------------------------------------- #
+
+CONCEPT_CATEGORIES = ("pose", "gesture", "expression", "style")
+
+
+class ConceptLoraIn(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    filename: str = Field(min_length=1)
+    base_model: str = ""
+    category: str = "pose"
+    trigger_words: str = ""
+    weight_min: float = Field(default=0.4, ge=0.0, le=2.0)
+    weight_max: float = Field(default=0.8, ge=0.0, le=2.0)
+    notes: str = ""
+
+
+class ConceptLoraPatch(BaseModel):
+    name: str | None = None
+    base_model: str | None = None
+    category: str | None = None
+    trigger_words: str | None = None
+    weight_min: float | None = Field(default=None, ge=0.0, le=2.0)
+    weight_max: float | None = Field(default=None, ge=0.0, le=2.0)
+    notes: str | None = None
+
+
+@app.get("/api/concept-loras")
+async def concept_loras_list() -> dict:
+    """The library, annotated with whether ComfyUI can actually still see each file.
+
+    A missing file is reported rather than hidden — a stack referencing it would fail at
+    submit time, and a stale library entry is exactly the kind of thing worth surfacing.
+    """
+    with db.connect() as conn:
+        rows = conn.execute("SELECT * FROM concept_loras ORDER BY category, name").fetchall()
+    try:
+        available = set(await comfy.list_models("loras"))
+    except Exception as exc:  # noqa: BLE001
+        logs.warn("integration", f"could not list loras to check the concept library: {exc}")
+        available = None
+    return {
+        "concept_loras": [
+            {**dict(r), "available": (None if available is None else r["filename"] in available)}
+            for r in rows
+        ],
+        "categories": list(CONCEPT_CATEGORIES),
+    }
+
+
+@app.post("/api/concept-loras", status_code=201)
+async def concept_lora_add(body: ConceptLoraIn) -> dict:
+    if body.category not in CONCEPT_CATEGORIES:
+        raise HTTPException(400, f"category must be one of {', '.join(CONCEPT_CATEGORIES)}")
+    if body.weight_max < body.weight_min:
+        raise HTTPException(400, "weight_max must be >= weight_min")
+    with db.connect() as conn:
+        if conn.execute("SELECT 1 FROM concept_loras WHERE filename = ?",
+                        (body.filename,)).fetchone():
+            raise HTTPException(409, "that LoRA file is already in the library")
+        cur = conn.execute(
+            """INSERT INTO concept_loras
+               (name, filename, base_model, category, trigger_words, weight_min, weight_max, notes)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (body.name, body.filename, body.base_model, body.category,
+             body.trigger_words, body.weight_min, body.weight_max, body.notes),
+        )
+        row = conn.execute("SELECT * FROM concept_loras WHERE id = ?", (cur.lastrowid,)).fetchone()
+    # NB: `category=` would collide with logs.info's own first parameter
+    logs.info("process", f"concept LoRA '{body.name}' added to the library",
+              filename=body.filename, kind=body.category)
+    return {"concept_lora": dict(row)}
+
+
+@app.patch("/api/concept-loras/{lora_id}")
+async def concept_lora_update(lora_id: int, body: ConceptLoraPatch) -> dict:
+    fields = {k: v for k, v in body.model_dump().items() if v is not None}
+    if not fields:
+        raise HTTPException(400, "nothing to update")
+    if "category" in fields and fields["category"] not in CONCEPT_CATEGORIES:
+        raise HTTPException(400, f"category must be one of {', '.join(CONCEPT_CATEGORIES)}")
+    with db.connect() as conn:
+        row = conn.execute("SELECT * FROM concept_loras WHERE id = ?", (lora_id,)).fetchone()
+        if row is None:
+            raise HTTPException(404, "concept LoRA not found")
+        lo = fields.get("weight_min", row["weight_min"])
+        hi = fields.get("weight_max", row["weight_max"])
+        if hi < lo:
+            raise HTTPException(400, "weight_max must be >= weight_min")
+        sets = ", ".join(f"{k} = ?" for k in fields)
+        conn.execute(f"UPDATE concept_loras SET {sets} WHERE id = ?", (*fields.values(), lora_id))
+        row = conn.execute("SELECT * FROM concept_loras WHERE id = ?", (lora_id,)).fetchone()
+    return {"concept_lora": dict(row)}
+
+
+@app.delete("/api/concept-loras/{lora_id}")
+async def concept_lora_delete(lora_id: int) -> dict:
+    """Remove a library entry. Stacks already built keep working — they store the
+    filename, not a foreign key, precisely so curating the library can't break a version."""
+    with db.connect() as conn:
+        row = conn.execute("SELECT * FROM concept_loras WHERE id = ?", (lora_id,)).fetchone()
+        if row is None:
+            raise HTTPException(404, "concept LoRA not found")
+        conn.execute("DELETE FROM concept_loras WHERE id = ?", (lora_id,))
+    logs.info("process", f"concept LoRA '{row['name']}' removed from the library")
+    return {"deleted": lora_id}
+
+
 @app.get("/api/workflows")
 async def list_workflows() -> dict:
     return {"workflows": workflows.list_manifests()}
@@ -507,6 +618,15 @@ async def get_project(project_id: int) -> dict:
 # prompt versions — append-only, with sign-off and rollback
 # --------------------------------------------------------------------------- #
 
+class LoraStackEntry(BaseModel):
+    """One concept LoRA overlaid on top of the character/style LoRA (Phase H1b)."""
+    lora_name: str
+    strength_model: float = Field(default=0.7, ge=0.0, le=2.0)
+    strength_clip: float = Field(default=0.7, ge=0.0, le=2.0)
+    enabled: bool = True
+    triggers: str = ""
+
+
 class VersionCreate(BaseModel):
     character: str | None = None
     style: str | None = None
@@ -515,6 +635,7 @@ class VersionCreate(BaseModel):
     seed: int | None = None
     style_lora: str | None = None
     style_lora_strength: float | None = None
+    lora_stack: list[LoraStackEntry] | None = None
     source: str = "manual"          # manual | ollama
     note: str = ""
 
@@ -557,17 +678,21 @@ async def create_version(project_id: int, body: VersionCreate) -> dict:
             "style_lora": body.style_lora if body.style_lora is not None else parent["style_lora"],
             "style_lora_strength": (body.style_lora_strength if body.style_lora_strength is not None
                                     else parent["style_lora_strength"]),
+            # the concept-LoRA stack rides along with the prompt, so rollback restores it too
+            "lora_stack_json": (json.dumps([e.model_dump() for e in body.lora_stack])
+                                if body.lora_stack is not None
+                                else (parent["lora_stack_json"] or "[]")),
         }
         cur = conn.execute(
             """INSERT INTO prompt_versions
                (project_id, parent_id, character, style, negative, checkpoint, seed,
-                style_lora, style_lora_strength, source, note)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                style_lora, style_lora_strength, lora_stack_json, source, note)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 project_id, parent["id"], merged["character"], merged["style"],
                 merged["negative"], merged["checkpoint"], merged["seed"],
                 merged["style_lora"], merged["style_lora_strength"],
-                body.source, body.note,
+                merged["lora_stack_json"], body.source, body.note,
             ),
         )
         new_id = cur.lastrowid
@@ -697,6 +822,7 @@ class GenerateRequest(BaseModel):
     # the current version's saved LoRA; "" = force checkpoint-only for this run.
     style_lora: str | None = None
     style_lora_strength: float | None = None
+    lora_stack: list[LoraStackEntry] | None = None
 
 
 @app.post("/api/projects/{project_id}/generate")
@@ -717,18 +843,26 @@ async def generate(project_id: int, body: GenerateRequest) -> dict:
     params = {k: v for k, v in params.items() if v is not None}
     params.update(body.params)  # explicit params win
 
-    # A selected style LoRA upgrades base-character -> base-character-lora. Prefer the
-    # value sent with the request; fall back to whatever the saved version carries.
+    # A selected style LoRA or concept stack upgrades base-character ->
+    # base-character-lora. Prefer values sent with the request (the Studio previews an
+    # unsaved edit); fall back to whatever the saved version carries.
     lora_name = body.style_lora if body.style_lora is not None else version.get("style_lora")
     lora_strength = (body.style_lora_strength if body.style_lora_strength is not None
                      else version.get("style_lora_strength"))
-    workflow_id, lora_params = _resolve_style_lora(body.workflow, lora_name, lora_strength)
+    stack = (_parse_lora_stack([e.model_dump() for e in body.lora_stack])
+             if body.lora_stack is not None
+             else _parse_lora_stack(version.get("lora_stack_json")))
+    await _check_stack_files(stack)
+    workflow_id, lora_params, chain = _resolve_style_lora(
+        body.workflow, lora_name, lora_strength, stack)
     params.update(lora_params)
+    params = _apply_stack_triggers(params, stack)
 
     logs.info("process", f"generation requested ({workflow_id})",
-              project_id=project_id, slug=slug, version_id=version.get("id"))
+              project_id=project_id, slug=slug, version_id=version.get("id"),
+              lora_stack=len(stack) or None)
     try:
-        graph = workflows.build_graph(workflow_id, params)
+        graph = workflows.build_graph(workflow_id, params, lora_stack=chain)
         prompt_id = await comfy.submit(graph)
     except workflows.WorkflowError as exc:
         raise HTTPException(400, str(exc)) from exc
@@ -927,25 +1061,114 @@ def _version_prompt_params(version: dict[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in params.items() if v is not None}
 
 
-def _resolve_style_lora(
-    base_workflow: str, lora_name: str | None, strength: float | None
-) -> tuple[str, dict[str, Any]]:
-    """Given a Studio-family base workflow and a chosen style LoRA, return the workflow
-    to actually run plus any LoRA params to inject.
+def _parse_lora_stack(raw: Any) -> list[dict[str, Any]]:
+    """Read a version's stored stack, keeping only enabled entries that name a file."""
+    if not raw:
+        return []
+    try:
+        entries = json.loads(raw) if isinstance(raw, str) else list(raw)
+    except (json.JSONDecodeError, TypeError):
+        logs.warn("process", "ignoring malformed lora_stack_json on a version")
+        return []
+    out: list[dict[str, Any]] = []
+    for e in entries or []:
+        if not isinstance(e, dict) or not (e.get("lora_name") or "").strip():
+            continue
+        if not e.get("enabled", True):
+            continue
+        out.append({
+            "lora_name": e["lora_name"].strip(),
+            "strength_model": float(e.get("strength_model", 0.7)),
+            "strength_clip": float(e.get("strength_clip", 0.7)),
+            "triggers": (e.get("triggers") or "").strip(),
+        })
+    return out
 
-    An empty/absent LoRA (or a non-Studio base workflow) is a no-op: the base workflow
-    runs unchanged (checkpoint-only). A selected LoRA upgrades `base-character` to
-    `base-character-lora`, applying one strength to both the model and CLIP sides.
+
+def _stack_triggers(stack: list[dict[str, Any]]) -> str:
+    """Trigger words for the enabled entries, de-duplicated, order preserved.
+
+    Most concept LoRAs are inert without their trigger tokens, so the stack has to reach
+    the prompt as well as the model graph.
+    """
+    seen: set[str] = set()
+    out: list[str] = []
+    for entry in stack:
+        for tok in (t.strip() for t in entry.get("triggers", "").split(",")):
+            if tok and tok.lower() not in seen:
+                seen.add(tok.lower())
+                out.append(tok)
+    return ", ".join(out)
+
+
+def _apply_stack_triggers(params: dict[str, Any], stack: list[dict[str, Any]]) -> dict[str, Any]:
+    """Append the stack's trigger words to the style/framing text (all one prompt anyway)."""
+    triggers = _stack_triggers(stack)
+    if not triggers:
+        return params
+    out = dict(params)
+    style = (out.get("style") or "").strip()
+    out["style"] = f"{style}, {triggers}" if style else triggers
+    return out
+
+
+async def _check_stack_files(stack: list[dict[str, Any]]) -> None:
+    """Fail fast if a stacked LoRA is no longer on disk.
+
+    Worth the one extra call: without it the run dies inside ComfyUI with a node-level
+    error that says nothing about *which* stack entry went missing (a real risk, since a
+    stack stores filenames so that curating the library can't break a saved version).
+    """
+    if not stack:
+        return
+    try:
+        available = set(await comfy.list_models("loras"))
+    except Exception as exc:  # noqa: BLE001
+        logs.warn("integration", f"could not verify stacked LoRA files: {exc}")
+        return
+    missing = [e["lora_name"] for e in stack if e["lora_name"] not in available]
+    if missing:
+        raise HTTPException(
+            400,
+            "ComfyUI can no longer see these stacked LoRA file(s): "
+            + ", ".join(missing)
+            + " — remove them from the stack or restore the files.",
+        )
+
+
+def _resolve_style_lora(
+    base_workflow: str,
+    lora_name: str | None,
+    strength: float | None,
+    stack: list[dict[str, Any]] | None = None,
+) -> tuple[str, dict[str, Any], list[dict[str, Any]]]:
+    """Given a Studio-family base workflow, a style LoRA and a concept stack, return the
+    workflow to actually run, any single-LoRA params, and the full chain to splice.
+
+    Neither a LoRA nor a stack (or a non-Studio base workflow) is a no-op: the base
+    workflow runs unchanged (checkpoint-only). Either one upgrades `base-character` to
+    `base-character-lora`, whose `lora_chain` anchor carries the whole chain — the style
+    LoRA first, then the concept LoRAs in order, so identity is applied before the
+    pose/gesture overlays that sit on top of it.
     """
     name = (lora_name or "").strip()
-    if not name or base_workflow != "base-character":
-        return base_workflow, {}
+    stack = stack or []
+    if base_workflow != "base-character" or (not name and not stack):
+        return base_workflow, {}, []
+
     s = 1.0 if strength is None else float(strength)
+    chain: list[dict[str, Any]] = []
+    if name:
+        chain.append({"lora_name": name, "strength_model": s, "strength_clip": s})
+    chain.extend(stack)
+
+    # The single-LoRA params stay in sync with chain entry 0 so the manifest's declared
+    # params and the spliced graph never disagree.
     return "base-character-lora", {
-        "lora_name": name,
-        "lora_strength_model": s,
-        "lora_strength_clip": s,
-    }
+        "lora_name": chain[0]["lora_name"],
+        "lora_strength_model": chain[0]["strength_model"],
+        "lora_strength_clip": chain[0]["strength_clip"],
+    }, chain
 
 
 async def _reconcile_dataset(project_id: int) -> None:
@@ -1020,11 +1243,15 @@ async def dataset_generate(project_id: int, body: DatasetGenerateRequest) -> dic
     base = _version_prompt_params(version)
     vary = body.pose_variety
 
-    # Carry the version's style LoRA into the dataset so the trained character reflects
-    # the look chosen in the Studio (upgrades base-character -> base-character-lora).
-    ds_workflow, lora_params = _resolve_style_lora(
-        "base-character", version.get("style_lora"), version.get("style_lora_strength"))
-    base = {**base, **lora_params}
+    # Carry the version's style LoRA + concept stack into the dataset so the trained
+    # character reflects the look chosen in the Studio (upgrades base-character ->
+    # base-character-lora). The stack matters most here: a pose/gesture LoRA is exactly
+    # how a dataset gains body-language variety the checkpoint alone won't produce.
+    ds_stack = _parse_lora_stack(version.get("lora_stack_json"))
+    await _check_stack_files(ds_stack)
+    ds_workflow, lora_params, ds_chain = _resolve_style_lora(
+        "base-character", version.get("style_lora"), version.get("style_lora_strength"), ds_stack)
+    base = _apply_stack_triggers({**base, **lora_params}, ds_stack)
 
     # Continue the variation rotation across successive batches (Generate 30, then +10 more)
     # so coverage stays even instead of restarting at the first framing each time.
@@ -1051,7 +1278,7 @@ async def dataset_generate(project_id: int, body: DatasetGenerateRequest) -> dic
                 variation = _dataset_variation(offset + i, body.mode)
                 params["expression"] = variation
             try:
-                graph = workflows.build_graph(ds_workflow, params)
+                graph = workflows.build_graph(ds_workflow, params, lora_stack=ds_chain)
                 logs.verbose("process", f"queuing dataset image {i + 1}/{count}",
                              seed=seed, variation=variation)
                 prompt_id = await comfy.submit(graph)
@@ -1625,6 +1852,9 @@ async def _queue_pose(conn, project_id: int, slug: str, version: dict, pose_row:
 
     With a resolved `lora_cfg` the render goes through `pose-with-lora` (character LoRA
     loaded, trigger prepended); otherwise it uses the LoRA-free `base-character` graph.
+    Either way the version's concept-LoRA stack is chained on top (Phase H1b) — this is
+    the path that most wants it, since a pose the character LoRA never learned is exactly
+    what a gesture/pose LoRA is for.
     """
     params = {
         **_version_prompt_params(version),
@@ -1632,17 +1862,25 @@ async def _queue_pose(conn, project_id: int, slug: str, version: dict, pose_row:
         "expression": pose_row["modifier"] or None,
         "output_prefix": f"{slug}/images/pose_{pose_row['id']}",
     }
+    stack = _parse_lora_stack(version.get("lora_stack_json"))
+    chain = stack
     if lora_cfg:
         workflow_id = "pose-with-lora"
         params["lora_name"] = lora_cfg["lora_name"]
         params["lora_strength"] = lora_cfg["lora_strength"]
         params["trigger"] = lora_cfg["trigger"]
     else:
-        workflow_id = "base-character"
+        # No character LoRA: base-character has no chain anchor, so fall back to the
+        # Studio graph, which does — the stack still applies.
+        workflow_id, lora_params, chain = _resolve_style_lora(
+            "base-character", version.get("style_lora"), version.get("style_lora_strength"), stack)
+        params.update(lora_params)
+    params = _apply_stack_triggers(params, stack)
     params = {k: v for k, v in params.items() if v is not None}
     logs.verbose("process", "queuing pose render", pose_id=pose_row["id"], name=pose_row["name"],
-                 workflow=workflow_id, lora=lora_cfg["lora_name"] if lora_cfg else None)
-    graph = workflows.build_graph(workflow_id, params)
+                 workflow=workflow_id, lora=lora_cfg["lora_name"] if lora_cfg else None,
+                 lora_stack=len(stack) or None)
+    graph = workflows.build_graph(workflow_id, params, lora_stack=chain)
     prompt_id = await comfy.submit(graph)
     conn.execute("UPDATE poses SET prompt_id = ?, status = 'pending' WHERE id = ?",
                  (prompt_id, pose_row["id"]))

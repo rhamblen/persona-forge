@@ -19,7 +19,7 @@ const fmtDateTime = (ts) => (ts ? new Date(ts * 1000).toLocaleString() : "");
 const fmtDateShort = (ts) => (ts ? new Date(ts * 1000).toLocaleString([], {
   year: "2-digit", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "");
 
-let state = { projectId: null, versions: [], current: null, checkpoints: [], styleLoras: [], defaultCheckpoint: "", defaultNegative: "", versionOrdinals: {} };
+let state = { projectId: null, versions: [], current: null, checkpoints: [], styleLoras: [], defaultCheckpoint: "", defaultNegative: "", versionOrdinals: {}, loraStack: [], conceptLoras: [] };
 
 // Version rows carry a GLOBAL auto-increment id; the UI numbers them PER PROJECT (v1, v2, …).
 // API calls still use the real id — only the label is the ordinal.
@@ -157,6 +157,117 @@ function setLoraStrength(v) {
   $("f-style-lora-strength-val").textContent = s.toFixed(2);
 }
 
+/* ---------------- concept LoRA stack (Phase H1b) ----------------
+   The stack overlays pose/gesture LoRAs on top of the style/character LoRA. It lives on
+   the prompt version, so it is part of formValues() and rolls back with everything else. */
+
+async function loadConceptLoras() {
+  try {
+    const { concept_loras } = await api("/api/concept-loras");
+    state.conceptLoras = concept_loras || [];
+  } catch {
+    state.conceptLoras = [];
+  }
+  renderStack();   // also refreshes the add-list, and paints the empty state before any project loads
+}
+
+function conceptByFile(file) {
+  return state.conceptLoras.find((c) => c.filename === file) || null;
+}
+
+function renderStackAddOptions() {
+  const sel = $("stack-add-sel");
+  const inStack = new Set(state.loraStack.map((e) => e.lora_name));
+  const free = state.conceptLoras.filter((c) => !inStack.has(c.filename));
+  sel.innerHTML = free.length
+    ? free.map((c) => `<option value="${esc(c.filename)}">${esc(c.name)} · ${esc(c.category)}</option>`).join("")
+    : `<option value="">— ${state.conceptLoras.length ? "all registered LoRAs are already stacked" : "library is empty"} —</option>`;
+  $("stack-add-btn").disabled = !free.length;
+}
+
+function renderStack() {
+  const list = $("stack-list");
+  const n = state.loraStack.filter((e) => e.enabled).length;
+  $("stack-summary").textContent = n
+    ? `pose / gesture overlays — ${n} active`
+    : "pose / gesture overlays — none";
+  if (!state.loraStack.length) {
+    list.innerHTML = '<p class="muted small">Nothing stacked. The render uses the checkpoint + style LoRA only.</p>';
+    renderStackAddOptions();
+    return;
+  }
+  list.innerHTML = state.loraStack.map((e, i) => {
+    const meta = conceptByFile(e.lora_name);
+    const label = meta ? meta.name : e.lora_name;
+    // A file the library no longer knows (or ComfyUI can't see) still renders here so it
+    // can be removed — silently dropping it would strand the version.
+    const warn = meta
+      ? (meta.available === false ? '<span class="tag bad-tag" title="ComfyUI cannot see this file">missing</span>' : "")
+      : '<span class="tag" title="not in the library — kept so it can be removed">unregistered</span>';
+    return `
+      <div class="stack-row${e.enabled ? "" : " stack-row-off"}" data-i="${i}">
+        <input type="checkbox" class="stack-en" ${e.enabled ? "checked" : ""} title="Enable / disable" />
+        <span class="stack-name">
+          ${esc(label)}
+          ${meta ? `<span class="tag">${esc(meta.category)}</span>` : ""}
+          ${meta && meta.base_model ? `<span class="tag">${esc(meta.base_model)}</span>` : ""}
+          ${warn}
+          ${e.triggers ? `<span class="muted small">· ${esc(e.triggers)}</span>` : ""}
+        </span>
+        <input type="range" class="stack-str" min="0" max="2" step="0.05" value="${e.strength_model}" />
+        <span class="chip small stack-str-val">${Number(e.strength_model).toFixed(2)}</span>
+        <button class="btn btn-ghost stack-up" type="button" title="Move earlier" ${i === 0 ? "disabled" : ""}>↑</button>
+        <button class="btn btn-ghost stack-down" type="button" title="Move later" ${i === state.loraStack.length - 1 ? "disabled" : ""}>↓</button>
+        <button class="btn btn-ghost stack-del" type="button" title="Remove">✕</button>
+      </div>`;
+  }).join("");
+
+  list.querySelectorAll(".stack-row").forEach((row) => {
+    const i = parseInt(row.dataset.i, 10);
+    row.querySelector(".stack-en").addEventListener("change", (ev) => {
+      state.loraStack[i].enabled = ev.target.checked;
+      renderStack();
+    });
+    row.querySelector(".stack-str").addEventListener("input", (ev) => {
+      const v = parseFloat(ev.target.value);
+      // strength_clip tracks the model side: one knob is enough here, and splitting them
+      // is a power-user setting that would only invite mismatched pairs.
+      state.loraStack[i].strength_model = v;
+      state.loraStack[i].strength_clip = v;
+      row.querySelector(".stack-str-val").textContent = v.toFixed(2);
+      $("stack-summary").textContent = `pose / gesture overlays — ${state.loraStack.filter((e) => e.enabled).length} active`;
+    });
+    row.querySelector(".stack-up").addEventListener("click", () => {
+      [state.loraStack[i - 1], state.loraStack[i]] = [state.loraStack[i], state.loraStack[i - 1]];
+      renderStack();
+    });
+    row.querySelector(".stack-down").addEventListener("click", () => {
+      [state.loraStack[i + 1], state.loraStack[i]] = [state.loraStack[i], state.loraStack[i + 1]];
+      renderStack();
+    });
+    row.querySelector(".stack-del").addEventListener("click", () => {
+      state.loraStack.splice(i, 1);
+      renderStack();
+    });
+  });
+  renderStackAddOptions();
+}
+
+function setStack(entries) {
+  state.loraStack = (entries || []).map((e) => ({
+    lora_name: e.lora_name,
+    strength_model: Number(e.strength_model ?? 0.7),
+    strength_clip: Number(e.strength_clip ?? e.strength_model ?? 0.7),
+    enabled: e.enabled !== false,
+    triggers: e.triggers || "",
+  }));
+  renderStack();
+}
+
+function parseStackJson(raw) {
+  try { return JSON.parse(raw || "[]"); } catch { return []; }
+}
+
 async function loadPromptDefaults() {
   try {
     const d = await api("/api/prompt-defaults");
@@ -192,6 +303,7 @@ function fillForm(v) {
   $("f-style-lora").value = (lora && state.styleLoras.includes(lora)) ? lora : "";
   setLoraStrength(v.style_lora_strength ?? 1.0);
   syncLoraStrengthVisibility();
+  setStack(parseStackJson(v.lora_stack_json));
   $("current-version-chip").textContent = `${verLabel(v.id)}${v.signed_off ? " · signed off" : ""}`;
   $("current-version-chip").className = "chip" + (v.signed_off ? " chip-good" : "");
 }
@@ -205,6 +317,7 @@ function formValues() {
     seed: parseInt($("f-seed").value || "0", 10),
     style_lora: $("f-style-lora").value,
     style_lora_strength: parseFloat($("f-style-lora-strength").value || "1"),
+    lora_stack: state.loraStack,
   };
 }
 
@@ -226,6 +339,9 @@ function diffSummary(v, parent) {
   if (!parent) return '<span class="muted">initial version</span>';
   const changed = ["character", "style", "negative", "checkpoint", "seed", "style_lora", "style_lora_strength"]
     .filter((k) => String(v[k]) !== String(parent[k]));
+  // normalise before comparing: '' and '[]' both mean "no stack" on older rows
+  const stackOf = (r) => JSON.stringify(parseStackJson(r.lora_stack_json));
+  if (stackOf(v) !== stackOf(parent)) changed.push("lora_stack");
   if (!changed.length) return '<span class="muted">no field changes</span>';
   return changed.map((k) => `<span class="tag">${k}</span>`).join(" ");
 }
@@ -298,15 +414,15 @@ async function generate() {
   msg($("studio-msg"), "Generating… (first run loads the checkpoint, ~30–60s)");
   $("preview").innerHTML = '<div class="spinner"></div>';
   try {
-    // The two LoRA fields are request-level, not base-character workflow params — the
-    // backend upgrades to base-character-lora when a LoRA is set.
-    const { style_lora, style_lora_strength, ...params } = formValues();
+    // The LoRA fields are request-level, not base-character workflow params — the backend
+    // upgrades to base-character-lora when a style LoRA or a concept stack is set.
+    const { style_lora, style_lora_strength, lora_stack, ...params } = formValues();
     // Sampler tuning is ephemeral (per-run only) — merged into the workflow params here,
     // deliberately NOT part of formValues() so it never touches version save/diff.
     Object.assign(params, genSettings());
     const res = await api(`/api/projects/${state.projectId}/generate`, {
       method: "POST",
-      body: JSON.stringify({ workflow: "base-character", params, style_lora, style_lora_strength }),
+      body: JSON.stringify({ workflow: "base-character", params, style_lora, style_lora_strength, lora_stack }),
     });
     const img = res.images?.[0];
     if (img) {
@@ -1370,6 +1486,109 @@ $("reroll-seed").addEventListener("click", () => { $("f-seed").value = Math.floo
 $("f-style-lora").addEventListener("change", syncLoraStrengthVisibility);
 $("f-style-lora-strength").addEventListener("input", (e) => setLoraStrength(parseFloat(e.target.value)));
 
+/* ---------------- concept LoRA stack + library ---------------- */
+
+$("stack-add-btn").addEventListener("click", () => {
+  const file = $("stack-add-sel").value;
+  if (!file) return;
+  const meta = conceptByFile(file);
+  // Start at the middle of the library's recommended range — concept LoRAs overpower the
+  // character at 1.0, and a sensible default is the difference between "works" and "why
+  // does she look like someone else".
+  const w = meta ? Math.round(((meta.weight_min + meta.weight_max) / 2) * 20) / 20 : 0.7;
+  state.loraStack.push({
+    lora_name: file,
+    strength_model: w,
+    strength_clip: w,
+    enabled: true,
+    triggers: meta ? meta.trigger_words || "" : "",
+  });
+  renderStack();
+  msg($("studio-msg"), "Added to the stack — Save version to keep it.");
+});
+
+function libRow(c) {
+  const avail = c.available === false
+    ? '<span class="tag bad-tag" title="ComfyUI cannot see this file">missing</span>'
+    : "";
+  return `<div class="lib-row" data-id="${c.id}">
+    <span class="lib-main">
+      <strong>${esc(c.name)}</strong> <span class="tag">${esc(c.category)}</span>
+      ${c.base_model ? `<span class="tag">${esc(c.base_model)}</span>` : ""} ${avail}
+      <br /><span class="muted small">${esc(c.filename)}</span>
+      ${c.trigger_words ? `<br /><span class="muted small">triggers: ${esc(c.trigger_words)}</span>` : ""}
+      ${c.notes ? `<br /><span class="muted small">${esc(c.notes)}</span>` : ""}
+    </span>
+    <span class="muted small">${Number(c.weight_min).toFixed(2)}–${Number(c.weight_max).toFixed(2)}</span>
+    <button class="btn btn-ghost lib-del" type="button" title="Remove from library">✕</button>
+  </div>`;
+}
+
+function renderLibrary() {
+  const list = $("lib-list");
+  list.innerHTML = state.conceptLoras.length
+    ? state.conceptLoras.map(libRow).join("")
+    : '<p class="muted small">No concept LoRAs registered yet. Register one below to make it stackable.</p>';
+  list.querySelectorAll(".lib-del").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const id = btn.closest(".lib-row").dataset.id;
+      try {
+        await api(`/api/concept-loras/${id}`, { method: "DELETE" });
+        await loadConceptLoras();
+        renderLibrary();
+        // Stacks store filenames, not ids, so an existing stack keeps working — just
+        // re-render so the entry shows as "unregistered".
+        renderStack();
+        msg($("lib-msg"), "Removed. Stacks already using it still render.", "ok");
+      } catch (e) { msg($("lib-msg"), e.message, "bad"); }
+    });
+  });
+}
+
+async function openLibrary() {
+  // Show first, then populate: the listing round-trips to ComfyUI to check which files
+  // are still visible, which can take seconds — long enough that awaiting it before
+  // revealing the modal reads as a dead click.
+  msg($("lib-msg"), "");
+  $("lib-modal").hidden = false;
+  $("lib-list").innerHTML = '<p class="muted small">Loading…</p>';
+  await loadConceptLoras();
+  renderLibrary();
+  // offer every LoRA ComfyUI can see that isn't registered yet
+  const known = new Set(state.conceptLoras.map((c) => c.filename));
+  const free = state.styleLoras.filter((f) => !known.has(f));
+  $("lib-file").innerHTML = free.length
+    ? free.map((f) => `<option value="${esc(f)}">${esc(f)}</option>`).join("")
+    : '<option value="">— every visible LoRA is already registered —</option>';
+}
+
+$("stack-library-btn").addEventListener("click", openLibrary);
+$("lib-close").addEventListener("click", () => { $("lib-modal").hidden = true; });
+$("lib-modal").addEventListener("click", (e) => {
+  if (e.target === $("lib-modal")) $("lib-modal").hidden = true;
+});
+
+$("lib-add").addEventListener("click", async () => {
+  const filename = $("lib-file").value;
+  if (!filename) { msg($("lib-msg"), "Pick a LoRA file first.", "bad"); return; }
+  const body = {
+    filename,
+    name: $("lib-name").value.trim() || filename.split("/").pop().replace(/\.safetensors$/i, ""),
+    category: $("lib-category").value,
+    base_model: $("lib-base").value.trim(),
+    trigger_words: $("lib-triggers").value.trim(),
+    weight_min: parseFloat($("lib-wmin").value || "0.4"),
+    weight_max: parseFloat($("lib-wmax").value || "0.8"),
+    notes: $("lib-notes").value.trim(),
+  };
+  try {
+    await api("/api/concept-loras", { method: "POST", body: JSON.stringify(body) });
+    ["lib-name", "lib-base", "lib-triggers", "lib-notes"].forEach((id) => ($(id).value = ""));
+    await openLibrary();
+    msg($("lib-msg"), `Registered ${body.name}.`, "ok");
+  } catch (e) { msg($("lib-msg"), e.message, "bad"); }
+});
+
 $("save-version-btn").addEventListener("click", async () => {
   try { const v = await saveVersion(); msg($("studio-msg"), `Saved as ${verLabel(v.id)}.`, "ok"); }
   catch (e) { msg($("studio-msg"), e.message, "bad"); }
@@ -1382,7 +1601,8 @@ $("signoff-btn").addEventListener("click", async () => {
     const f = formValues();
     const dirty = ["character", "style", "negative", "checkpoint", "style_lora"].some((k) => f[k] !== (cur[k] ?? "")) ||
                   f.seed !== cur.seed ||
-                  f.style_lora_strength !== (cur.style_lora_strength ?? 1.0);
+                  f.style_lora_strength !== (cur.style_lora_strength ?? 1.0) ||
+                  JSON.stringify(f.lora_stack) !== JSON.stringify(parseStackJson(cur.lora_stack_json));
     const v = dirty ? await saveVersion("signed-off baseline") : cur;
     await signOff(v.id);
   } catch (e) { msg($("studio-msg"), e.message, "bad"); }
@@ -1447,6 +1667,7 @@ $("np-create").addEventListener("click", async () => {
   await refreshStatus();
   await loadCheckpoints();
   await loadStyleLoras();
+  await loadConceptLoras();   // before loadProjects, so fillForm can label stack entries
   await loadPromptDefaults();
   await loadProjects().catch((e) => msg($("studio-msg"), e.message, "bad"));
   setInterval(refreshStatus, POLL_MS);

@@ -292,7 +292,8 @@ the baseline for a different emotion.*
   LoRA v1 is trained from a signed-off `core` **and** the 28 baseline sprites are rendered
   and reviewed. Reviewing that baseline (grouped **by axis**, not alphabetically) is what
   identifies the weak axis worth honing.
-- **The LoRA stack — a secondary overlay tool (user request, 2026-07-26).** Distinguish the
+- **The LoRA stack — a secondary overlay tool (user request, 2026-07-26).** ✅ **SHIPPED in
+  0.8.0.** Distinguish the
   **character LoRA** (trained here, one per character, carries *who*) from **concept LoRAs**
   (third-party, stacked, carry *what the body is doing* — arm movement, sitting positions,
   gestures). The Prompt/Pose studios gain a **stack editor** (N LoRAs, per-entry model/CLIP

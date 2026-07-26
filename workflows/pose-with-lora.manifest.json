@@ -1,9 +1,15 @@
 {
   "id": "pose-with-lora",
   "name": "Pose render (with character LoRA)",
-  "description": "Phase 6: render one pose/expression from the signed-off character prompt with the project's trained character LoRA loaded (LoraLoaderModelOnly, model-only) and its trigger word prepended, so posture/expression variants stay on-model. Used by the Poses tab when a LoRA is selected; poses fall back to base-character when none is.",
+  "description": "Phase 6: render one pose/expression from the signed-off character prompt with the project's trained character LoRA loaded (LoraLoaderModelOnly, model-only) and its trigger word prepended, so posture/expression variants stay on-model. Used by the Poses tab when a LoRA is selected; poses fall back to base-character when none is. `lora_chain` (Phase H1b) injects a full model+CLIP chain of concept LoRAs *after* the character LoRA when the version has a stack — the template itself has no loader to spare, so nothing is added when the stack is empty.",
   "file": "pose-with-lora.json",
   "output_node": "12",
+  "lora_chain": {
+    "class_type": "LoraLoader",
+    "model_source": ["13", 0],
+    "clip_source": ["1", 1],
+    "id_prefix": "cl"
+  },
   "params": {
     "trigger":       { "node": "14", "input": "value",        "type": "text",  "label": "Trigger word" },
     "lora_name":     { "node": "13", "input": "lora_name",    "type": "model", "label": "Character LoRA", "model_type": "loras" },

@@ -122,12 +122,15 @@ never built there.
 ## Status
 
 Prompt Studio, the Dataset builder, **per-character LoRA training** (validated) and the
-**Pose / expression studio with SillyTavern sprite export** are all working — shipped
-through **v0.6.2**. Next comes hardening (0.7), then **Character Studio (0.8)** — the
-plain-language character-sheet front door described above, which adds the one piece the
-pipeline never produced: the character *card* itself, not just the sprites. See the
-roadmap in [PROJECT_PLAN.md](PROJECT_PLAN.md) and the release history in
-[CHANGELOG.md](CHANGELOG.md).
+**Pose / expression studio with SillyTavern sprite export** are all working, followed by
+hardening through **v0.7.x**. **v0.8.0 starts Phase H — emotional depth**, beginning with
+the **concept LoRA stack**: overlay third-party pose/gesture LoRAs on top of your own
+character LoRA to reach postures it can't produce alone. Still ahead in Phase H are
+emotion axes + intensity tiers, per-emotion dataset enrichment, and selective sprite
+rebuild — see [docs/emotion-depth.md](docs/emotion-depth.md). **Character Studio** (the
+plain-language character-sheet front door that produces the character *card*, not just the
+sprites) follows at 0.9. See the roadmap in [PROJECT_PLAN.md](PROJECT_PLAN.md) and the
+release history in [CHANGELOG.md](CHANGELOG.md).
 
 Versioning is `0.<phase>.<iteration>` — the middle digit is the phase, the last
 increments with each update inside it.

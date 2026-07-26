@@ -1,5 +1,16 @@
 # AI Context — cold-start orientation
 
+> **2026-07-26 — v0.8.0 starts Phase H (emotional depth).** Design lives in
+> `docs/emotion-depth.md`; read it before touching LoRA/dataset/pose code. Shipped in 0.8.0:
+> the **concept LoRA stack** (H1b) — `prompt_versions.lora_stack_json` + a `concept_loras`
+> library table, `workflows.build_graph(..., lora_stack=)` splicing a chain of **core**
+> `LoraLoader` nodes (anchor mode for `base-character-lora`, inject mode for `pose-with-lora`),
+> applied to previews, dataset batches and pose renders, with trigger words auto-appended.
+> Still to build in H1: axes×tiers map, dataset layers + `mode="emotion"` enrichment behind the
+> **baseline gate** (no focused build before the basic 28 exist and are reviewed), `lora_builds`
+> versioning, and per-axis selective sprite rebuild. **Roadmap resequenced**: Character Studio
+> moved 0.8→0.9.
+
 > **Latest session handover:** `docs/handover-2026-07-25.md` — shipped 0.6.2→0.7.1 (LoRA-driven
 > poses, training timer, **generic job engine + `lora_build` overnight build**, prompt-studio
 > fixes), moved aux GPU containers off the 3090. **0.7.2 + 0.7.3 fixed the weak/pose-locked LoRA**
@@ -90,6 +101,10 @@ LAN; no Claude/Anthropic in the runtime loop.
 
 - **Health/status:** `GET /api/health`, `/api/comfyui/status`, `/api/storage/status`.
 - **Models/workflows:** `GET /api/models?kind=` (returns `default`), `/api/workflows[/{id}]`.
+- **Concept LoRA library (0.8.0):** `GET/POST /api/concept-loras`, `PATCH/DELETE
+  /api/concept-loras/{id}`. Global (not per project). List annotates each row with
+  `available` (whether ComfyUI still sees the file). The per-version *stack* is not here —
+  it rides on the prompt version as `lora_stack_json`.
 - **AI assistant:** `GET /api/ai/status` (reachable/loaded), `POST /api/ai/warm`,
   `/api/ai/unload`, `/api/ai/suggest-prompt` (`{instruction, mode: replace|modify, character, style, negative}`).
 - **Container control:** `GET /api/containers/status`, `POST /api/containers/{key}/start`,
@@ -276,7 +291,26 @@ LAN; no Claude/Anthropic in the runtime loop.
   scheduler `<option>`s are a curated static list (canonical ComfyUI enum names), not fetched from
   `/object_info`. Possible follow-up: **persist per version** (steps/cfg/sampler/scheduler columns,
   the fuller "reproducible baseline" option we deferred).
-- **Remaining:** 0.7.x hardening · 1.0 release. The **dataset side of the weak-LoRA fix is now
+- **0.8.0:** **Phase H1b — concept LoRA stack.** Separates the *character* LoRA (identity, one,
+  trained here) from *concept* LoRAs (pose/gesture/expression, third-party, stacked). New
+  `concept_loras` library table + `prompt_versions.lora_stack_json` (JSON on the version, **not** a
+  child table — versions are append-only, so the stack versions and rolls back for free; entries
+  store the **filename**, not a library id, so curating the library can't break a saved version).
+  `workflows.apply_lora_stack()` splices a chain of **core `LoraLoader`** nodes and repoints
+  downstream consumers at the tail; two manifest shapes — `lora_chain: {node}` (**anchor**, reuses
+  `base-character-lora`'s existing loader) and `lora_chain: {class_type, model_source, clip_source,
+  id_prefix}` (**inject**, builds the whole chain for `pose-with-lora`, whose character LoRA is
+  `LoraLoaderModelOnly` with CLIP off the checkpoint — avoids a second workflow file and leaves the
+  graph untouched when the stack is empty). `_resolve_style_lora()` now returns
+  `(workflow, params, chain)` with the style LoRA as chain entry 0. Applied to **previews, dataset
+  batches and pose renders**; `_stack_triggers()`/`_apply_stack_triggers()` append de-duplicated
+  trigger words to `style`; `_check_stack_files()` fails fast on a missing file. **Verified against
+  live ComfyUI 0.28.0** (graphs, CRUD, versioning/rollback, guard, browser interactions); no image
+  rendered as part of that. Note `logs.info(category=...)` collides with the logger's own first
+  param — pass `kind=` instead.
+- **Remaining:** rest of **Phase H1** (axes×tiers, dataset layers + emotion enrichment behind the
+  baseline gate, `lora_builds` versioning, per-axis selective rebuild — see `docs/emotion-depth.md`)
+  · Character Studio at **0.9** · 1.0 release. The **dataset side of the weak-LoRA fix is now
   complete** (0.7.2 pose + 0.7.3 framing/expression + 0.7.6 targeting/variety).
 - **Future infra (HARDWARE-GATED, added 2026-07-26):** user is swapping UR1's RTX 3060 → a second
   **RTX 3090 24 GB** (→ 2× 3090). Unlocks a **dedicated training GPU**: a 2nd ComfyUI instance

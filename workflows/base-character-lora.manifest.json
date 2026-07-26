@@ -1,9 +1,10 @@
 {
   "id": "base-character-lora",
   "name": "Base character + style LoRA (single image)",
-  "description": "Prompt Studio variant of base-character with an external style/detail LoRA loaded through a full LoraLoader (model + CLIP, so text-encoder-side style LoRAs work). Used automatically by the Studio and dataset generation whenever the version has a Style LoRA selected; renders identically to base-character when none is.",
+  "description": "Prompt Studio variant of base-character with external LoRAs loaded through full LoraLoaders (model + CLIP, so text-encoder-side style LoRAs work). Used automatically by the Studio and dataset generation whenever the version has a Style LoRA or a concept-LoRA stack; renders identically to base-character when it has neither. Node 13 is the chain anchor: `lora_chain` lets the backend clone it into a chain of core LoraLoaders, one per stack entry (Phase H1b).",
   "file": "base-character-lora.json",
   "output_node": "12",
+  "lora_chain": { "node": "13" },
   "params": {
     "character":   { "node": "2",  "input": "value",           "type": "text",  "label": "Character",  "multiline": true },
     "style":       { "node": "3",  "input": "value",           "type": "text",  "label": "Style + framing", "multiline": true },

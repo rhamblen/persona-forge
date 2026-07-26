@@ -174,6 +174,26 @@
                 </label>
               </div>
 
+              <details class="gen-settings" id="stack-block">
+                <summary>Concept LoRA stack <em id="stack-summary">pose / gesture overlays — none</em></summary>
+                <p class="muted small">
+                  Third-party LoRAs that carry <strong>what the body is doing</strong> — arm movement,
+                  sitting positions, gestures — chained on top of the style/character LoRA. Use them to
+                  reach poses the character LoRA can't produce alone; their trigger words are appended to
+                  the prompt automatically. Saved with the version, so they roll back with it.
+                  Keep the stack to <strong>2–3</strong>: stacked LoRAs fight, and identity is what loses.
+                </p>
+                <div id="stack-list"></div>
+                <div class="field-row">
+                  <label class="field">
+                    <span class="field-label">Add from library</span>
+                    <select id="stack-add-sel"></select>
+                  </label>
+                  <button class="btn" id="stack-add-btn" type="button">Add</button>
+                  <button class="btn btn-ghost" id="stack-library-btn" type="button">Manage library…</button>
+                </div>
+              </details>
+
               <details class="gen-settings">
                 <summary>Generation settings <em>sampler tuning — applies to this preview run only</em></summary>
                 <div class="field-row">
@@ -581,6 +601,75 @@
       <div class="actions">
         <button class="btn btn-primary" id="np-create">Create</button>
         <button class="btn" id="np-cancel">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- concept-LoRA library (Phase H1b) — registered pose/gesture LoRAs, shared by every persona -->
+  <div class="modal-backdrop" id="lib-modal" hidden>
+    <div class="modal modal-wide">
+      <h2>Concept LoRA library</h2>
+      <p class="muted small">
+        Pose / gesture / expression LoRAs available to every persona's stack. <strong>Base model</strong>
+        is compatibility, not a label — an SD1.5 LoRA will not load on an SDXL checkpoint.
+        <strong>Triggers</strong> get appended to the prompt when the entry is stacked; most concept
+        LoRAs do nothing without them.
+      </p>
+      <div id="lib-list" class="lib-list"></div>
+
+      <details class="gen-settings">
+        <summary>Register a LoRA</summary>
+        <div class="field-row">
+          <label class="field">
+            <span class="field-label">LoRA file</span>
+            <select id="lib-file"></select>
+          </label>
+          <label class="field">
+            <span class="field-label">Display name</span>
+            <input id="lib-name" placeholder="e.g. Arm movement" />
+          </label>
+        </div>
+        <div class="field-row">
+          <label class="field field-narrow">
+            <span class="field-label">Category</span>
+            <select id="lib-category">
+              <option value="pose">pose</option>
+              <option value="gesture">gesture</option>
+              <option value="expression">expression</option>
+              <option value="style">style</option>
+            </select>
+          </label>
+          <label class="field field-narrow">
+            <span class="field-label">Base model</span>
+            <input id="lib-base" placeholder="e.g. sdxl / noobai-xl" />
+          </label>
+          <label class="field">
+            <span class="field-label">Trigger words <em>comma-separated</em></span>
+            <input id="lib-triggers" placeholder="e.g. arms up, reaching" />
+          </label>
+        </div>
+        <div class="field-row">
+          <label class="field field-narrow">
+            <span class="field-label">Weight min</span>
+            <input id="lib-wmin" type="number" min="0" max="2" step="0.05" value="0.4" />
+          </label>
+          <label class="field field-narrow">
+            <span class="field-label">Weight max</span>
+            <input id="lib-wmax" type="number" min="0" max="2" step="0.05" value="0.8" />
+          </label>
+          <label class="field">
+            <span class="field-label">Notes</span>
+            <input id="lib-notes" placeholder="optional" />
+          </label>
+        </div>
+        <div class="actions">
+          <button class="btn btn-primary" id="lib-add" type="button">Register</button>
+        </div>
+      </details>
+
+      <p class="hint" id="lib-msg"></p>
+      <div class="actions">
+        <button class="btn" id="lib-close" type="button">Close</button>
       </div>
     </div>
   </div>

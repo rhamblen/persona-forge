@@ -9,6 +9,59 @@ Every version below is a **published GitHub Release** with a matching
 
 ---
 
+## [0.8.0] — 2026-07-26
+
+**Concept LoRA stack — overlay pose/gesture LoRAs on any render.** (Phase H, stage 1b —
+the first piece of the emotional-depth work in [`docs/emotion-depth.md`](docs/emotion-depth.md).)
+
+Separates the two kinds of LoRA this pipeline uses: the **character LoRA** (trained here, one
+per persona, carries *who*) and **concept LoRAs** (third-party, stacked, carry *what the body is
+doing* — arm movement, sitting positions, gestures). Reach poses the character LoRA can't produce
+alone, and — the reason this lands first — generate enrichment data that adds **external signal**
+instead of recycling the model's own output.
+
+### Added
+- **Concept LoRA stack** in the Prompt Studio — a collapsible panel to stack N LoRAs on top of the
+  style/character LoRA: enable/disable, per-entry strength, reorder (the chain applies top-down),
+  and remove. **Saved on the prompt version**, so it rolls back with everything else and shows up
+  in the version diff as `lora_stack`.
+- **Concept LoRA library** (`/api/concept-loras`, CRUD + a "Manage library…" modal) — register a
+  LoRA once and stack it on any persona. Each entry records **base-model compatibility** (an SD1.5
+  LoRA will not load on an SDXL checkpoint), **trigger words**, a recommended weight range, and a
+  category (`pose` / `gesture` / `expression` / `style`).
+- **Trigger words are appended to the prompt automatically** for enabled entries, de-duplicated
+  case-insensitively. Most concept LoRAs are inert without them, so the stack has to reach the
+  prompt as well as the model graph.
+- **Pre-flight check**: a stacked LoRA ComfyUI can no longer see fails with a message naming the
+  file, instead of a node-level ComfyUI error that doesn't say which entry broke.
+
+### Changed
+- `workflows.build_graph()` takes an optional `lora_stack` and splices a **chain of core
+  `LoraLoader` nodes**, threading model+CLIP through in order and repointing every downstream
+  consumer at the chain tail. Two manifest shapes: **anchor** (`base-character-lora` reuses its
+  existing loader) and **inject** (`pose-with-lora` gets a full model+CLIP chain built from
+  nothing, since its own character LoRA is model-only with CLIP straight off the checkpoint).
+- The stack applies to **all three generation paths** — Studio preview, dataset batches, and pose
+  renders. Dataset batches matter most: a pose/gesture LoRA is exactly how a dataset gains
+  body-language variety the checkpoint won't produce on its own.
+- `_resolve_style_lora()` now returns the workflow, the single-LoRA params, and the full chain;
+  the style LoRA is always chain entry 0, so identity is applied before the overlays on top of it.
+
+### Notes
+- **Core ComfyUI nodes only.** A "power LoRA loader" custom node would be tidier, but
+  `custom_nodes` is read-only over SMB on UR1 — this needs nothing installed.
+- **Migration is automatic**: `prompt_versions.lora_stack_json` (default `[]`) and a new
+  `concept_loras` table are added on boot. Existing versions are untouched and render exactly as
+  before. The stack is stored as JSON *on the version* rather than in a child table precisely
+  because versions are append-only — it then versions and rolls back for free.
+- Stacks store **filenames, not library ids**, so deleting a library entry can never break a saved
+  version; the stack row just shows as `unregistered` and can be removed.
+- Keep stacks to **2–3**: stacked LoRAs fight, and identity is what loses. Entries default to the
+  middle of the library's recommended weight range rather than 1.0.
+- **Verified** against a live ComfyUI (0.28.0) for graph construction, library CRUD, version
+  save/inherit/rollback, the missing-file guard, and every stack interaction in the browser. No
+  image was generated as part of this verification.
+
 ## [0.7.10] — 2026-07-26
 
 **A1111-style sampler controls in the Prompt Studio.** (Phase 7.)

@@ -57,8 +57,115 @@ def get_manifest(workflow_id: str) -> dict[str, Any]:
     raise WorkflowError(f"unknown workflow '{workflow_id}'")
 
 
-def build_graph(workflow_id: str, params: dict[str, Any]) -> dict[str, Any]:
-    """Load the template and patch the requested parameters into it."""
+def _same_link(val: Any, link: Any) -> bool:
+    return (
+        isinstance(val, list)
+        and len(val) == 2
+        and isinstance(link, list)
+        and len(link) == 2
+        and str(val[0]) == str(link[0])
+        and val[1] == link[1]
+    )
+
+
+def _rewire_link(graph: dict[str, Any], old: Any, new: list[Any], skip: set[str]) -> None:
+    """Repoint every input carrying link `old` at `new`, except inside `skip` nodes."""
+    if old is None:
+        return
+    for node_id, node in graph.items():
+        if node_id in skip:
+            continue
+        for field, val in (node.get("inputs") or {}).items():
+            if _same_link(val, old):
+                node["inputs"][field] = list(new)
+
+
+def apply_lora_stack(
+    graph: dict[str, Any], manifest: dict[str, Any], stack: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """Splice a chain of `LoraLoader` nodes into a workflow that declares `lora_chain`.
+
+    One node per stack entry, model+CLIP threaded through in order, and every downstream
+    consumer repointed at the chain tail. Two shapes, because the two workflows differ:
+
+    - **anchor** (`{"node": "13"}`) — the template already has a loader; entry 0 reuses it
+      and the rest are clones. Used by `base-character-lora`, whose loader exists so the
+      no-stack case still renders.
+    - **inject** (`{"model_source": [...], "clip_source": [...]}`) — the template has no
+      loader to spare; the whole chain is created here. Lets `pose-with-lora` (whose own
+      character LoRA is model-only, with CLIP straight off the checkpoint) gain a full
+      model+CLIP concept stack without a second template file, and leaves the graph
+      untouched when the stack is empty.
+
+    Deliberately built from **core `LoraLoader` nodes only** — a "power LoRA loader"
+    custom node would be tidier, but `custom_nodes` is read-only over SMB on UR1, so a
+    workflow that needs nothing installed is worth the extra wiring here.
+    """
+    chain = manifest.get("lora_chain")
+    if not chain or not stack:
+        return graph
+
+    anchor = str(chain["node"]) if chain.get("node") else ""
+    if anchor:
+        if anchor not in graph:
+            raise WorkflowError(f"lora_chain points at node '{anchor}' which is not in the template")
+        base = graph[anchor]
+        class_type = base["class_type"]
+        model_src = (base.get("inputs") or {}).get("model")
+        clip_src = (base.get("inputs") or {}).get("clip")
+        # consumers link to the anchor's own outputs
+        old_model, old_clip = [anchor, 0], [anchor, 1]
+        node_ids = [anchor]
+        start = 1
+    else:
+        class_type = chain.get("class_type", "LoraLoader")
+        model_src = chain.get("model_source")
+        clip_src = chain.get("clip_source")
+        if model_src is None or clip_src is None:
+            raise WorkflowError("lora_chain needs either 'node' or both 'model_source' and 'clip_source'")
+        # consumers currently link to whatever fed the chain; they move to the tail
+        old_model, old_clip = model_src, clip_src
+        node_ids = []
+        start = 0
+
+    prefix = chain.get("id_prefix") or (f"{anchor}s" if anchor else "loraX")
+    for i in range(start, len(stack)):
+        new_id = f"{prefix}{i}"
+        if new_id in graph:
+            raise WorkflowError(f"lora chain node id '{new_id}' collides with the template")
+        graph[new_id] = {"class_type": class_type, "inputs": {}}
+        node_ids.append(new_id)
+
+    # Repoint downstream consumers at the tail *before* the chain links itself up, so the
+    # chain's own internal links aren't caught by the rewire.
+    tail = node_ids[-1]
+    skip = set(node_ids)
+    _rewire_link(graph, old_model, [tail, 0], skip)
+    _rewire_link(graph, old_clip, [tail, 1], skip)
+
+    prev_model, prev_clip = model_src, clip_src
+    for node_id, entry in zip(node_ids, stack):
+        inputs = graph[node_id].setdefault("inputs", {})
+        inputs["model"] = prev_model
+        inputs["clip"] = prev_clip
+        inputs["lora_name"] = entry["lora_name"]
+        inputs["strength_model"] = float(entry.get("strength_model", 1.0))
+        inputs["strength_clip"] = float(entry.get("strength_clip", 1.0))
+        prev_model, prev_clip = [node_id, 0], [node_id, 1]
+    return graph
+
+
+def build_graph(
+    workflow_id: str,
+    params: dict[str, Any],
+    lora_stack: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Load the template and patch the requested parameters into it.
+
+    `lora_stack` (Phase H1b) overlays N LoRAs on workflows declaring `lora_chain`; it
+    supersedes the single-LoRA `lora_name`/`lora_strength_*` params, which stay for the
+    one-LoRA case and older callers.
+    """
     manifest = get_manifest(workflow_id)
     template_path = WORKFLOW_DIR / manifest["file"]
     if not template_path.is_file():
@@ -81,6 +188,9 @@ def build_graph(workflow_id: str, params: dict[str, Any]) -> dict[str, Any]:
                 f"manifest for '{workflow_id}' points at node '{node_id}' which is not in the template"
             )
         graph[node_id].setdefault("inputs", {})[field] = value
+
+    if lora_stack:
+        apply_lora_stack(graph, manifest, lora_stack)
 
     # strip UI-only metadata before submitting
     for node in graph.values():

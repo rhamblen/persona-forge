@@ -55,6 +55,13 @@ CREATE TABLE IF NOT EXISTS prompt_versions (
     -- checkpoint via a full LoraLoader. '' = render checkpoint-only (base-character).
     style_lora          TEXT NOT NULL DEFAULT '',
     style_lora_strength REAL NOT NULL DEFAULT 1.0,
+    -- Phase H1b (0.8.0): the concept-LoRA stack overlaid on top of the character/style
+    -- LoRA — pose/gesture/expression LoRAs that teach the body what to do. Stored as
+    -- JSON on the version rather than a child table precisely because versions are
+    -- append-only: the stack then rolls back with the prompt for free. A list of
+    -- {lora_name, strength_model, strength_clip, enabled, triggers}; `lora_name` is the
+    -- file, denormalised so a stack survives its library entry being deleted.
+    lora_stack_json     TEXT NOT NULL DEFAULT '[]',
     -- 'manual' | 'ollama' | 'initial'
     source      TEXT NOT NULL DEFAULT 'manual',
     note        TEXT NOT NULL DEFAULT '',
@@ -148,6 +155,30 @@ CREATE TABLE IF NOT EXISTS jobs (
 
 CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status, id);
 CREATE INDEX IF NOT EXISTS idx_jobs_project ON jobs(project_id, id);
+
+-- Phase H1b (0.8.0): the concept-LoRA library. Third-party pose/gesture/expression
+-- LoRAs ("arm movement", "sitting positions") that carry *what the body is doing*, as
+-- opposed to the per-character LoRA that carries *who*. Global, not per project — the
+-- whole point is that one is reused across every character.
+--
+-- `base_model` is compatibility, not decoration: an SD1.5 pose LoRA will not load on an
+-- SDXL/NoobAI checkpoint, so it is checked before a stack is submitted rather than
+-- discovered as a ComfyUI error. `trigger_words` are appended to the positive prompt
+-- when the entry is enabled — most concept LoRAs are inert without them.
+CREATE TABLE IF NOT EXISTS concept_loras (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    name          TEXT NOT NULL,
+    filename      TEXT NOT NULL,                     -- as ComfyUI lists it under models/loras
+    base_model    TEXT NOT NULL DEFAULT '',          -- '' = unknown/unchecked
+    category      TEXT NOT NULL DEFAULT 'pose',      -- pose | gesture | expression | style
+    trigger_words TEXT NOT NULL DEFAULT '',
+    weight_min    REAL NOT NULL DEFAULT 0.4,
+    weight_max    REAL NOT NULL DEFAULT 0.8,
+    notes         TEXT NOT NULL DEFAULT '',
+    created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_concept_loras_file ON concept_loras(filename);
 """
 
 
@@ -186,6 +217,8 @@ def init_db() -> None:
         if "style_lora" not in vcols:  # pre-0.7.9
             conn.execute("ALTER TABLE prompt_versions ADD COLUMN style_lora TEXT NOT NULL DEFAULT ''")
             conn.execute("ALTER TABLE prompt_versions ADD COLUMN style_lora_strength REAL NOT NULL DEFAULT 1.0")
+        if "lora_stack_json" not in vcols:  # pre-0.8.0
+            conn.execute("ALTER TABLE prompt_versions ADD COLUMN lora_stack_json TEXT NOT NULL DEFAULT '[]'")
 
 
 def row_to_dict(row: sqlite3.Row | None) -> dict | None:
