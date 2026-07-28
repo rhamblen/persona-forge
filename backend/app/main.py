@@ -9,6 +9,8 @@ generation through ComfyUI via workflow templates + manifests.
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import json
 import os
 import random
@@ -26,7 +28,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import comfy, db, docker_ctl, jobs, logs, ollama, workflows
+from . import comfy, db, docker_ctl, jobs, logs, ollama, skeleton, workflows
 
 COMFYUI_URL = comfy.COMFYUI_URL
 BUILDS_ROOT = Path(os.getenv("BUILDS_ROOT", "/builds"))
@@ -368,6 +370,144 @@ async def concept_lora_delete(lora_id: int) -> dict:
         conn.execute("DELETE FROM concept_loras WHERE id = ?", (lora_id,))
     logs.info("process", f"concept LoRA '{row['name']}' removed from the library")
     return {"deleted": lora_id}
+
+
+# --------------------------------------------------------------------------- #
+# ControlNet registry (Phase H3, 0.8.4)
+#
+# Same shape as the concept-LoRA library above, for the same reason: a ControlNet only
+# works on the checkpoint family it was trained for, and this project deliberately isn't
+# committed to one. Registering both a NoobAI-native and a generic SDXL openpose model
+# means moving a persona's checkpoint doesn't strand pose control.
+# --------------------------------------------------------------------------- #
+
+CONTROLNET_KINDS = ("openpose", "depth", "canny", "union")
+
+# Seeded on first read for whichever files ComfyUI actually reports — lazily rather than
+# at boot so a ComfyUI that is down doesn't block startup, and so nothing is invented for
+# a file that isn't installed.
+DEFAULT_CONTROLNETS = [
+    {
+        "name": "NoobAI openpose (native)",
+        "filename": "noobai-openpose-sdxl.safetensors",
+        "base_model": "noobai-xl / illustrious",
+        "kind": "openpose",
+        "notes": "Laxhar/noob_openpose, trained on NoobAI-XL. First choice for "
+                 "NoobAI/Illustrious checkpoints.",
+    },
+    {
+        "name": "xinsir openpose SDXL 1.0",
+        "filename": "xinsir-openpose-sdxl-1.0.safetensors",
+        "base_model": "sdxl",
+        "kind": "openpose",
+        "notes": "Generic SDXL openpose — the fallback when the checkpoint is not "
+                 "NoobAI/Illustrious.",
+    },
+]
+
+
+class ControlNetIn(BaseModel):
+    name: str
+    filename: str
+    base_model: str = ""
+    kind: str = "openpose"
+    notes: str = ""
+
+
+class ControlNetPatch(BaseModel):
+    name: str | None = None
+    base_model: str | None = None
+    kind: str | None = None
+    notes: str | None = None
+
+
+def _seed_controlnets(conn, available: set[str] | None) -> int:
+    """Register the shipped defaults that are actually on disk. Idempotent."""
+    if available is None:
+        return 0
+    have = {r["filename"] for r in conn.execute("SELECT filename FROM controlnets")}
+    added = 0
+    for d in DEFAULT_CONTROLNETS:
+        if d["filename"] in have or d["filename"] not in available:
+            continue
+        conn.execute(
+            "INSERT INTO controlnets (name, filename, base_model, kind, notes) VALUES (?, ?, ?, ?, ?)",
+            (d["name"], d["filename"], d["base_model"], d["kind"], d["notes"]),
+        )
+        added += 1
+    if added:
+        logs.info("boot", f"registered {added} installed ControlNet(s) from the shipped defaults")
+    return added
+
+
+@app.get("/api/controlnets")
+async def controlnets_list() -> dict:
+    """The registry, annotated with whether ComfyUI can still see each file."""
+    try:
+        available: set[str] | None = set(await comfy.list_models("controlnet"))
+    except Exception as exc:  # noqa: BLE001
+        logs.warn("integration", f"could not list controlnet models: {exc}")
+        available = None
+    with db.connect() as conn:
+        _seed_controlnets(conn, available)
+        rows = conn.execute("SELECT * FROM controlnets ORDER BY kind, name").fetchall()
+    return {
+        "controlnets": [
+            {**dict(r), "available": (None if available is None else r["filename"] in available)}
+            for r in rows
+        ],
+        "installed": sorted(available) if available is not None else [],
+        "kinds": list(CONTROLNET_KINDS),
+    }
+
+
+@app.post("/api/controlnets", status_code=201)
+async def controlnet_add(body: ControlNetIn) -> dict:
+    if body.kind not in CONTROLNET_KINDS:
+        raise HTTPException(400, f"kind must be one of {', '.join(CONTROLNET_KINDS)}")
+    with db.connect() as conn:
+        if conn.execute("SELECT 1 FROM controlnets WHERE filename = ?", (body.filename,)).fetchone():
+            raise HTTPException(409, "that ControlNet file is already registered")
+        cur = conn.execute(
+            "INSERT INTO controlnets (name, filename, base_model, kind, notes) VALUES (?, ?, ?, ?, ?)",
+            (body.name, body.filename, body.base_model, body.kind, body.notes),
+        )
+        row = conn.execute("SELECT * FROM controlnets WHERE id = ?", (cur.lastrowid,)).fetchone()
+    logs.info("process", f"ControlNet '{body.name}' registered", filename=body.filename)
+    return {"controlnet": dict(row)}
+
+
+@app.patch("/api/controlnets/{cn_id}")
+async def controlnet_update(cn_id: int, body: ControlNetPatch) -> dict:
+    fields = {k: v for k, v in body.model_dump().items() if v is not None}
+    if not fields:
+        raise HTTPException(400, "nothing to update")
+    if "kind" in fields and fields["kind"] not in CONTROLNET_KINDS:
+        raise HTTPException(400, f"kind must be one of {', '.join(CONTROLNET_KINDS)}")
+    with db.connect() as conn:
+        if conn.execute("SELECT 1 FROM controlnets WHERE id = ?", (cn_id,)).fetchone() is None:
+            raise HTTPException(404, "ControlNet not found")
+        sets = ", ".join(f"{k} = ?" for k in fields)
+        conn.execute(f"UPDATE controlnets SET {sets} WHERE id = ?", (*fields.values(), cn_id))
+        row = conn.execute("SELECT * FROM controlnets WHERE id = ?", (cn_id,)).fetchone()
+    return {"controlnet": dict(row)}
+
+
+@app.delete("/api/controlnets/{cn_id}")
+async def controlnet_delete(cn_id: int) -> dict:
+    """Unregister. Personas selecting it fall back to prompt-only pose renders rather
+    than failing — the same posture the LoRA delete takes."""
+    with db.connect() as conn:
+        row = conn.execute("SELECT * FROM controlnets WHERE id = ?", (cn_id,)).fetchone()
+        if row is None:
+            raise HTTPException(404, "ControlNet not found")
+        conn.execute("DELETE FROM controlnets WHERE id = ?", (cn_id,))
+        cleared = conn.execute(
+            "UPDATE projects SET pose_controlnet = '' WHERE pose_controlnet = ?",
+            (row["filename"],),
+        ).rowcount
+    logs.info("process", f"ControlNet '{row['name']}' unregistered", cleared_from=cleared)
+    return {"deleted": cn_id, "cleared_from_personas": cleared}
 
 
 @app.get("/api/workflows")
@@ -2092,42 +2232,89 @@ def _pose_dict(row: Any) -> dict:
 
 
 async def _reconcile_poses(project_id: int) -> None:
+    """Advance in-flight pose renders, across both passes (Phase H3).
+
+    `pending` is pass 1 (body, ControlNet-conditioned) and `facepass` is pass 2. A
+    finished pass 1 stores its image as the **base** and — if the face pass is on — queues
+    pass 2 against it rather than declaring the pose done. The base is kept either way,
+    because it is what makes a face re-roll cheap and what the before/after comparison
+    shows (docs/pose-control.md §4.1).
+    """
     with db.connect() as conn:
         pending = conn.execute(
-            "SELECT id, prompt_id FROM poses WHERE project_id = ? AND status = 'pending' AND prompt_id != ''",
-            (project_id,),
+            "SELECT * FROM poses WHERE project_id = ? AND status IN ('pending', 'facepass') "
+            "AND prompt_id != ''", (project_id,),
         ).fetchall()
     if not pending:
         return
-    logs.verbose("process", f"reconciling {len(pending)} pending pose render(s)", project_id=project_id)
+    logs.verbose("process", f"reconciling {len(pending)} in-flight pose render(s)",
+                 project_id=project_id)
     try:
         hist = await comfy.history_all()
     except Exception as exc:  # noqa: BLE001
         logs.warn("integration", f"could not read history to reconcile poses: {exc}")
         return
-    done = failed = 0
+
+    slug = await _project_slug(project_id)
+    version = None
+    done = failed = queued_face = 0
     with db.connect() as conn:
+        lora_cfg = _pose_lora_cfg(conn, project_id, slug) if slug else None
         for job in pending:
             entry = hist.get(job["prompt_id"])
             if not entry:
                 continue
             st = comfy.status_of(entry)
-            if st == "success":
-                imgs = comfy.outputs_from(entry)
-                if imgs:
-                    conn.execute(
-                        "UPDATE poses SET filename = ?, subfolder = ?, status = 'done' WHERE id = ?",
-                        (imgs[-1]["filename"], imgs[-1]["subfolder"], job["id"]),
-                    )
-                    done += 1
-                    logs.verbose("process", "pose render finished", pose_id=job["id"],
-                                 file=imgs[-1]["filename"])
-            elif st == "error":
+            if st == "error":
                 conn.execute("UPDATE poses SET status = 'error' WHERE id = ?", (job["id"],))
                 failed += 1
-                logs.warn("process", "a pose render failed", pose_id=job["id"])
-    if done or failed:
-        logs.info("process", f"pose reconcile: {done} finished, {failed} failed", project_id=project_id)
+                logs.warn("process", f"a pose {job['status']} render failed", pose_id=job["id"])
+                continue
+            if st != "success":
+                continue
+            imgs = comfy.outputs_from(entry)
+            if not imgs:
+                continue
+            out = imgs[-1]
+
+            if job["status"] == "facepass":
+                conn.execute(
+                    "UPDATE poses SET filename = ?, subfolder = ?, status = 'done' WHERE id = ?",
+                    (out["filename"], out["subfolder"], job["id"]))
+                done += 1
+                logs.verbose("process", "face pass finished", pose_id=job["id"],
+                             file=out["filename"])
+                continue
+
+            # pass 1 finished — record the base, then decide whether pass 2 runs
+            conn.execute(
+                "UPDATE poses SET base_filename = ?, base_subfolder = ?, filename = ?, "
+                "subfolder = ? WHERE id = ?",
+                (out["filename"], out["subfolder"], out["filename"], out["subfolder"], job["id"]))
+            face_cfg = _pose_face_cfg(conn, project_id, job)
+            started = False
+            if face_cfg and slug:
+                if version is None:
+                    version = await _current_version(project_id)
+                if version:
+                    row = conn.execute("SELECT * FROM poses WHERE id = ?", (job["id"],)).fetchone()
+                    try:
+                        started = await _queue_face_pass(conn, project_id, slug, version,
+                                                         row, lora_cfg, face_cfg)
+                    except (workflows.WorkflowError, comfy.ComfyError) as exc:
+                        logs.error("process", f"could not queue the face pass: {exc}",
+                                   pose_id=job["id"])
+            if started:
+                queued_face += 1
+            else:
+                conn.execute("UPDATE poses SET status = 'done' WHERE id = ?", (job["id"],))
+                done += 1
+                logs.verbose("process", "pose render finished", pose_id=job["id"],
+                             file=out["filename"])
+    if done or failed or queued_face:
+        logs.info("process",
+                  f"pose reconcile: {done} finished, {queued_face} into the face pass, "
+                  f"{failed} failed", project_id=project_id)
 
 
 def _pose_lora_cfg(conn, project_id: int, slug: str) -> dict[str, Any] | None:
@@ -2157,6 +2344,88 @@ def _pose_lora_cfg(conn, project_id: int, slug: str) -> dict[str, Any] | None:
     }
 
 
+async def _current_version(project_id: int) -> dict[str, Any] | None:
+    """The project's current prompt version, read straight from the DB.
+
+    Deliberately not `get_project()`: the reconciler needs this while advancing poses, and
+    going through the endpoint would pull in work it doesn't need.
+    """
+    with db.connect() as conn:
+        proj = conn.execute("SELECT current_version_id FROM projects WHERE id = ?",
+                            (project_id,)).fetchone()
+        if not proj or not proj["current_version_id"]:
+            return None
+        row = conn.execute("SELECT * FROM prompt_versions WHERE id = ?",
+                           (proj["current_version_id"],)).fetchone()
+    return dict(row) if row else None
+
+
+def _pose_seed(version_seed: int, pose_id: int) -> int:
+    """A per-pose seed derived from the version's.
+
+    Before Phase H3 every pose in a set rendered at the version's single seed, so the
+    whole set came back as the same picture with a different expression suffix — the
+    largest single cause of "the poses all look the same" (docs/pose-control.md §0a).
+    Derived rather than random so a set stays reproducible; Python's `hash()` is salted
+    per process and would not survive a restart.
+    """
+    mixed = (int(version_seed) * 2654435761 + int(pose_id) * 40503 + 0x9E3779B9) & 0xFFFFFFFF
+    return mixed % 2_147_483_647
+
+
+def _pose_cn_cfg(conn, project_id: int, pose_row: Any) -> dict[str, Any] | None:
+    """Resolve the ControlNet config for one pose, or None to render prompt-only.
+
+    Per-pose values win over the persona's defaults; NULL means inherit, so moving the
+    persona-level dial moves every pose that hasn't been individually overridden.
+    """
+    proj = conn.execute(
+        """SELECT pose_controlnet, pose_cn_strength, pose_cn_start, pose_cn_end, pose_skeleton
+           FROM projects WHERE id = ?""", (project_id,)).fetchone()
+    if not proj:
+        return None
+    cn_name = (proj["pose_controlnet"] or "").strip()
+    skeleton = (pose_row["skeleton_ref"] or "").strip() or (proj["pose_skeleton"] or "").strip()
+    if not cn_name or not skeleton:
+        return None
+    reg = conn.execute("SELECT kind FROM controlnets WHERE filename = ?", (cn_name,)).fetchone()
+    strength = pose_row["cn_strength"]
+    return {
+        "controlnet_name": cn_name,
+        "skeleton": skeleton,
+        "kind": (reg["kind"] if reg else "openpose"),
+        "strength": proj["pose_cn_strength"] if strength is None else strength,
+        "start_percent": proj["pose_cn_start"],
+        "end_percent": proj["pose_cn_end"],
+    }
+
+
+def _pose_face_cfg(conn, project_id: int, pose_row: Any) -> dict[str, Any] | None:
+    """Face-pass settings for one pose, or None when the pass is switched off."""
+    proj = conn.execute(
+        "SELECT pose_face_pass, pose_face_denoise FROM projects WHERE id = ?",
+        (project_id,)).fetchone()
+    if not proj:
+        return None
+    enabled = pose_row["face_pass"]
+    if (proj["pose_face_pass"] if enabled is None else enabled) != 1:
+        return None
+    denoise = pose_row["face_denoise"]
+    return {"denoise": proj["pose_face_denoise"] if denoise is None else denoise}
+
+
+async def _check_controlnet_file(name: str) -> None:
+    """Fail with the filename rather than letting ComfyUI throw a node-level error."""
+    try:
+        available = set(await comfy.list_models("controlnet"))
+    except Exception as exc:  # noqa: BLE001
+        logs.warn("integration", f"could not verify the ControlNet file: {exc}")
+        return
+    if name not in available:
+        raise HTTPException(400, f"ComfyUI cannot see the ControlNet '{name}' — check it is "
+                                 f"in models/controlnet and restart ComfyUI")
+
+
 async def _queue_pose(conn, project_id: int, slug: str, version: dict, pose_row: Any,
                       lora_cfg: dict | None = None) -> None:
     """Submit one pose's render and mark it pending.
@@ -2167,9 +2436,10 @@ async def _queue_pose(conn, project_id: int, slug: str, version: dict, pose_row:
     the path that most wants it, since a pose the character LoRA never learned is exactly
     what a gesture/pose LoRA is for.
     """
+    seed = pose_row["seed"] or _pose_seed(version.get("seed") or 0, pose_row["id"])
     params = {
         **_version_prompt_params(version),
-        "seed": version.get("seed") or 0,
+        "seed": seed,
         "expression": pose_row["modifier"] or None,
         "output_prefix": f"{slug}/images/pose_{pose_row['id']}",
     }
@@ -2188,13 +2458,64 @@ async def _queue_pose(conn, project_id: int, slug: str, version: dict, pose_row:
         params.update(lora_params)
     params = _apply_stack_triggers(params, stack)
     params = {k: v for k, v in params.items() if v is not None}
+    cn_cfg = _pose_cn_cfg(conn, project_id, pose_row)
     logs.verbose("process", "queuing pose render", pose_id=pose_row["id"], name=pose_row["name"],
                  workflow=workflow_id, lora=lora_cfg["lora_name"] if lora_cfg else None,
-                 lora_stack=len(stack) or None)
-    graph = workflows.build_graph(workflow_id, params, lora_stack=chain)
+                 lora_stack=len(stack) or None, seed=seed,
+                 controlnet=cn_cfg["controlnet_name"] if cn_cfg else None)
+    graph = workflows.build_graph(workflow_id, params, lora_stack=chain, controlnet=cn_cfg)
     prompt_id = await comfy.submit(graph)
-    conn.execute("UPDATE poses SET prompt_id = ?, status = 'pending' WHERE id = ?",
+    # Pass 1 clears any previous pass-1 output: a re-render invalidates the stored base,
+    # and leaving a stale one would let a face re-roll silently work off the old body.
+    conn.execute(
+        "UPDATE poses SET prompt_id = ?, status = 'pending', seed = ?, base_filename = '', "
+        "base_subfolder = '' WHERE id = ?",
+        (prompt_id, seed, pose_row["id"]))
+
+
+async def _queue_face_pass(conn, project_id: int, slug: str, version: dict, pose_row: Any,
+                           lora_cfg: dict | None, face_cfg: dict) -> bool:
+    """Pass 2: re-render just the face of a finished pass-1 image.
+
+    Reads the stored base off the builds share and stages it into ComfyUI's input the same
+    way the sprite export does, so this needs no extra mount. Returns False (leaving the
+    pose on its pass-1 image) if the base can't be read — a missing face pass is a much
+    better outcome than losing the pose.
+    """
+    src = BUILDS_ROOT / (pose_row["base_subfolder"] or f"{slug}/images") / pose_row["base_filename"]
+    try:
+        data = src.read_bytes()
+    except OSError as exc:
+        logs.warn("local", f"cannot read the base render for the face pass: {exc}", path=str(src))
+        return False
+    up = await comfy.upload_image(data, f"pose_{pose_row['id']}_base.png", f"pf-facepass-{slug}")
+    img_ref = f"{up['subfolder']}/{up['name']}" if up.get("subfolder") else up["name"]
+
+    params = {
+        "image": img_ref,
+        "character": version.get("character") or None,
+        "negative": version.get("negative") or None,
+        "checkpoint": version.get("checkpoint") or None,
+        "expression": pose_row["modifier"] or None,
+        "denoise": face_cfg["denoise"],
+        "seed": (pose_row["seed"] or 0) + 1,
+        "output_prefix": f"{slug}/images/pose_{pose_row['id']}_face",
+    }
+    if lora_cfg:
+        params["lora_name"] = lora_cfg["lora_name"]
+        params["lora_strength"] = lora_cfg["lora_strength"]
+        params["trigger"] = lora_cfg["trigger"]
+    params = {k: v for k, v in params.items() if v is not None}
+
+    graph = workflows.build_graph("pose-face-pass", params)
+    if not lora_cfg:
+        workflows.bypass_optional_lora(graph, workflows.get_manifest("pose-face-pass"))
+    logs.verbose("process", "queuing face pass", pose_id=pose_row["id"], name=pose_row["name"],
+                 denoise=face_cfg["denoise"], base=pose_row["base_filename"])
+    prompt_id = await comfy.submit(graph)
+    conn.execute("UPDATE poses SET prompt_id = ?, status = 'facepass' WHERE id = ?",
                  (prompt_id, pose_row["id"]))
+    return True
 
 
 @app.get("/api/projects/{project_id}/poses")
@@ -2208,7 +2529,8 @@ async def poses_list(project_id: int) -> dict:
             "SELECT * FROM poses WHERE project_id = ? ORDER BY position, id", (project_id,)
         ).fetchall()
     poses = [_pose_dict(r) for r in rows]
-    pending = sum(1 for p in poses if p["status"] == "pending")
+    # 'facepass' is pass 2 — still in flight, so it has to keep the UI polling.
+    pending = sum(1 for p in poses if p["status"] in ("pending", "facepass"))
 
     # The map is authoritative, the stored axis/tier only a fallback: resolve each pose
     # against the *current* map by name, so renaming an axis or reordering an intensity
@@ -2606,7 +2928,10 @@ async def pose_config(project_id: int) -> dict:
     slug = detail["project"]["slug"]
     with db.connect() as conn:
         proj = conn.execute(
-            "SELECT trigger_word, train_status, pose_lora, pose_lora_strength FROM projects WHERE id = ?",
+            """SELECT trigger_word, train_status, pose_lora, pose_lora_strength,
+                      pose_controlnet, pose_cn_strength, pose_cn_start, pose_cn_end,
+                      pose_skeleton, pose_face_pass, pose_face_denoise
+               FROM projects WHERE id = ?""",
             (project_id,),
         ).fetchone()
     if proj is None:
@@ -2630,7 +2955,38 @@ async def pose_config(project_id: int) -> dict:
         # a trained LoRA exists on disk but ComfyUI can't see any of them → the user still
         # needs `loras: /builds` in extra_model_paths.yaml + a ComfyUI restart.
         "needs_extra_paths": bool(files) and not any(visible(f["name"]) for f in files),
+        # Phase H3: structural pose control + the face pass.
+        "controlnet": {
+            "selected": (proj["pose_controlnet"] or "").strip(),
+            "strength": proj["pose_cn_strength"],
+            "start_percent": proj["pose_cn_start"],
+            "end_percent": proj["pose_cn_end"],
+            "skeleton": (proj["pose_skeleton"] or "").strip(),
+        },
+        "face_pass": {
+            "enabled": bool(proj["pose_face_pass"]),
+            "denoise": proj["pose_face_denoise"],
+        },
+        # Base SDXL renders a flat face at every denoise — the expression simply doesn't
+        # land (docs/pose-control.md §4.0). Worth saying out loud, because it looks like a
+        # broken feature rather than a wrong checkpoint.
+        "checkpoint_warning": _expressive_checkpoint_warning(
+            (detail.get("current_version") or {}).get("checkpoint") or ""),
     }
+
+
+# Checkpoints known to render flat faces for stylised emotion. Substring match, lowercase.
+_FLAT_FACE_CHECKPOINTS = ("sd_xl_base", "sd_xl_refiner", "stableDiffusionXL".lower())
+
+
+def _expressive_checkpoint_warning(checkpoint: str) -> str:
+    ck = (checkpoint or "").lower()
+    if any(s in ck for s in _FLAT_FACE_CHECKPOINTS):
+        return (f"'{checkpoint}' is a base Stable Diffusion checkpoint — measured on this "
+                f"box, it renders a flat face at every face-pass denoise. Switch this "
+                f"persona to an anime-capable checkpoint (e.g. NoobAI-XL) for expressive "
+                f"sprites.")
+    return ""
 
 
 class PoseLoraRequest(BaseModel):
@@ -2656,6 +3012,141 @@ async def set_pose_lora(project_id: int, body: PoseLoraRequest) -> dict:
     logs.info("process", f"pose LoRA {'set: ' + name if name else 'cleared'}",
               project_id=project_id, strength=body.strength)
     return {"pose_lora": name, "pose_lora_strength": body.strength}
+
+
+class PoseControlNetRequest(BaseModel):
+    controlnet: str = ""                                     # registry filename, '' disables
+    strength: float = Field(default=0.7, ge=0.0, le=2.0)
+    start_percent: float = Field(default=0.0, ge=0.0, le=1.0)
+    end_percent: float = Field(default=0.7, ge=0.0, le=1.0)
+    face_pass: bool = True
+    face_denoise: float = Field(default=0.6, ge=0.1, le=1.0)
+
+
+@app.post("/api/projects/{project_id}/pose-controlnet")
+async def set_pose_controlnet(project_id: int, body: PoseControlNetRequest) -> dict:
+    """Set this persona's pose-render structure + face-pass defaults (Phase H3)."""
+    name = body.controlnet.strip()
+    if name:
+        await _check_controlnet_file(name)
+    if body.end_percent < body.start_percent:
+        raise HTTPException(400, "end_percent must be >= start_percent")
+    warning = ""
+    if body.face_denoise > 0.7:
+        # 0.75 was measured destroying the face outright — allowed, but not silently.
+        warning = ("face denoise above 0.70 distorts the face — 0.60 is the measured "
+                   "sweet spot for driving an expression")
+    with db.connect() as conn:
+        cur = conn.execute(
+            """UPDATE projects SET pose_controlnet = ?, pose_cn_strength = ?, pose_cn_start = ?,
+                      pose_cn_end = ?, pose_face_pass = ?, pose_face_denoise = ? WHERE id = ?""",
+            (name, body.strength, body.start_percent, body.end_percent,
+             1 if body.face_pass else 0, body.face_denoise, project_id))
+        if cur.rowcount == 0:
+            raise HTTPException(404, "project not found")
+    logs.info("process", f"pose ControlNet {'set: ' + name if name else 'cleared'}",
+              project_id=project_id, strength=body.strength, face_pass=body.face_pass,
+              face_denoise=body.face_denoise)
+    return {"controlnet": name, "strength": body.strength, "start_percent": body.start_percent,
+            "end_percent": body.end_percent, "face_pass": body.face_pass,
+            "face_denoise": body.face_denoise, "warning": warning}
+
+
+class SkeletonRequest(BaseModel):
+    # 'builtin' renders the shipped standing skeleton; 'image' takes a base64 PNG so a
+    # skeleton exported from anywhere else can be used without a multipart dependency.
+    mode: str = "builtin"
+    image_b64: str = ""
+    width: int = Field(default=832, ge=256, le=2048)
+    height: int = Field(default=1216, ge=256, le=2048)
+    pose_id: int | None = None          # None = set the persona default, else one pose
+
+
+@app.post("/api/projects/{project_id}/pose-skeleton")
+async def set_pose_skeleton(project_id: int, body: SkeletonRequest) -> dict:
+    """Stage a skeleton into ComfyUI's input and bind it to the persona or one pose.
+
+    Phase H3a's manual source. H3b replaces this with the pose library, at which point a
+    binding picks a stored keypoint set and this stays as the escape hatch for a skeleton
+    authored elsewhere.
+    """
+    detail = await get_project(project_id)
+    slug = detail["project"]["slug"]
+    if body.mode == "builtin":
+        png = skeleton.render_png(skeleton.STANDING_NEUTRAL, body.width, body.height)
+        label = "standing-neutral"
+    elif body.mode == "image":
+        raw = (body.image_b64 or "").split(",")[-1]          # tolerate a data: URL prefix
+        try:
+            png = base64.b64decode(raw, validate=True)
+        except (binascii.Error, ValueError) as exc:
+            raise HTTPException(400, f"image_b64 is not valid base64: {exc}") from exc
+        if not png:
+            raise HTTPException(400, "image_b64 is empty")
+        label = "uploaded"
+    else:
+        raise HTTPException(400, "mode must be 'builtin' or 'image'")
+
+    target = f"pose_{body.pose_id}" if body.pose_id else "default"
+    up = await comfy.upload_image(png, f"{slug}_{target}.png", f"pf-skeletons-{slug}")
+    ref = f"{up['subfolder']}/{up['name']}" if up.get("subfolder") else up["name"]
+
+    with db.connect() as conn:
+        if body.pose_id:
+            cur = conn.execute("UPDATE poses SET skeleton_ref = ? WHERE id = ? AND project_id = ?",
+                               (ref, body.pose_id, project_id))
+            if cur.rowcount == 0:
+                raise HTTPException(404, "pose not found")
+        else:
+            cur = conn.execute("UPDATE projects SET pose_skeleton = ? WHERE id = ?",
+                               (ref, project_id))
+            if cur.rowcount == 0:
+                raise HTTPException(404, "project not found")
+    logs.info("process", f"pose skeleton set ({label})", project_id=project_id,
+              pose_id=body.pose_id, ref=ref)
+    return {"skeleton": ref, "source": label, "pose_id": body.pose_id}
+
+
+@app.post("/api/projects/{project_id}/poses/{pose_id}/face-pass")
+async def pose_face_reroll(project_id: int, pose_id: int, denoise: float | None = None) -> dict:
+    """Re-run pass 2 against the stored base — a new expression, same body.
+
+    The whole point of keeping the pass-1 image: this costs seconds and cannot change the
+    pose, so the expression dial can be tried repeatedly against a body already approved.
+    """
+    if denoise is not None and not 0.1 <= denoise <= 1.0:
+        raise HTTPException(400, "denoise must be between 0.1 and 1.0")
+    detail = await get_project(project_id)
+    slug = detail["project"]["slug"]
+    version = detail["current_version"]
+    if not version:
+        raise HTTPException(400, "this persona has no prompt version yet")
+    with db.connect() as conn:
+        row = conn.execute("SELECT * FROM poses WHERE id = ? AND project_id = ?",
+                           (pose_id, project_id)).fetchone()
+        if row is None:
+            raise HTTPException(404, "pose not found")
+        if row["status"] in ("pending", "facepass"):
+            raise HTTPException(409, "this pose is still rendering")
+        if not row["base_filename"]:
+            raise HTTPException(400, "no base render to work from — generate this pose first")
+        face_cfg = _pose_face_cfg(conn, project_id, row)
+        if denoise is not None:
+            face_cfg = {"denoise": denoise}
+        elif face_cfg is None:
+            # Explicitly asking for a face pass overrides the pose being switched off.
+            proj = conn.execute("SELECT pose_face_denoise FROM projects WHERE id = ?",
+                                (project_id,)).fetchone()
+            face_cfg = {"denoise": proj["pose_face_denoise"]}
+        lora_cfg = _pose_lora_cfg(conn, project_id, slug)
+        try:
+            started = await _queue_face_pass(conn, project_id, slug, version, row,
+                                             lora_cfg, face_cfg)
+        except (workflows.WorkflowError, comfy.ComfyError) as exc:
+            raise HTTPException(502, f"could not queue the face pass: {exc}") from exc
+    if not started:
+        raise HTTPException(502, "the stored base render could not be read off the builds share")
+    return {"queued": True, "pose_id": pose_id, "denoise": face_cfg["denoise"]}
 
 
 # --------------------------------------------------------------------------- #

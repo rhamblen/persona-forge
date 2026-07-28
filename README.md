@@ -131,8 +131,15 @@ much), with the poses grid grouped so a weak emotion is visible at a glance. The
 map is a default: every axis and tier is editable. **v0.8.3 adds the admin tools** —
 delete a persona (with the build folder as a separate, explicit choice), prune a prompt
 version, or remove a trained LoRA, each behind guards so the append-only history can't be
-lost by accident. Still ahead in Phase H are per-emotion
-dataset enrichment and selective sprite rebuild — see
+lost by accident. **v0.8.4 adds structural pose control** — an OpenPose **ControlNet**
+fixes the body from a skeleton instead of hoping the prompt will, and a **second pass**
+re-renders just the face to put the emotion on it, since a full-body sprite leaves the
+face too small to read. The two are independently tunable, and because the pre-face image
+is kept, re-rolling an expression takes seconds and can't disturb a body you already
+liked. Poses also stopped sharing one seed, which was quietly making a whole set look
+alike — see [docs/pose-control.md](docs/pose-control.md). Still ahead in Phase H are the
+**pose library** (a different skeleton bound to each emotion tier), ControlNet in the
+dataset build, per-emotion dataset enrichment and selective sprite rebuild — see
 [docs/emotion-depth.md](docs/emotion-depth.md). **Character Studio** (the
 plain-language character-sheet front door that produces the character *card*, not just the
 sprites) follows at 0.9. See the roadmap in [PROJECT_PLAN.md](PROJECT_PLAN.md) and the

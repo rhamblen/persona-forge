@@ -1,63 +1,87 @@
-# v0.8.3 — Admin tools
+# v0.8.4 — Structural pose control
 
-Everything in Persona Forge could be created and nothing could be removed. A scrapped
-experiment stayed in the picker forever, and a bad LoRA sat next to the good one with only its
-timestamp to tell them apart. This release adds the missing half: **delete a persona, a prompt
-version, or a trained LoRA.**
+Poses in a set came out looking like each other. There were **three separable causes**, and it
+was worth pulling them apart before building anything:
 
-## Deliberate, not general
+1. **Every pose rendered at the same seed.** Same prompt, same LoRA, same seed, differing only
+   by a short expression suffix — diffusion is deterministic in the seed, so a near-identical
+   picture is the *expected* result, not a mystery.
+2. **Posture prose is weakly obeyed.** The checkpoint spends its budget on subject and style,
+   and a character LoRA pulls hard toward the stance its dataset over-represented.
+3. **Nothing constrained where the limbs went.** The prompt was the only lever on posture, and
+   it is the wrong kind of lever.
 
-The version store is append-only on purpose, and that stays true. The append-only rule exists to
-prevent **accidental** loss — so deletion is a *deliberate* action with guards, never something
-that happens on its own:
+This release fixes 1 and 3. Fixing 3 makes 2 stop mattering.
 
-- The **current version can't be deleted** — roll back to another one first.
-- A persona always keeps **at least one version**.
-- A **signed-off baseline** takes a second confirmation that names it as the approved reference.
-- A persona with a **running build** refuses to delete — cancel the build first, rather than
-  having its job row vanish from under the worker mid-stage.
-- **Clones are kept.** Deleting a parent persona orphans its clones (they lose the parent link);
-  it never cascades into personas you didn't ask to remove.
+## Three layers, two passes
 
-## Delete a persona
+A pose is now three independently tunable layers:
 
-**🗑 Delete this persona** in the sidebar. The confirmation names the persona, counts its
-versions and poses, and shows the exact build folder path.
+| Layer | What it sets | Mechanically | Re-tuning costs |
+|---|---|---|---|
+| **base** | prompt, character LoRA, seed | pass 1 | full re-render |
+| **body** | the skeleton, ControlNet strength and reach | conditioning on pass 1 | full re-render |
+| **face** | the emotion, and how hard it's pushed | pass 2 | **face pass only** |
 
-Ticking **"also delete the build folder"** is a separate decision, and deliberately so: that
-folder holds every rendered image and the trained LoRA — often an hour of GPU time. Leave it
-unticked and the persona leaves Persona Forge while the files stay on the share.
+That asymmetry is the point. The face is the layer most likely to need another try — it carries
+the emotion, and its denoise is the dial nobody gets right first time — and it is the only one
+that can be re-run **without losing a body you already liked**. So the pass-1 image is kept, and
+**"Re-roll face" takes 14 seconds against ~104 for a full re-render**, with the pose held fixed.
 
-## Delete a prompt version
+## Calibrated, not guessed
 
-A **Delete** button on any version that isn't the current one. Its children **re-attach to its
-parent**, so pruning a mid-history version leaves the chain connected rather than fragmenting it
-into orphans. Images generated from that version are kept — they just lose the link.
+Face-pass denoise defaults to **0.60** because that was measured on your box, not chosen from a
+range:
 
-## Delete a trained LoRA
+- **0.45** — barely moves an expression. Not a useful default.
+- **0.60** — a genuinely furious, shouting face, identity intact.
+- **0.75** — the jaw disintegrates. Past the cliff.
 
-A ✕ on each file in the LoRA list. If you delete the one currently selected for pose renders,
-the selection is **cleared and the UI tells you** — otherwise poses would keep asking ComfyUI for
-a file that no longer exists.
+That independently reproduces the threshold the Track A expression workflow arrived at the hard
+way, which is about as much confidence as a setting like this gets.
 
-## Notes
-- Every deletion is logged with what went and what it cost: version/image/pose counts, whether
-  the build folder was removed, and how many clones were orphaned.
-- LoRA filenames are treated as path components only, and build-folder removal refuses any path
-  that isn't a direct child of the builds root — a blank or odd slug can never turn into "delete
-  the builds root".
-- Verified in a browser end to end, including both cancel paths, the signed-off double-confirm,
-  re-parenting checked in the database, the running-build refusal, and delete-with-files versus
-  delete-without-files.
+## Two things worth knowing before you run it
+
+**ControlNet beats posture prose outright.** A neutral standing skeleton, with a prompt asking
+for *"furious, shouting, leaning forward aggressively, one fist clenched and raised"*, renders a
+calm woman standing at rest. The skeleton wins. This is why the next stage binds a *different*
+skeleton per emotion tier — it isn't a convenience, it's the only way an emotion's body happens.
+
+**The face pass needs an anime-capable checkpoint.** On base SDXL the face comes out flat at
+every denoise setting. Confirmed as a 2×2 over {base SDXL, NoobAI} × {no character LoRA, LoRA at
+1.0}: the **checkpoint** is the deciding variable, and the character LoRA emotes perfectly well
+at full strength — it is not the limiting factor. The Poses tab now warns when a persona is
+pinned to a base checkpoint, because it presents as a broken feature rather than a wrong model.
+
+*(`sweetie pie` is currently on `!first/sd_xl_base_1.0` and will render flat faces until it
+moves to NoobAI-XL.)*
+
+## Setup
+
+Two OpenPose ControlNets are already installed on UR1 and **register themselves** on first use:
+
+| File | For |
+|---|---|
+| `noobai-openpose-sdxl.safetensors` | NoobAI-XL / Illustrious — first choice |
+| `xinsir-openpose-sdxl-1.0.safetensors` | any other SDXL checkpoint |
+
+On the **Poses** tab, open *Pose structure & face pass*: pick a ControlNet, click **Use built-in
+standing skeleton**, and Apply. Poses render prompt-only until both a ControlNet *and* a skeleton
+are set, so nothing changes until you opt in.
+
+## Coming next (stage H3b/H3c)
+
+A **pose library** — many skeletons, bound per emotion tier, so `despair` gets a slumped kneel
+and `elation` gets arms flung wide — plus ControlNet in the **dataset build**, which is what
+teaches the LoRA what this character's body does at all.
 
 ## Upgrade notes
-Automatic. No schema change, no compose change.
 
-**Image:** `ghcr.io/rhamblen/persona-forge:0.8.3`
+Schema migration is automatic (seven nullable columns on `poses`, seven on `projects`, and the
+`controlnets` table). Existing poses render exactly as before until you opt in. **No compose
+change**, but the image gains a dependency (Pillow), so pull rather than reuse a cached layer.
 
-## Upgrading
-No compose changes. Pull and restart:
+**Image:** `ghcr.io/rhamblen/persona-forge:0.8.4`
 
-```bash
-docker compose pull && docker compose up -d
-```
+Full detail in [`CHANGELOG.md`](CHANGELOG.md); design and measurements in
+[`docs/pose-control.md`](docs/pose-control.md).

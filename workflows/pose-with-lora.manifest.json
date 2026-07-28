@@ -10,6 +10,11 @@
     "clip_source": ["1", 1],
     "id_prefix": "cl"
   },
+  "controlnet": {
+    "positive": ["7", 0],
+    "negative": ["8", 0],
+    "id_prefix": "cn"
+  },
   "params": {
     "trigger":       { "node": "14", "input": "value",        "type": "text",  "label": "Trigger word" },
     "lora_name":     { "node": "13", "input": "lora_name",    "type": "model", "label": "Character LoRA", "model_type": "loras" },

@@ -1240,8 +1240,120 @@ async function loadPoseConfig() {
       hint.className = "hint muted";
     }
     $("pose-lora-panel").hidden = false;
+    renderPoseControlNet(d);
   } catch (e) { /* pose-config is best-effort; don't block the poses grid */ }
 }
+
+// --- Phase H3: structural pose control + the face pass ------------------------
+let controlnetCache = null;
+
+async function renderPoseControlNet(cfg) {
+  const panel = $("pose-cn-panel");
+  const cn = cfg.controlnet || {};
+  if (controlnetCache === null) {
+    try {
+      controlnetCache = (await api("/api/controlnets")).controlnets || [];
+    } catch (e) { controlnetCache = []; }
+  }
+  const sel = $("pose-cn-select");
+  if (document.activeElement !== sel) {
+    sel.innerHTML = ['<option value="">None — prompt-only poses</option>'].concat(
+      controlnetCache.map((c) =>
+        `<option value="${esc(c.filename)}"${c.filename === cn.selected ? " selected" : ""}>` +
+        `${esc(c.name)}${c.base_model ? " — " + esc(c.base_model) : ""}` +
+        `${c.available === false ? " (not in ComfyUI)" : ""}</option>`)
+    ).join("");
+    sel.value = cn.selected || "";
+  }
+  const setIf = (id, v) => { if (document.activeElement !== $(id)) $(id).value = v; };
+  setIf("pose-cn-strength", cn.strength);
+  setIf("pose-cn-end", cn.end_percent);
+  setIf("pose-face-denoise", (cfg.face_pass || {}).denoise);
+  if (document.activeElement !== $("pose-face-pass")) {
+    $("pose-face-pass").checked = !!(cfg.face_pass || {}).enabled;
+  }
+
+  $("pose-skeleton-current").textContent = cn.skeleton || "no skeleton set";
+  const ready = !!(cn.selected && cn.skeleton);
+  $("pose-cn-summary").textContent = ready
+    ? `ControlNet on · face pass ${(cfg.face_pass || {}).enabled ? "on" : "off"}`
+    : "not configured — poses render from the prompt alone";
+
+  const hint = $("pose-cn-hint");
+  if (!controlnetCache.length) {
+    hint.innerHTML = "No ControlNet is registered. Install an OpenPose model into ComfyUI’s " +
+      "<code>models/controlnet</code> folder — it is registered automatically once ComfyUI sees it.";
+    hint.className = "hint muted";
+  } else if (!cn.selected) {
+    hint.innerHTML = "Pick an OpenPose ControlNet matching this persona’s checkpoint family, " +
+      "then set a skeleton. Without one, posture comes from the prompt and tends to repeat.";
+    hint.className = "hint muted";
+  } else if (!cn.skeleton) {
+    hint.innerHTML = "ControlNet selected but no skeleton yet — set one below, " +
+      "otherwise poses still render prompt-only.";
+    hint.className = "hint muted";
+  } else {
+    hint.innerHTML = `Poses render with <strong>${esc(cn.selected)}</strong> at strength ` +
+      `${cn.strength}, ending at ${Math.round(cn.end_percent * 100)}% of the steps so the last ` +
+      `stretch belongs to the character rather than the skeleton.`;
+    hint.className = "hint ok";
+  }
+
+  const warn = $("pose-cn-warning");
+  warn.hidden = !cfg.checkpoint_warning;
+  if (cfg.checkpoint_warning) warn.textContent = cfg.checkpoint_warning;
+  panel.hidden = false;
+}
+
+$("pose-cn-save").addEventListener("click", async () => {
+  if (!state.projectId) return;
+  const btn = $("pose-cn-save");
+  btn.disabled = true;
+  try {
+    const r = await api(`/api/projects/${state.projectId}/pose-controlnet`, {
+      method: "POST",
+      body: JSON.stringify({
+        controlnet: $("pose-cn-select").value,
+        strength: parseFloat($("pose-cn-strength").value) || 0.7,
+        start_percent: 0.0,
+        end_percent: parseFloat($("pose-cn-end").value) || 0.7,
+        face_pass: $("pose-face-pass").checked,
+        face_denoise: parseFloat($("pose-face-denoise").value) || 0.6,
+      }),
+    });
+    msg($("poses-msg"), r.warning
+      ? `Saved — but ${r.warning}.`
+      : "Pose structure saved. Regenerate poses to render with it.", r.warning ? "warn" : "ok");
+    loadPoseConfig();
+  } catch (e) { msg($("poses-msg"), e.message, "bad"); }
+  finally { btn.disabled = false; }
+});
+
+async function setSkeleton(body, label) {
+  try {
+    await api(`/api/projects/${state.projectId}/pose-skeleton`, {
+      method: "POST", body: JSON.stringify(body),
+    });
+    msg($("poses-msg"), `Skeleton set (${label}). Regenerate poses to use it.`, "ok");
+    loadPoseConfig();
+  } catch (e) { msg($("poses-msg"), e.message, "bad"); }
+}
+
+$("pose-skeleton-builtin").addEventListener("click", () => {
+  if (!state.projectId) return;
+  setSkeleton({ mode: "builtin", width: 832, height: 1216 }, "built-in standing");
+});
+
+$("pose-skeleton-upload").addEventListener("click", () => $("pose-skeleton-file").click());
+
+$("pose-skeleton-file").addEventListener("change", async (e) => {
+  const file = e.target.files && e.target.files[0];
+  if (!file || !state.projectId) return;
+  const reader = new FileReader();
+  reader.onload = () => setSkeleton({ mode: "image", image_b64: String(reader.result) }, file.name);
+  reader.readAsDataURL(file);
+  e.target.value = "";
+});
 
 $("pose-lora-save").addEventListener("click", async () => {
   if (!state.projectId) return;
@@ -1263,6 +1375,7 @@ $("pose-lora-save").addEventListener("click", async () => {
 
 function poseStatusBadge(p) {
   if (p.status === "pending") return '<span class="pose-badge b-pending">rendering…</span>';
+  if (p.status === "facepass") return '<span class="pose-badge b-pending">face pass…</span>';
   if (p.status === "error") return '<span class="pose-badge b-error">failed</span>';
   if (p.status === "empty" || !p.filename) return '<span class="pose-badge b-empty">not rendered</span>';
   return "";
@@ -1456,11 +1569,15 @@ function selectPose(id) {
 function refreshPosePreview(p) {
   const box = $("pose-ed-preview");
   const url = poseImageUrl(p);
+  const busy = p.status === "pending" || p.status === "facepass";
   box.innerHTML = url
     ? `<button type="button" class="pose-zoom-frame" id="pose-ed-zoomimg"><img src="${url}" alt="${esc(p.name)}" /></button>`
-    : `<div class="pose-empty-lg">${p.status === "pending" ? "rendering…" : "not rendered yet"}</div>`;
+    : `<div class="pose-empty-lg">${busy ? "rendering…" : "not rendered yet"}</div>`;
   const z = $("pose-ed-zoomimg");
   if (z) z.addEventListener("click", () => openLightbox(url));
+  // The face pass runs against the stored pass-1 image, so it only makes sense once
+  // there is one — and not while either pass is still in flight.
+  $("pose-ed-face").hidden = !(p.base_filename && !busy);
 }
 
 function closePoseEditor() { selectedPoseId = null; $("poses-editor").hidden = true; renderPosesGrid(posesCache); }
@@ -1628,6 +1745,27 @@ $("map-reset").addEventListener("click", async () => {
 });
 $("pose-ed-close").addEventListener("click", closePoseEditor);
 $("pose-ed-save").addEventListener("click", () => savePose(false));
+
+$("pose-ed-face").addEventListener("click", async () => {
+  if (selectedPoseId == null) return;
+  const btn = $("pose-ed-face");
+  btn.disabled = true;
+  try {
+    // Save any edit to the expression first — the face pass is what renders it.
+    const modifier = $("pose-ed-modifier").value.trim();
+    const name = $("pose-ed-name").value.trim();
+    if (name) {
+      await api(`/api/projects/${state.projectId}/poses/${selectedPoseId}`, {
+        method: "PATCH", body: JSON.stringify({ name, modifier }),
+      });
+    }
+    await api(`/api/projects/${state.projectId}/poses/${selectedPoseId}/face-pass`, { method: "POST" });
+    msg($("pose-ed-msg"), "Re-rendering the face over the same body…", "ok");
+    startPosesPolling();
+    loadPoses();
+  } catch (e) { msg($("pose-ed-msg"), e.message, "bad"); }
+  finally { btn.disabled = false; }
+});
 $("pose-ed-regen").addEventListener("click", () => savePose(true));
 $("pose-ed-ai-btn").addEventListener("click", poseAiSuggest);
 $("pose-ed-delete").addEventListener("click", deletePose);

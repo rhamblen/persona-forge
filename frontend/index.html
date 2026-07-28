@@ -527,6 +527,56 @@
                 <p class="hint" id="pose-lora-hint"></p>
               </div>
 
+              <details class="panel pose-cn-panel" id="pose-cn-panel" hidden>
+                <summary>
+                  Pose structure &amp; face pass
+                  <span class="muted small" id="pose-cn-summary"></span>
+                </summary>
+                <p class="hint">
+                  ControlNet fixes the <em>body</em> from a skeleton — far more reliable than
+                  asking the prompt for a posture. The face pass then re-renders just the face
+                  at full resolution to put the <em>emotion</em> on it, because a full-body
+                  sprite leaves the face too small to read.
+                </p>
+                <div class="pose-lora-row">
+                  <label class="field pose-lora-field">
+                    <span class="field-label">ControlNet <em>openpose model</em></span>
+                    <select id="pose-cn-select"></select>
+                  </label>
+                  <label class="field pose-lora-strength">
+                    <span class="field-label">Strength</span>
+                    <input id="pose-cn-strength" type="number" min="0" max="2" step="0.05" value="0.7" />
+                  </label>
+                  <label class="field pose-lora-strength">
+                    <span class="field-label">Ends at</span>
+                    <input id="pose-cn-end" type="number" min="0" max="1" step="0.05" value="0.7" />
+                  </label>
+                </div>
+                <div class="pose-lora-row">
+                  <label class="field pose-lora-strength">
+                    <span class="field-label">Face pass</span>
+                    <input id="pose-face-pass" type="checkbox" checked />
+                  </label>
+                  <label class="field pose-lora-strength">
+                    <span class="field-label">Face denoise</span>
+                    <input id="pose-face-denoise" type="number" min="0.1" max="1" step="0.05" value="0.6" />
+                  </label>
+                  <button class="btn" id="pose-cn-save">Apply</button>
+                </div>
+                <div class="pose-lora-row">
+                  <button class="chip" id="pose-skeleton-builtin"
+                          title="Render the shipped standing skeleton and use it for this persona">
+                    Use built-in standing skeleton
+                  </button>
+                  <button class="chip" id="pose-skeleton-upload"
+                          title="Upload your own OpenPose skeleton image">Upload skeleton…</button>
+                  <input id="pose-skeleton-file" type="file" accept="image/png,image/jpeg" hidden />
+                  <code class="export-folder" id="pose-skeleton-current"></code>
+                </div>
+                <p class="hint" id="pose-cn-hint"></p>
+                <p class="hint warn" id="pose-cn-warning" hidden></p>
+              </details>
+
               <p class="hint" id="poses-msg"></p>
               <div class="poses-grid" id="poses-grid">
                 <p class="muted">No poses yet — add one or load a preset.</p>
@@ -574,6 +624,10 @@
               <div class="actions">
                 <button class="btn btn-primary" id="pose-ed-regen">Save &amp; regenerate</button>
                 <button class="btn" id="pose-ed-save">Save only</button>
+                <button class="btn" id="pose-ed-face" hidden
+                        title="Re-render only the face over the same body — seconds, and the pose can't change">
+                  Re-roll face
+                </button>
                 <button class="btn btn-ghost" id="pose-ed-zoom" title="Zoom the current image">⤢ Zoom</button>
                 <button class="btn btn-ghost" id="pose-ed-delete">Delete</button>
               </div>

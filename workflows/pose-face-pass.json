@@ -1,0 +1,199 @@
+{
+ "1": {
+  "class_type": "CheckpointLoaderSimple",
+  "inputs": {
+   "ckpt_name": "animi/NoobAI-XL-v1.1.safetensors"
+  }
+ },
+ "13": {
+  "class_type": "LoraLoaderModelOnly",
+  "inputs": {
+   "model": [
+    "1",
+    0
+   ],
+   "lora_name": "",
+   "strength_model": 1.0
+  },
+  "_meta": {
+   "title": "Character LoRA"
+  }
+ },
+ "14": {
+  "class_type": "PrimitiveStringMultiline",
+  "inputs": {
+   "value": "pf_character"
+  },
+  "_meta": {
+   "title": "TRIGGER (LoRA)"
+  }
+ },
+ "2": {
+  "class_type": "PrimitiveStringMultiline",
+  "inputs": {
+   "value": "1girl, solo"
+  },
+  "_meta": {
+   "title": "CHARACTER"
+  }
+ },
+ "5": {
+  "class_type": "PrimitiveStringMultiline",
+  "inputs": {
+   "value": "neutral expression, closed mouth"
+  },
+  "_meta": {
+   "title": "Expression"
+  }
+ },
+ "4": {
+  "class_type": "PrimitiveStringMultiline",
+  "inputs": {
+   "value": "lowres, bad anatomy, worst quality"
+  },
+  "_meta": {
+   "title": "NEGATIVE"
+  }
+ },
+ "20": {
+  "class_type": "LoadImage",
+  "inputs": {
+   "image": "example.png"
+  },
+  "_meta": {
+   "title": "Base render (pass 1)"
+  }
+ },
+ "6": {
+  "class_type": "Text Concatenate",
+  "inputs": {
+   "delimiter": ", ",
+   "clean_whitespace": "true",
+   "text_a": [
+    "5",
+    0
+   ],
+   "text_b": [
+    "14",
+    0
+   ],
+   "text_c": [
+    "2",
+    0
+   ]
+  }
+ },
+ "23": {
+  "class_type": "CLIPTextEncode",
+  "inputs": {
+   "text": [
+    "6",
+    0
+   ],
+   "clip": [
+    "1",
+    1
+   ]
+  }
+ },
+ "24": {
+  "class_type": "CLIPTextEncode",
+  "inputs": {
+   "text": [
+    "4",
+    0
+   ],
+   "clip": [
+    "1",
+    1
+   ]
+  }
+ },
+ "25": {
+  "class_type": "UltralyticsDetectorProvider",
+  "inputs": {
+   "model_name": "bbox/face_yolov8m.pt"
+  }
+ },
+ "26": {
+  "class_type": "SAMLoader",
+  "inputs": {
+   "model_name": "sam_vit_b_01ec64.pth",
+   "device_mode": "AUTO"
+  }
+ },
+ "27": {
+  "class_type": "FaceDetailer",
+  "inputs": {
+   "image": [
+    "20",
+    0
+   ],
+   "model": [
+    "13",
+    0
+   ],
+   "clip": [
+    "1",
+    1
+   ],
+   "vae": [
+    "1",
+    2
+   ],
+   "positive": [
+    "23",
+    0
+   ],
+   "negative": [
+    "24",
+    0
+   ],
+   "bbox_detector": [
+    "25",
+    0
+   ],
+   "sam_model_opt": [
+    "26",
+    0
+   ],
+   "guide_size": 512,
+   "max_size": 1024,
+   "seed": 0,
+   "steps": 24,
+   "cfg": 6.5,
+   "sampler_name": "euler_ancestral",
+   "scheduler": "normal",
+   "denoise": 0.6,
+   "force_inpaint": true,
+   "guide_size_for": true,
+   "feather": 5,
+   "noise_mask": true,
+   "bbox_threshold": 0.5,
+   "bbox_dilation": 10,
+   "bbox_crop_factor": 3.0,
+   "sam_detection_hint": "center-1",
+   "sam_dilation": 0,
+   "sam_threshold": 0.93,
+   "sam_bbox_expansion": 0,
+   "sam_mask_hint_threshold": 0.7,
+   "sam_mask_hint_use_negative": "False",
+   "drop_size": 10,
+   "wildcard": "",
+   "cycle": 1
+  },
+  "_meta": {
+   "title": "Face pass"
+  }
+ },
+ "28": {
+  "class_type": "SaveImage",
+  "inputs": {
+   "images": [
+    "27",
+    0
+   ],
+   "filename_prefix": "persona-forge/pose_face"
+  }
+ }
+}

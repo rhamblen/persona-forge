@@ -155,16 +155,103 @@ def apply_lora_stack(
     return graph
 
 
+def apply_controlnet(
+    graph: dict[str, Any], manifest: dict[str, Any], cfg: dict[str, Any]
+) -> dict[str, Any]:
+    """Splice OpenPose ControlNet into a workflow that declares `controlnet` (Phase H3).
+
+    Three nodes — `LoadImage` (the skeleton), `ControlNetLoader`, `ControlNetApplyAdvanced`
+    — inserted between the text encoders and whatever consumes their conditioning. The
+    manifest names the two conditioning links; every consumer of them is repointed at the
+    apply node's paired outputs, reusing the same `_rewire_link` machinery the LoRA chain
+    uses.
+
+    Spliced rather than shipped as a second template family because ControlNet touches
+    **conditioning only** while the LoRA chain touches **model/CLIP only** — they are
+    orthogonal, so one splice serves `pose-with-lora`, `base-character` and (Phase H3c)
+    the dataset graphs without any of them gaining a variant file.
+
+    A union ControlNet additionally needs `SetUnionControlNetType`; `kind` carries it.
+    """
+    spec = manifest.get("controlnet")
+    if not spec or not cfg or not cfg.get("skeleton") or not cfg.get("controlnet_name"):
+        return graph
+
+    pos_src, neg_src = spec.get("positive"), spec.get("negative")
+    if not pos_src or not neg_src:
+        raise WorkflowError("controlnet manifest block needs both 'positive' and 'negative'")
+
+    prefix = spec.get("id_prefix") or "cn"
+    img_id, load_id, apply_id = f"{prefix}_img", f"{prefix}_load", f"{prefix}_apply"
+    union_id = f"{prefix}_union"
+    for nid in (img_id, load_id, apply_id, union_id):
+        if nid in graph:
+            raise WorkflowError(f"controlnet node id '{nid}' collides with the template")
+
+    graph[img_id] = {"class_type": "LoadImage", "inputs": {"image": cfg["skeleton"]}}
+    graph[load_id] = {"class_type": "ControlNetLoader",
+                      "inputs": {"control_net_name": cfg["controlnet_name"]}}
+    control_src: list[Any] = [load_id, 0]
+
+    # A union model is one file covering many control types and has to be told which.
+    if (cfg.get("kind") or "").lower() == "union":
+        graph[union_id] = {"class_type": "SetUnionControlNetType",
+                           "inputs": {"control_net": [load_id, 0], "type": "openpose"}}
+        control_src = [union_id, 0]
+
+    graph[apply_id] = {
+        "class_type": "ControlNetApplyAdvanced",
+        "inputs": {
+            "positive": list(pos_src),
+            "negative": list(neg_src),
+            "control_net": control_src,
+            "image": [img_id, 0],
+            "strength": float(cfg.get("strength", 0.7)),
+            "start_percent": float(cfg.get("start_percent", 0.0)),
+            "end_percent": float(cfg.get("end_percent", 0.7)),
+        },
+    }
+
+    skip = {img_id, load_id, apply_id, union_id}
+    _rewire_link(graph, pos_src, [apply_id, 0], skip)
+    _rewire_link(graph, neg_src, [apply_id, 1], skip)
+    return graph
+
+
+def bypass_optional_lora(graph: dict[str, Any], manifest: dict[str, Any]) -> dict[str, Any]:
+    """Remove a template's LoRA loader and wire its consumers to the raw model.
+
+    Templates carry a character-LoRA loader because that is the normal case, but a persona
+    with no trained LoRA still has to render. An empty `lora_name` is not an option —
+    ComfyUI rejects a COMBO value that isn't in the list — so the node has to go. The
+    manifest names it (`lora_optional`) rather than the caller hardcoding a node id.
+    """
+    spec = manifest.get("lora_optional")
+    if not spec:
+        raise WorkflowError(f"'{manifest.get('id')}' does not declare lora_optional")
+    node_id = str(spec["node"])
+    if node_id not in graph:
+        return graph
+    _rewire_link(graph, [node_id, 0], list(spec["fallback_source"]), {node_id})
+    graph.pop(node_id, None)
+    return graph
+
+
 def build_graph(
     workflow_id: str,
     params: dict[str, Any],
     lora_stack: list[dict[str, Any]] | None = None,
+    controlnet: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Load the template and patch the requested parameters into it.
 
     `lora_stack` (Phase H1b) overlays N LoRAs on workflows declaring `lora_chain`; it
     supersedes the single-LoRA `lora_name`/`lora_strength_*` params, which stay for the
     one-LoRA case and older callers.
+
+    `controlnet` (Phase H3) splices OpenPose conditioning into workflows declaring
+    `controlnet`. The two are independent — LoRAs touch model/CLIP, ControlNet touches
+    conditioning — so a graph can carry both.
     """
     manifest = get_manifest(workflow_id)
     template_path = WORKFLOW_DIR / manifest["file"]
@@ -191,6 +278,8 @@ def build_graph(
 
     if lora_stack:
         apply_lora_stack(graph, manifest, lora_stack)
+    if controlnet:
+        apply_controlnet(graph, manifest, controlnet)
 
     # strip UI-only metadata before submitting
     for node in graph.values():

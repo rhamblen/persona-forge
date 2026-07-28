@@ -1,5 +1,23 @@
 # AI Context — cold-start orientation
 
+> **2026-07-28 — v0.8.4: structural pose control (H3a).** Pose renders are now **two passes
+> carrying three tunable layers** — *base* (prompt/LoRA/seed) and *body* (skeleton) both settle
+> in pass 1; *face* is pass 2. **Keep the pass-1 image** (`poses.base_filename`): re-running the
+> face against it is the cheap loop (14s vs ~104s) and is what lets an expression be retried
+> without disturbing an approved body. Pose status now runs `pending → facepass → done`; treat
+> `facepass` as in-flight everywhere `pending` is (it is why `poses_list.pending` counts both).
+> ControlNet is **spliced**, not templated — `workflows.apply_controlnet()` inserts
+> LoadImage/ControlNetLoader/ControlNetApplyAdvanced and repoints conditioning consumers, and
+> every workflow declaring a `controlnet` manifest block gets it (so H3c's dataset work needs no
+> new template). It composes with the LoRA chain because ControlNet touches **conditioning** and
+> LoRAs touch **model/CLIP**. Per-pose columns are **nullable = inherit the persona default** —
+> preserve that, it is how one dial moves a whole set. Two measured facts not to re-derive:
+> face-pass denoise **0.60** (0.45 does nothing, 0.75 destroys the face), and **a base-SDXL
+> checkpoint renders a flat face at every denoise** — proven as a 2×2 against the character LoRA,
+> which is *not* the limiting factor. Also: `comfy.list_models()` now **raises** on an unknown
+> kind instead of falling back to checkpoints; FaceDetailer's `wildcard` input is required with
+> no schema default (send `""`). Full design + measurements: `docs/pose-control.md`.
+
 > **2026-07-28 — v0.8.3: admin tools (deletion).** `DELETE /api/projects/{id}?delete_files=`,
 > `DELETE /api/versions/{id}?force=`, `DELETE /api/projects/{id}/lora/{filename}`. **Append-only
 > is still the rule** — these are deliberate, guarded exceptions, never automatic, and nothing
@@ -353,7 +371,17 @@ LAN; no Claude/Anthropic in the runtime loop.
   the same decision as a row); version children are re-parented rather than orphaned so history
   stays a connected chain; clones are orphaned rather than cascade-deleted; a running build
   refuses (409) rather than racing the worker. Browser-verified end to end.
-- **Remaining:** rest of **Phase H1** (dataset layers + emotion enrichment behind the
+- **0.8.4:** **Phase H3a — structural pose control.** See the header note. Key design calls:
+  ControlNet is spliced into any workflow declaring a `controlnet` manifest block rather than
+  shipping a parallel template family (conditioning vs model/CLIP makes it orthogonal to the LoRA
+  chain); the face pass is a **separate graph over the stored pass-1 image**, which is what makes
+  an expression re-roll cheap and non-destructive; per-pose overrides are nullable so the persona
+  dial stays authoritative; per-pose seeds are **derived** from the version seed, not random, so a
+  set is still reproducible. The defaults are measured against the live box, not chosen — see the
+  `docs/pose-control.md` §4.0 calibration before changing them.
+- **Remaining:** **H3b** (pose library — many skeletons, bound per emotion tier) and **H3c**
+  (ControlNet in the dataset build, which is what teaches the LoRA the body at all); rest of
+  **Phase H1** (dataset layers + emotion enrichment behind the
   baseline gate, `lora_builds` versioning, per-axis selective rebuild — see `docs/emotion-depth.md`)
   · Character Studio at **0.9** · 1.0 release. The **dataset side of the weak-LoRA fix is now
   complete** (0.7.2 pose + 0.7.3 framing/expression + 0.7.6 targeting/variety).

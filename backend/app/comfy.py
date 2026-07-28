@@ -52,11 +52,20 @@ async def object_info(node: str | None = None) -> dict[str, Any]:
 
 
 async def list_models(kind: str = "checkpoints") -> list[str]:
-    """kind: 'checkpoints' | 'loras'. Reads the live dropdown values from ComfyUI."""
-    node, field = {
-        "checkpoints": ("CheckpointLoaderSimple", "ckpt_name"),
-        "loras": ("LoraLoaderModelOnly", "lora_name"),
-    }.get(kind, ("CheckpointLoaderSimple", "ckpt_name"))
+    """kind: 'checkpoints' | 'loras' | 'controlnet'. Reads live dropdown values from ComfyUI.
+
+    An unknown kind raises rather than quietly falling back to checkpoints — the fallback
+    made a missing mapping look like "none of your files are installed", which is a much
+    harder symptom to read than an error naming the kind.
+    """
+    try:
+        node, field = {
+            "checkpoints": ("CheckpointLoaderSimple", "ckpt_name"),
+            "loras": ("LoraLoaderModelOnly", "lora_name"),
+            "controlnet": ("ControlNetLoader", "control_net_name"),
+        }[kind]
+    except KeyError:
+        raise ComfyError(f"unknown model kind '{kind}'") from None
     info = await object_info(node)
     try:
         models = list(info[node]["input"]["required"][field][0])

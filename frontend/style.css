@@ -392,6 +392,21 @@ code { background: var(--bg-raised); padding: 1px 5px; border-radius: 4px; font-
 .pose-lora-bar .hint { margin: 10px 0 0; }
 .pose-lora-bar .hint code { background: var(--bg-raised); border: 1px solid var(--line);
   border-radius: 5px; padding: 1px 5px; font-size: 12px; }
+.hint.warn { color: var(--warn); }
+
+/* Pose structure + face pass (Phase H3). Collapsed by default: it carries real dials but
+   most sessions only set it once, so it shouldn't crowd the grid. */
+.pose-cn-panel { margin-bottom: 12px; }
+.pose-cn-panel > summary { cursor: pointer; font-weight: 600; display: flex;
+  align-items: baseline; gap: 10px; }
+.pose-cn-panel > summary::marker { color: var(--muted); }
+.pose-cn-panel .pose-lora-row { margin-top: 10px; }
+.pose-cn-panel .hint { margin: 10px 0 0; }
+.pose-cn-panel .hint code { background: var(--bg-raised); border: 1px solid var(--line);
+  border-radius: 5px; padding: 1px 5px; font-size: 12px; }
+.pose-cn-panel input[type="checkbox"] { width: auto; margin: 0; }
+.pose-cn-panel .export-folder { align-self: center; }
+
 .build-progress { margin-top: 12px; }
 .build-progress .ds-bar-track { margin-bottom: 6px; }
 .ds-controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }

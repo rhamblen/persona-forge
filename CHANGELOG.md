@@ -9,6 +9,70 @@ Every version below is a **published GitHub Release** with a matching
 
 ---
 
+## [0.8.4] — 2026-07-28
+
+**Structural pose control — ControlNet drives the body, a second pass drives the face.**
+(Phase H, stage H3a. Design doc: [`docs/pose-control.md`](docs/pose-control.md).)
+
+Poses came out looking the same as each other, for three separable reasons: every pose in a
+set rendered at the **same seed**, posture prose is **weakly obeyed** by the checkpoint and
+actively fought by a character LoRA trained mostly on one stance, and nothing constrained
+where the limbs actually went. This release fixes the first and third, which makes the
+second stop mattering.
+
+A pose is now **three independently tunable layers over two render passes**: *base* (prompt,
+LoRA, seed) and *body* (the skeleton) are both settled in pass 1, and *face* is pass 2 —
+so re-rolling an expression costs seconds and **cannot change a body you already approved**.
+
+### Added
+- **ControlNet on pose renders.** An OpenPose skeleton fixes the figure; the prompt stops
+  being the only lever on posture. Strength, and the fraction of steps it acts over, are
+  persona-level dials with per-pose overrides.
+- **The face pass.** Full-body sprites leave the face ~100px wide — too small to carry a
+  trained identity *or* read an expression. `pose-face-pass.json` re-renders just the face at
+  `guide_size` and pastes it back, and it is what actually puts the emotion on the sprite.
+- **"Re-roll face"** in the pose editor — re-runs pass 2 against the stored pass-1 image.
+  **Measured: 14s versus ~104s for a full re-render**, with the pose held fixed.
+- **ControlNet registry** (`/api/controlnets`, CRUD) recording **base-model compatibility**,
+  same as the concept-LoRA library and for the same reason. Seeded automatically from the
+  installed files, so the two shipped OpenPose models register themselves.
+- **Skeleton staging** — `POST .../pose-skeleton` renders the built-in standing skeleton
+  (`backend/app/skeleton.py`, canonical `draw_bodypose` geometry over normalised COCO-18
+  keypoints) or accepts an uploaded one, and stages it into ComfyUI's input.
+- **A checkpoint warning.** Base SDXL renders a flat face at *every* face-pass denoise; the
+  Poses tab now says so, because it presents as a broken feature rather than a wrong model.
+
+### Changed
+- **Per-pose seeds.** `_queue_pose` derives `hash(version.seed, pose.id)` instead of reusing
+  the version's single seed. Derived rather than random, so a set stays reproducible.
+- `workflows.build_graph()` takes an optional `controlnet` and splices `LoadImage` +
+  `ControlNetLoader` + `ControlNetApplyAdvanced` in, repointing conditioning consumers via the
+  same `_rewire_link` machinery the LoRA chain uses. Declared per workflow, so `pose-with-lora`,
+  `base-character` and `base-character-lora` all gained it — and Phase H3c's dataset work
+  inherits it without a new template.
+- `comfy.list_models()` learned `controlnet`, and now **raises on an unknown kind** instead of
+  silently falling back to checkpoints — the fallback made a missing mapping look like "none of
+  your files are installed", which cost real debugging time.
+
+### Notes
+- **Calibrated against the live box, not guessed.** Face-pass denoise defaults to **0.60**:
+  0.45 barely moves an expression and 0.75 destroys the face. That independently reproduces the
+  threshold the Track A expression workflow found.
+- **ControlNet beats posture prose outright.** A neutral skeleton plus a "furious, shouting,
+  leaning forward" prompt renders a calm figure standing at rest. Per-tier skeleton bindings
+  (stage H3c) are therefore load-bearing, not a convenience.
+- **The face pass needs an anime-capable checkpoint.** Verified as a 2×2 over
+  {base SDXL, NoobAI} × {no LoRA, LoRA @1.0}: the checkpoint decides, and the character LoRA
+  emotes fine at full strength — it is not the limiting factor.
+- Migration is automatic: seven nullable columns on `poses` (NULL = inherit the persona
+  default), seven on `projects`, and the `controlnets` table. Existing poses render exactly as
+  before until a ControlNet *and* a skeleton are both set.
+- Adds **Pillow** to the backend, for skeleton rendering.
+- **Verified** against live ComfyUI 0.28.0 and a copy of the production database: migrations,
+  registry seeding and its idempotence, both passes reconciling `pending → facepass → done`,
+  the LoRA-free bypass path, the face re-roll, every guard (400/404/409), and the whole panel
+  driven in a browser.
+
 ## [0.8.3] — 2026-07-28
 
 **Admin tools — delete a persona, a version, or a trained LoRA.** Everything in Persona Forge

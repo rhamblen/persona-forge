@@ -214,7 +214,61 @@ CREATE TABLE IF NOT EXISTS emotion_tiers (
 );
 
 CREATE INDEX IF NOT EXISTS idx_emotion_tiers_axis ON emotion_tiers(axis_id, position);
+
+-- Phase H3 (0.8.4): the ControlNet registry. Same shape and same reason as
+-- `concept_loras` — a ControlNet is bound to a checkpoint family, so `base_model` is
+-- compatibility rather than decoration, and the project is deliberately not committed to
+-- one family. Global, not per project: a ControlNet is character-agnostic.
+--
+-- `kind` is the control type ('openpose' here; depth/canny later), because a union
+-- ControlNet needs `SetUnionControlNetType` told which mode to run and a dedicated one
+-- does not.
+CREATE TABLE IF NOT EXISTS controlnets (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT NOT NULL,
+    filename    TEXT NOT NULL,                  -- as ComfyUI lists it under models/controlnet
+    base_model  TEXT NOT NULL DEFAULT '',       -- '' = unknown/unchecked
+    kind        TEXT NOT NULL DEFAULT 'openpose',
+    notes       TEXT NOT NULL DEFAULT '',
+    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_controlnets_file ON controlnets(filename);
 """
+
+# Per-pose ControlNet + face-pass columns (Phase H3, 0.8.4). Nullable on purpose: NULL
+# means "inherit the persona's default", so changing the persona-level dial moves every
+# pose that hasn't been individually overridden. See docs/pose-control.md §4.1.
+_POSE_H3_COLUMNS = [
+    # The skeleton driving this pose, as a ComfyUI *input* path. '' = no ControlNet,
+    # render prompt-only exactly as before H3.
+    ("skeleton_ref", "TEXT NOT NULL DEFAULT ''"),
+    # Per-pose seed. Before H3 every pose in a set rendered at the version's single seed,
+    # which is most of why they came out looking the same (docs/pose-control.md §0a).
+    ("seed", "INTEGER NOT NULL DEFAULT 0"),
+    # Pass 1's output, kept so the face pass can be re-run without re-rendering the body.
+    ("base_filename", "TEXT NOT NULL DEFAULT ''"),
+    ("base_subfolder", "TEXT NOT NULL DEFAULT ''"),
+    # Overrides; NULL = inherit from the project.
+    ("cn_strength", "REAL"),
+    ("face_pass", "INTEGER"),
+    ("face_denoise", "REAL"),
+]
+
+# Persona-level pose-render defaults (Phase H3, 0.8.4).
+_PROJECT_H3_COLUMNS = [
+    ("pose_controlnet", "TEXT NOT NULL DEFAULT ''"),        # filename from the registry
+    ("pose_cn_strength", "REAL NOT NULL DEFAULT 0.7"),
+    ("pose_cn_start", "REAL NOT NULL DEFAULT 0.0"),
+    # Structure is decided early; leaving the last third free keeps the character LoRA
+    # in charge of identity instead of the skeleton flattening it.
+    ("pose_cn_end", "REAL NOT NULL DEFAULT 0.7"),
+    ("pose_skeleton", "TEXT NOT NULL DEFAULT ''"),          # default skeleton for the set
+    ("pose_face_pass", "INTEGER NOT NULL DEFAULT 1"),
+    # 0.60 measured, not guessed: 0.45 barely moves an expression and 0.75 destroys the
+    # face. See docs/pose-control.md §4.0.
+    ("pose_face_denoise", "REAL NOT NULL DEFAULT 0.6"),
+]
 
 
 def connect() -> sqlite3.Connection:
@@ -259,6 +313,15 @@ def init_db() -> None:
         if "axis" not in pcols:  # pre-0.8.2 — grouping the grid by emotion axis
             conn.execute("ALTER TABLE poses ADD COLUMN axis TEXT NOT NULL DEFAULT ''")
             conn.execute("ALTER TABLE poses ADD COLUMN tier INTEGER NOT NULL DEFAULT 0")
+
+        # pre-0.8.4 — ControlNet + face pass. Added column-by-column rather than as a
+        # block so a database that picked up only some of them still lands complete.
+        for col, decl in _POSE_H3_COLUMNS:
+            if col not in pcols:
+                conn.execute(f"ALTER TABLE poses ADD COLUMN {col} {decl}")
+        for col, decl in _PROJECT_H3_COLUMNS:
+            if col not in cols:
+                conn.execute(f"ALTER TABLE projects ADD COLUMN {col} {decl}")
 
 
 def row_to_dict(row: sqlite3.Row | None) -> dict | None:
