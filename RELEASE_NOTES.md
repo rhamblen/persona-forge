@@ -1,61 +1,59 @@
-# v0.8.2 — The emotion map
+# v0.8.3 — Admin tools
 
-**Phase H1a.** Emotion is two dimensions, not one: *which* emotion (**axis**) and *how much*
-(**tier**). This release adds that structure — and makes it yours to change.
+Everything in Persona Forge could be created and nothing could be removed. A scrapped
+experiment stayed in the picker forever, and a bad LoRA sat next to the good one with only its
+timestamp to tell them apart. This release adds the missing half: **delete a persona, a prompt
+version, or a trained LoRA.**
 
-## The happy accident
+## Deliberate, not general
 
-SillyTavern's 28 expression labels are the GoEmotions set, and several already come graded:
+The version store is append-only on purpose, and that stays true. The append-only rule exists to
+prevent **accidental** loss — so deletion is a *deliberate* action with guards, never something
+that happens on its own:
 
-- annoyance → **anger** → *fury*
-- disappointment → **sadness** → **grief** → *despair*
-- amusement → **joy** → **excitement** → *elation*
+- The **current version can't be deleted** — roll back to another one first.
+- A persona always keeps **at least one version**.
+- A **signed-off baseline** takes a second confirmation that names it as the approved reference.
+- A persona with a **running build** refuses to delete — cancel the build first, rather than
+  having its job row vanish from under the worker mid-stage.
+- **Clones are kept.** Deleting a parent persona orphans its clones (they lose the parent link);
+  it never cascades into personas you didn't ask to remove.
 
-So grouping the 28 by axis gives you most of the intensity ladder for free. Only the top tiers
-are new — 7 of them: **fury, terror, despair, elation, devotion, revulsion, humiliation**. The
-28 stay the baseline and the export target; tiers are purely additive.
+## Delete a persona
 
-## It's a default, not a vocabulary
+**🗑 Delete this persona** in the sidebar. The confirmation names the persona, counts its
+versions and poses, and shows the exact build folder path.
 
-The shipped map is a starting point. Everything is editable, at every level:
+Ticking **"also delete the build folder"** is a separate decision, and deliberately so: that
+folder holds every rendered image and the trained LoRA — often an hour of GPU time. Leave it
+unticked and the persona leaves Persona Forge while the files stay on the share.
 
-- **Axes** — add your own (Exhaustion, Resolve, whatever your cast needs), rename, delete, and
-  mark whether they're a real intensity ladder.
-- **Tiers** — add, relabel, reorder along the ladder, delete, and rewrite the prose that drives
-  the render.
-- **Reset to default** whenever you want the shipped map back.
+## Delete a prompt version
 
-A stoic character doesn't need a rage tier; a monster may need axes no human has. Open
-**Emotion map…** on the Poses tab.
+A **Delete** button on any version that isn't the current one. Its children **re-attach to its
+parent**, so pruning a mid-history version leaves the chain connected rather than fragmenting it
+into orphans. Images generated from that version are kept — they just lose the link.
 
-## Added
-- **Grouped poses grid** — poses now render grouped by axis with tiers in rising-intensity
-  order, each group showing **done/total**. That's the real point: the baseline review has to
-  answer *"which emotion is this persona weak at?"*, and an alphabetical grid of 28 can't.
-- **"+ intensity tiers" preset** — the 28 plus the graded top tiers, in one click.
-- Prose modifiers that describe **posture as well as face**. Rage and despair are body
-  language; a face-only repaint can't render them, which is exactly why this pipeline trains a
-  per-character LoRA.
+## Delete a trained LoRA
+
+A ✕ on each file in the LoRA list. If you delete the one currently selected for pose renders,
+the selection is **cleared and the UI tells you** — otherwise poses would keep asking ComfyUI for
+a file that no longer exists.
 
 ## Notes
-- **The map is authoritative.** Poses resolve against the current map by name, so renaming an
-  axis or reordering a ladder re-groups the grid at once rather than showing whatever was true
-  when the pose was created. A pose whose label has left the map keeps its last grouping.
-- **`graded` is honest.** Anger and Sadness are ladders. Cognition ("confusion → surprise") is
-  not — those axes are groupings, and they say so. Later enrichment will only offer "hone the
-  intensity" where an intensity actually exists.
-- **Custom tiers are flagged.** SillyTavern's classifier can never emit `fury` — custom labels
-  need the planned state engine, or a manual trigger, to ever appear. Whether a label is one of
-  ST's own 28 is a fixed external contract, tracked separately from your editable map.
-- Deleting a tier or axis never touches rendered images — those poses just move to "Ungrouped".
-- Tier labels must be unique: they become sprite filenames, and a clash would silently overwrite
-  an export.
+- Every deletion is logged with what went and what it cost: version/image/pose counts, whether
+  the build folder was removed, and how many clones were orphaned.
+- LoRA filenames are treated as path components only, and build-folder removal refuses any path
+  that isn't a direct child of the builds root — a blank or odd slug can never turn into "delete
+  the builds root".
+- Verified in a browser end to end, including both cancel paths, the signed-off double-confirm,
+  re-parenting checked in the database, the running-build refusal, and delete-with-files versus
+  delete-without-files.
 
 ## Upgrade notes
-Automatic. The map seeds on first boot, and existing poses are tagged with their axis by name.
-An edited map is never overwritten by a later start.
+Automatic. No schema change, no compose change.
 
-**Image:** `ghcr.io/rhamblen/persona-forge:0.8.2`
+**Image:** `ghcr.io/rhamblen/persona-forge:0.8.3`
 
 ## Upgrading
 No compose changes. Pull and restart:

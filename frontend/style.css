@@ -252,6 +252,18 @@ body.no-scroll { overflow: hidden; }
 .map-add-tier .map-new-label { width: 130px; flex: none; }
 .map-add-tier .map-new-mod { flex: 1; min-width: 0; }
 
+/* ---------- destructive actions (0.8.3) ---------- */
+.nav-btn-danger { color: var(--bad); }
+.nav-btn-danger:hover { border-color: var(--bad); }
+.btn-danger { background: var(--bad); border-color: var(--bad); color: #fff; }
+.btn-danger:hover { filter: brightness(1.1); }
+.del-files-row { display: block; margin: 12px 0; }
+.del-files-row input { margin-right: 6px; }
+.lora-file .lora-del { margin-left: 8px; padding: 0 6px; color: var(--text-dim); }
+.lora-file .lora-del:hover { color: var(--bad); border-color: var(--bad); }
+.lora-file { display: flex; align-items: center; gap: 4px; }
+.lora-file .muted { flex: 1; }
+
 /* misc */
 dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; }
 dt { color: var(--text-dim); } dd { margin: 0; word-break: break-word; }

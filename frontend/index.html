@@ -56,6 +56,7 @@
         <select id="project-select" class="project-select"></select>
         <button class="nav-btn" id="new-project-btn">+ New persona</button>
         <button class="nav-btn" id="clone-project-btn">⧉ Clone this persona</button>
+        <button class="nav-btn nav-btn-danger" id="delete-project-btn">🗑 Delete this persona</button>
 
         <div class="nav-section">Phases</div>
         <a class="nav-item" data-view="overview" href="#">Overview</a>
@@ -672,6 +673,31 @@
       <p class="hint" id="lib-msg"></p>
       <div class="actions">
         <button class="btn" id="lib-close" type="button">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- delete persona (0.8.3) — the build folder is a separate, explicit decision -->
+  <div class="modal-backdrop" id="del-modal" hidden>
+    <div class="modal">
+      <h2>Delete persona</h2>
+      <p class="muted small" id="del-what"></p>
+      <label class="field del-files-row">
+        <span>
+          <input type="checkbox" id="del-files" />
+          <strong>Also delete the build folder</strong>
+        </span>
+        <span class="field-label" style="margin-top:4px">
+          Removes every rendered image <em>and any trained LoRA</em> from the share —
+          often an hour of GPU time. Leave unticked to keep the files and only remove the
+          persona from Persona Forge.
+        </span>
+      </label>
+      <code class="export-folder" id="del-folder"></code>
+      <p class="hint" id="del-msg"></p>
+      <div class="actions">
+        <button class="btn btn-danger" id="del-confirm">Delete persona</button>
+        <button class="btn" id="del-cancel">Cancel</button>
       </div>
     </div>
   </div>

@@ -372,6 +372,7 @@ async function loadVersions() {
         <div class="version-actions">
           ${isCurrent ? "" : `<button class="btn btn-sm" data-rollback="${v.id}">Roll back to this</button>`}
           ${v.signed_off ? "" : `<button class="btn btn-sm" data-signoff="${v.id}">Sign off</button>`}
+          ${isCurrent || list.length < 2 ? "" : `<button class="btn btn-sm btn-ghost" data-delversion="${v.id}" title="Delete this version">Delete</button>`}
         </div>
       </div>
     </div>`;
@@ -381,6 +382,27 @@ async function loadVersions() {
     b.addEventListener("click", () => rollback(b.dataset.rollback)));
   $("version-list").querySelectorAll("[data-signoff]").forEach((b) =>
     b.addEventListener("click", () => signOff(b.dataset.signoff)));
+  $("version-list").querySelectorAll("[data-delversion]").forEach((b) =>
+    b.addEventListener("click", () => deleteVersion(b.dataset.delversion)));
+}
+
+// Pruning a version is deliberate, never automatic — the append-only store exists to stop
+// *accidental* loss. Hence: no delete button on the current version, an extra confirm for a
+// signed-off baseline, and a note that history stays connected.
+async function deleteVersion(vid) {
+  const v = state.versions.find((x) => String(x.id) === String(vid));
+  const label = verLabel(vid);
+  if (!confirm(`Delete ${label} permanently?\n\nIts children re-attach to its parent, so the history chain stays intact. Images generated from it are kept.`)) return;
+  try {
+    let force = "";
+    if (v && v.signed_off) {
+      if (!confirm(`${label} is a SIGNED-OFF BASELINE.\n\nThat's the approved reference for this persona. Delete it anyway?`)) return;
+      force = "?force=true";
+    }
+    await api(`/api/versions/${vid}${force}`, { method: "DELETE" });
+    msg($("studio-msg"), `${label} deleted.`, "ok");
+    await loadProject();
+  } catch (e) { msg($("studio-msg"), e.message, "bad"); }
 }
 
 async function rollback(vid) {
@@ -965,6 +987,17 @@ function startLoraPolling() {
   }, 5000);
 }
 
+// A LoRA is roughly an hour of GPU time, so name the file and say it can't be undone.
+async function deleteLora(name) {
+  if (!confirm(`Delete the trained LoRA "${name}"?\n\nThis removes the file from the build folder. It cannot be undone — retraining takes about an hour.`)) return;
+  try {
+    const r = await api(`/api/projects/${state.projectId}/lora/${encodeURIComponent(name)}`, { method: "DELETE" });
+    msg($("lora-msg"), `Deleted ${name}.${r.selection_cleared ? " It was the selected pose LoRA — poses now render without one." : ""}`, "ok");
+    await loadLora();
+    await loadPoseConfig();
+  } catch (e) { msg($("lora-msg"), e.message, "bad"); }
+}
+
 async function loadLora() {
   const np = $("lora-noproject"), main = $("lora-main");
   if (!state.projectId) { np.hidden = false; main.hidden = true; return; }
@@ -979,8 +1012,11 @@ async function loadLora() {
     $("lora-list").innerHTML = d.loras.length
       ? d.loras.map((l, i) => `<div class="small lora-file">${esc(l.name)}` +
           `<span class="muted"> — built ${esc(l.modified || fmtDateTime(l.modified_ts))}</span>` +
-          `${i === 0 && d.loras.length > 1 ? '<span class="lora-latest">latest</span>' : ""}</div>`).join("")
+          `${i === 0 && d.loras.length > 1 ? '<span class="lora-latest">latest</span>' : ""}` +
+          `<button class="btn btn-ghost btn-sm lora-del" data-lora="${esc(l.name)}" title="Delete this LoRA file">✕</button></div>`).join("")
       : '<p class="muted">None yet.</p>';
+    $("lora-list").querySelectorAll(".lora-del").forEach((b) =>
+      b.addEventListener("click", () => deleteLora(b.dataset.lora)));
     // training state (with live elapsed + ETA from the previous run)
     const ts = d.train_status;
     const st = $("lora-train-status");
@@ -1809,6 +1845,53 @@ function openModal(mode = "new") {
 }
 $("new-project-btn").addEventListener("click", () => openModal("new"));
 $("empty-new-project").addEventListener("click", () => openModal("new"));
+/* ---------------- delete persona (0.8.3) ---------------- */
+
+$("delete-project-btn").addEventListener("click", async () => {
+  if (!state.projectId) { msg($("studio-msg"), "No persona selected.", "bad"); return; }
+  const opt = [...$("project-select").options].find((o) => o.value === String(state.projectId));
+  const name = opt ? opt.textContent : "this persona";
+  // Count what's about to go, so the confirmation is specific rather than generic.
+  let detail = "";
+  try {
+    const [d, poses] = await Promise.all([
+      api(`/api/projects/${state.projectId}`),
+      api(`/api/projects/${state.projectId}/poses`).catch(() => ({ counts: {} })),
+    ]);
+    const bits = [];
+    if (state.versions.length) bits.push(`${state.versions.length} version${state.versions.length === 1 ? "" : "s"}`);
+    if (poses.counts && poses.counts.total) bits.push(`${poses.counts.total} pose${poses.counts.total === 1 ? "" : "s"}`);
+    detail = bits.length ? ` (${bits.join(", ")})` : "";
+    $("del-folder").textContent = d.build_dir || "";
+  } catch { $("del-folder").textContent = ""; }
+  $("del-what").innerHTML = `Permanently remove <strong>${esc(name)}</strong>${esc(detail)} from Persona Forge. ` +
+    `Clones of this persona are kept (they just lose the parent link).`;
+  $("del-files").checked = false;
+  msg($("del-msg"), "");
+  $("del-modal").hidden = false;
+});
+
+$("del-cancel").addEventListener("click", () => { $("del-modal").hidden = true; });
+$("del-modal").addEventListener("click", (e) => { if (e.target === $("del-modal")) $("del-modal").hidden = true; });
+
+$("del-confirm").addEventListener("click", async () => {
+  const withFiles = $("del-files").checked;
+  const btn = $("del-confirm");
+  btn.disabled = true;
+  try {
+    const r = await api(`/api/projects/${state.projectId}?delete_files=${withFiles}`, { method: "DELETE" });
+    $("del-modal").hidden = true;
+    state.projectId = null;
+    state.current = null;
+    state.versions = [];
+    await loadProjects();
+    msg($("studio-msg"),
+      `Deleted "${r.name}".` + (r.removed_dir ? " Build folder removed." : " Build folder left on the share."),
+      "ok");
+  } catch (e) { msg($("del-msg"), e.message, "bad"); }
+  finally { btn.disabled = false; }
+});
+
 $("clone-project-btn").addEventListener("click", () => {
   if (!state.projectId) return msg($("studio-msg"), "Select a persona to clone first.", "bad");
   openModal("clone");

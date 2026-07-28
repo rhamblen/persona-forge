@@ -9,6 +9,50 @@ Every version below is a **published GitHub Release** with a matching
 
 ---
 
+## [0.8.3] — 2026-07-28
+
+**Admin tools — delete a persona, a version, or a trained LoRA.** Everything in Persona Forge
+could be created and nothing could be removed, so a scrapped experiment stayed in the picker
+forever and a bad LoRA sat next to the good one with only its timestamp to tell them apart.
+
+Deletion is **deliberate and narrow**, not a general capability. The append-only version store
+exists to prevent *accidental* loss, so these endpoints never fire by themselves, each one
+guards the case that would actually hurt, and the destructive half of every confirmation names
+what is about to go.
+
+### Added
+- **Delete a persona** — `DELETE /api/projects/{id}`, with **"also delete the build folder"** as
+  a separate, explicitly-ticked decision. Removing the database record and destroying an hour of
+  rendered images and trained LoRA are different choices; the caller makes both. The
+  confirmation names the persona, counts its versions and poses, and shows the exact folder path.
+- **Delete a prompt version** — `DELETE /api/versions/{id}`. Children are **re-parented onto the
+  deleted version's parent**, so history stays a connected chain instead of fragmenting into
+  orphans. Images generated from it are kept and simply lose the link.
+- **Delete a trained LoRA** — `DELETE /api/projects/{id}/lora/{filename}`, one ✕ per file in the
+  LoRA list. If the deleted file was the selected pose LoRA, the selection is **cleared and the
+  UI says so** — otherwise pose renders would keep asking ComfyUI for a file that's gone.
+
+### Guards
+- The **current version can't be deleted** (roll back first) and a persona always keeps **at
+  least one version**.
+- A **signed-off baseline** needs an explicit `force=true`; the UI asks a second time, naming it
+  as the approved reference.
+- A persona with a **running build** refuses to delete (409) rather than letting the job row
+  cascade out from under the worker mid-stage.
+- **Clones are orphaned, never cascaded** — deleting a parent persona doesn't delete personas
+  the user never asked to remove.
+- LoRA filenames are **path components only**, and build-folder removal refuses any path that
+  isn't a direct child of the builds root.
+
+### Notes
+- Every deletion writes a `process` log line with what went and what it cost — persona deletes
+  record version/image/pose counts and how many clones were orphaned.
+- **Verified in a browser** end to end: both confirm-then-cancel paths, the signed-off
+  double-confirm and its `?force=true` request, re-parenting checked in the database, the
+  last-version and current-version buttons correctly absent, LoRA delete clearing a live pose
+  selection, the running-build 409, and delete-with-files removing the folder while
+  delete-without-files leaves it on the share.
+
 ## [0.8.2] — 2026-07-26
 
 **The emotion map — axes × intensity tiers, fully editable.** (Phase H1a.)

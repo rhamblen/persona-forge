@@ -1,5 +1,18 @@
 # AI Context — cold-start orientation
 
+> **2026-07-28 — v0.8.3: admin tools (deletion).** `DELETE /api/projects/{id}?delete_files=`,
+> `DELETE /api/versions/{id}?force=`, `DELETE /api/projects/{id}/lora/{filename}`. **Append-only
+> is still the rule** — these are deliberate, guarded exceptions, never automatic, and nothing
+> else in the codebase may delete a version. Guards to preserve if you touch this code: current
+> version and last-remaining version are undeletable; a signed-off baseline needs `force=true`;
+> version children are **re-parented onto the deleted version's parent** (never orphaned) and
+> `images.version_id` is nulled rather than cascading; a project with a `running` job returns
+> 409; clones are orphaned (`parent_project_id = NULL`), never cascade-deleted; build-folder
+> removal requires the folder be a direct child of `BUILDS_ROOT`; LoRA filenames must be bare
+> path components. Deleting the selected `pose_lora` clears the selection. Note when testing:
+> a hand-inserted `running` job row gets flipped to `error` by the orphaned-job reaper, so stage
+> the 409 case against a job the reaper won't touch.
+
 > **2026-07-26 — v0.8.2: the emotion map (H1a).** `emotion_axes` + `emotion_tiers`, seeded
 > from `DEFAULT_EMOTION_AXES` on first boot and **fully editable** (`/api/emotion-map` CRUD +
 > reset; tier reorder is a swap endpoint that renumbers 1..N). 10 axes / 35 tiers = ST's 28
@@ -126,12 +139,16 @@ LAN; no Claude/Anthropic in the runtime loop.
   `/api/containers/{key}/restart?force=` (`key` ∈ `comfyui`, `ollama`).
 - **Projects/versions:** `POST/GET /api/projects[/{id}]`, `.../versions`, `.../signoff`,
   `.../rollback/{version_id}`, `.../clone`, `.../generate`, `.../repair-permissions`.
+- **Admin / deletion (0.8.3):** `DELETE /api/projects/{id}?delete_files=`,
+  `DELETE /api/versions/{id}?force=`, `DELETE /api/projects/{id}/lora/{filename}` — see the
+  0.8.3 banner at the top for the guards each one enforces.
 - **Images/builds:** `GET /api/image`, `/api/builds`. **Logs:** `GET /api/logs[/persisted]`.
 
 ## Data model (SQLite, append-only versioning)
 
 - `projects` (name, slug, `current_version_id`, `parent_project_id` for clones).
-- `prompt_versions` — **append-only**; nothing is ever edited or deleted. Fields:
+- `prompt_versions` — **append-only**; a row is never edited, and the only thing that removes
+  one is the explicit admin delete added in 0.8.3 (guarded; see the banner). Fields:
   character, style, negative, checkpoint, seed, source, note, signed_off. Rollback creates
   a *new* version copying an old one. Rendered in the UI as a VCS-style rail with per-field
   diff tags. Each build folder also gets a self-describing `persona.json` sidecar.
@@ -330,6 +347,12 @@ LAN; no Claude/Anthropic in the runtime loop.
   real intensity ladders from mere groupings; the map is authoritative over `poses.axis/tier`;
   tier labels are UNIQUE because they are sprite filenames; reorder is a swap+renumber, not a
   raw position write (which would create ties broken by row id).
+- **0.8.3:** **Admin tools** — the first deletion capability in the app (persona / prompt version
+  / trained LoRA). See the header note for the guards. Key design calls: destroying the build
+  folder is a *separate* explicit choice from removing the DB record (an hour of GPU time is not
+  the same decision as a row); version children are re-parented rather than orphaned so history
+  stays a connected chain; clones are orphaned rather than cascade-deleted; a running build
+  refuses (409) rather than racing the worker. Browser-verified end to end.
 - **Remaining:** rest of **Phase H1** (dataset layers + emotion enrichment behind the
   baseline gate, `lora_builds` versioning, per-axis selective rebuild — see `docs/emotion-depth.md`)
   · Character Studio at **0.9** · 1.0 release. The **dataset side of the weak-LoRA fix is now

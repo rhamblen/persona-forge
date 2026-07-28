@@ -128,7 +128,10 @@ the **concept LoRA stack**: overlay third-party pose/gesture LoRAs on top of you
 character LoRA to reach postures it can't produce alone, and **v0.8.2 adds the emotion
 map** — expression sprites organised as *axes* (which emotion) × *intensity tiers* (how
 much), with the poses grid grouped so a weak emotion is visible at a glance. The shipped
-map is a default: every axis and tier is editable. Still ahead in Phase H are per-emotion
+map is a default: every axis and tier is editable. **v0.8.3 adds the admin tools** —
+delete a persona (with the build folder as a separate, explicit choice), prune a prompt
+version, or remove a trained LoRA, each behind guards so the append-only history can't be
+lost by accident. Still ahead in Phase H are per-emotion
 dataset enrichment and selective sprite rebuild — see
 [docs/emotion-depth.md](docs/emotion-depth.md). **Character Studio** (the
 plain-language character-sheet front door that produces the character *card*, not just the

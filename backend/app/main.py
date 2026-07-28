@@ -13,6 +13,7 @@ import json
 import os
 import random
 import re
+import shutil
 import time
 import uuid
 from datetime import datetime, timezone
@@ -734,6 +735,136 @@ async def rollback(project_id: int, version_id: int) -> dict:
     logs.info("process", f"rolled back to v{version_id}", project_id=project_id, version_id=version_id)
     _write_persona_sidecar(project_id)
     return await get_project(project_id)
+
+
+# --------------------------------------------------------------------------- #
+# admin / cleanup (0.8.3). Deliberately manual, deliberately narrow.
+#
+# The version store is append-only by design and the README promises as much. Pruning a
+# version is therefore a *deliberate* action with guards, not a general capability: the
+# append-only rule exists to prevent **accidental** loss, and these endpoints never fire
+# by themselves. Guards: the current version can't go, a signed-off baseline needs an
+# explicit override, and children are re-parented so history stays a connected chain
+# rather than fragmenting into orphans.
+# --------------------------------------------------------------------------- #
+
+@app.delete("/api/versions/{version_id}")
+async def version_delete(version_id: int, force: bool = False) -> dict:
+    """Prune one prompt version. `force` is required to remove a signed-off baseline."""
+    with db.connect() as conn:
+        row = conn.execute("SELECT * FROM prompt_versions WHERE id = ?", (version_id,)).fetchone()
+        if row is None:
+            raise HTTPException(404, "version not found")
+        project_id = row["project_id"]
+        proj = conn.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone()
+        if proj and proj["current_version_id"] == version_id:
+            raise HTTPException(
+                409, "that's the current version — roll back to another version first, then delete it")
+        n_versions = conn.execute(
+            "SELECT COUNT(*) c FROM prompt_versions WHERE project_id = ?", (project_id,)).fetchone()["c"]
+        if n_versions <= 1:
+            raise HTTPException(409, "a persona must keep at least one version")
+        if row["signed_off"] and not force:
+            raise HTTPException(
+                409, "that version is a signed-off baseline — delete it again with force=true if you're sure")
+
+        # Re-parent children onto this version's parent so the history chain stays intact.
+        conn.execute("UPDATE prompt_versions SET parent_id = ? WHERE parent_id = ?",
+                     (row["parent_id"], version_id))
+        # Images reference the version they were generated from; keep the images, drop the link.
+        conn.execute("UPDATE images SET version_id = NULL WHERE version_id = ?", (version_id,))
+        conn.execute("DELETE FROM prompt_versions WHERE id = ?", (version_id,))
+    logs.info("process", f"version v{version_id} deleted", project_id=project_id,
+              was_signed_off=bool(row["signed_off"]) or None)
+    _write_persona_sidecar(project_id)
+    return {"deleted": version_id, "project_id": project_id,
+            "was_signed_off": bool(row["signed_off"])}
+
+
+@app.delete("/api/projects/{project_id}")
+async def project_delete(project_id: int, delete_files: bool = False) -> dict:
+    """Delete a persona. `delete_files` also removes its build folder from the share.
+
+    The two are separate on purpose: the build folder holds every rendered image and the
+    trained LoRA — often an hour of GPU time — so removing the database record and
+    removing that work are different decisions, and the caller has to make both.
+    """
+    with db.connect() as conn:
+        proj = conn.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone()
+        if proj is None:
+            raise HTTPException(404, "project not found")
+        slug = proj["slug"]
+        counts = {
+            "versions": conn.execute("SELECT COUNT(*) c FROM prompt_versions WHERE project_id = ?",
+                                     (project_id,)).fetchone()["c"],
+            "images": conn.execute("SELECT COUNT(*) c FROM images WHERE project_id = ?",
+                                   (project_id,)).fetchone()["c"],
+            "poses": conn.execute("SELECT COUNT(*) c FROM poses WHERE project_id = ?",
+                                  (project_id,)).fetchone()["c"],
+        }
+        # A running build would have its job row cascade out from under the worker
+        # mid-stage. Refuse rather than race it — cancelling is one click away.
+        if conn.execute("SELECT 1 FROM jobs WHERE project_id = ? AND status = 'running'",
+                        (project_id,)).fetchone():
+            raise HTTPException(
+                409, "a build is running for this persona — cancel it first, then delete")
+        # Clones point at their parent; orphan them rather than cascading the delete into
+        # personas the user never asked to remove.
+        clones = conn.execute("SELECT COUNT(*) c FROM projects WHERE parent_project_id = ?",
+                              (project_id,)).fetchone()["c"]
+        conn.execute("UPDATE projects SET parent_project_id = NULL WHERE parent_project_id = ?",
+                     (project_id,))
+        counts["clones_orphaned"] = clones
+        conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))   # children cascade
+
+    removed_dir = None
+    if delete_files:
+        folder = BUILDS_ROOT / slug
+        try:
+            # Guard against a blank/odd slug turning this into "delete the builds root".
+            if slug and folder.resolve().parent == BUILDS_ROOT.resolve() and folder.is_dir():
+                shutil.rmtree(folder)
+                removed_dir = str(folder)
+                logs.info("local", f"build folder removed for '{proj['name']}'", path=str(folder))
+            else:
+                logs.warn("local", "refusing to remove an unexpected build path", path=str(folder))
+        except OSError as exc:
+            logs.error("local", f"could not remove build folder: {exc}", path=str(folder))
+            raise HTTPException(
+                500, f"persona deleted, but its build folder could not be removed: {exc}") from exc
+
+    logs.info("process", f"persona '{proj['name']}' deleted", project_id=project_id,
+              slug=slug, files_removed=bool(removed_dir), **counts)
+    return {"deleted": project_id, "name": proj["name"], "slug": slug,
+            "removed_dir": removed_dir, "counts": counts}
+
+
+@app.delete("/api/projects/{project_id}/lora/{filename}")
+async def lora_delete(project_id: int, filename: str) -> dict:
+    """Delete one trained LoRA file from the persona's `lora/` folder."""
+    detail = await get_project(project_id)
+    slug = detail["project"]["slug"]
+    # Path components only — never let a filename escape the project's lora folder.
+    if "/" in filename or "\\" in filename or filename in ("", ".", ".."):
+        raise HTTPException(400, "invalid LoRA filename")
+    target = BUILDS_ROOT / slug / "lora" / filename
+    if not target.is_file():
+        raise HTTPException(404, f"no such LoRA file: {filename}")
+    try:
+        target.unlink()
+    except OSError as exc:
+        raise HTTPException(500, f"could not delete the LoRA: {exc}") from exc
+
+    cleared = False
+    with db.connect() as conn:
+        proj = conn.execute("SELECT pose_lora FROM projects WHERE id = ?", (project_id,)).fetchone()
+        if proj and proj["pose_lora"] == filename:
+            # Otherwise pose renders would keep asking ComfyUI for a file that's gone.
+            conn.execute("UPDATE projects SET pose_lora = '' WHERE id = ?", (project_id,))
+            cleared = True
+    logs.info("process", f"LoRA '{filename}' deleted", project_id=project_id,
+              slug=slug, selection_cleared=cleared or None)
+    return {"deleted": filename, "selection_cleared": cleared, "loras": _lora_files(slug)}
 
 
 class ProjectClone(BaseModel):
