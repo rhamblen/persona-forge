@@ -221,22 +221,58 @@ eventSource.on(event_types.MESSAGE_RECEIVED, …);
 So, confirmed present: an **event bus**, a **context accessor** (`getContext()`), and
 **slash-command registration** (STScript). Third-party extensions do load on this install.
 
-### What is NOT verified
+### ✅ SETTLED — the pre-generation hook exists
 
-Both installed extensions hook **`MESSAGE_RECEIVED` — after generation**. Nothing on this
-box demonstrates a **pre-generation interception** hook, which is precisely what a Director
-needs: read state → assemble a context packet → inject it → *then* let the model write.
+**The Director is buildable as designed.** Confirmed by reading SillyTavern **1.18.0**
+source (`public/scripts/extensions.js`, the version this box actually runs):
 
-This could not be settled because **the SillyTavern container is stopped** (`exited`, 2 days
-ago) and ST's own `script.js` is inside the image, not in appdata. Note also the image is
-`ghcr.io/sillytavern/sillytavern:staging` with an update pending — staging tracks the dev
-branch, which is good for V3 card support but means the extension API can move underneath
-us.
+```js
+// Called from Generate() in script.js, AFTER the chat is assembled and the token
+// limit computed, BEFORE the prompt is built and sent:
+const aborted = await runGenerationInterceptors(coreChat, this_max_context, type);
+if (aborted) { unblockGeneration(type); return Promise.resolve(); }
+```
 
-**This is the load-bearing unknown for the entire runtime half.** Settling it is cheap
-(start ST, enumerate `event_types`, check for a generate-interceptor mechanism) and it
-decides whether the Director is built as designed or needs a different mechanism entirely.
-Do it before any runtime design work.
+An extension opts in with `"generate_interceptor": "<globalFnName>"` in its `manifest.json`;
+ST then calls `globalThis[key](chat, contextSize, abort, type)`.
+
+The contract, and why each part matters here:
+
+| Parameter | What the Director gets |
+|---|---|
+| `chat` | The **live `coreChat` array, by reference** — mutate it and you change what the model receives. This is the context-packet injection point. |
+| `contextSize` | The computed token budget, so the packet can be **sized to fit** rather than blindly prepended |
+| `abort(immediately)` | Cancel generation outright — the hard end of "canon damage 95%" enforcement |
+| `type` | Generation type, so `swipe` / `regenerate` / `impersonate` / `quiet` can be treated differently — a re-swipe must not re-fire story progression |
+
+Three further properties that matter:
+
+- **It is `await`ed.** An async HTTP call to an external service is legitimate, so the
+  Director can be its own container talking to Ollama and the campaign DB — exactly the
+  architecture the proposal wanted, rather than logic trapped inside a browser extension.
+- **Skipped on `dryRun`** (token counting), which is correct — state must not advance on a
+  measurement pass.
+- **Ordered across extensions** by `loading_order`, and `abort(true)` stops the chain — so
+  the Director and the Phase H2 emotion-state engine can be two cooperating interceptors
+  with a defined precedence, not a single tangled one.
+
+Also confirmed present, from the user's installed `Extension-Live2d/index.js`: the event
+bus (`eventSource` / `event_types`), `getContext()`, and `registerSlashCommand` (STScript).
+Both installed extensions only use *post*-generation events (`MESSAGE_RECEIVED`,
+`CHAT_CHANGED`, `GROUP_UPDATED`) — which is why the interceptor had to be confirmed from
+source rather than by example.
+
+**Remaining caveats:**
+- The image is `ghcr.io/sillytavern/sillytavern:staging` with an update pending. Staging
+  tracks the dev branch — good for V3 card support, but the extension API can move
+  underneath us. Pin a known-good tag before the runtime depends on this.
+- Exactly how injected `chat` entries render and are attributed was **not** verified; only
+  that the array is passed by reference and mutation is the intended mechanism.
+
+*(Verified 2026-07-29 from source, not from the running instance: `192.168.1.38` currently
+has an **IP conflict** — it answers from MAC `9c:9c:1f:89:e9:5b` while the ST container is
+`02:42:c0:a8:01:26`. Something claimed the address during ST's two-day downtime. Needs a
+DHCP reservation; unrelated to this design.)*
 
 ### Hardware gate
 
@@ -265,7 +301,7 @@ Each step is provable without the next.
 | **L4** | V3 character cards (`.json`) | Import one into ST |
 | **L5** | `rules/` + `story/` + `canon/` + `relationships/` | Inspect as files |
 | **L6** | Merge into Persona Forge as a Book tab | Phase E exists by now |
-| **L7** | Runtime / Director | Gated on §5 |
+| **L7** | Runtime / Director as a `generate_interceptor` extension + service | Unblocked (§5); gated on the 70B hardware only for the *GM brain*, not for the plumbing |
 
 **L1 is the real risk checkpoint.** If retrieval is bad, everything above it is bad — and
 you find that out before writing a single generation prompt.
