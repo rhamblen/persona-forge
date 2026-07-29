@@ -263,6 +263,31 @@ CREATE TABLE IF NOT EXISTS pose_library (
 );
 
 CREATE INDEX IF NOT EXISTS idx_pose_library_cat ON pose_library(category, name);
+
+-- Which posture FAMILY an emotion axis poses in (Phase H3h, 0.8.10).
+--
+-- `category` is the coarse UI filter (standing | grounded); `family` is the posture class a
+-- mood is actually assigned to — standing, crouching, kneeling, sitting, lying. The point is that an
+-- intensity ladder often changes posture as it climbs: annoyance and fury both stand, but
+-- sorrow stands where despair sits on the floor. A row with tier IS NULL is the axis-wide
+-- default; a row naming a tier overrides just that rung, which is what lets one axis start
+-- standing and finish sitting.
+CREATE TABLE IF NOT EXISTS axis_pose_families (
+    id      INTEGER PRIMARY KEY AUTOINCREMENT,
+    -- NULL = the shipped/global default; a project id = that persona's own override. Two
+    -- characters should NOT strike the same pose for the same emotion, so the assignment
+    -- has to be per-persona, with the global row as the starting point it diverges from.
+    project_id INTEGER REFERENCES projects(id) ON DELETE CASCADE,
+    axis    TEXT NOT NULL,
+    tier    INTEGER,                                  -- NULL = the whole axis
+    family  TEXT NOT NULL,
+    -- Optional: pin this axis/tier to ONE library entry instead of spreading across the
+    -- family. The spread is deliberately blind (a name hash), which is fine for variety
+    -- and wrong for meaning — "hugging knees, head buried" fits Grief and ruins Elation.
+    -- Naming the entry is how a tier gets the figure it actually wants.
+    entry_id INTEGER REFERENCES pose_library(id),
+    UNIQUE (project_id, axis, tier)
+);
 """
 
 # Per-pose ControlNet + face-pass columns (Phase H3, 0.8.4). Nullable on purpose: NULL
@@ -345,6 +370,30 @@ def init_db() -> None:
             conn.execute("ALTER TABLE projects ADD COLUMN train_steps INTEGER NOT NULL DEFAULT 0")
             conn.execute("ALTER TABLE projects ADD COLUMN last_train_seconds REAL NOT NULL DEFAULT 0")
             conn.execute("ALTER TABLE projects ADD COLUMN last_train_steps INTEGER NOT NULL DEFAULT 0")
+
+        # 0.8.10: posture family per library entry. Backfilled from the name prefix, which
+        # is how the shipped catalogue already encodes it ("Kneeling — upright"); anything
+        # unrecognised falls back to its category so no row is left without a family.
+        lcols = {r["name"] for r in conn.execute("PRAGMA table_info(pose_library)")}
+        if "family" not in lcols:
+            conn.execute("ALTER TABLE pose_library ADD COLUMN family TEXT NOT NULL DEFAULT ''")
+        conn.execute("""
+            UPDATE pose_library SET family = CASE
+                WHEN name LIKE 'Crouching%'  THEN 'crouching'
+                WHEN name LIKE 'Kneeling%'   THEN 'kneeling'
+                WHEN name LIKE 'Sitting%'    THEN 'sitting'
+                WHEN name LIKE 'Lying%'      THEN 'lying'
+                WHEN name LIKE 'Standing%'   THEN 'standing'
+                WHEN category = 'grounded'   THEN 'sitting'
+                ELSE 'standing' END
+            WHERE family = ''""")
+
+        acols = {r["name"] for r in conn.execute("PRAGMA table_info(axis_pose_families)")}
+        if acols and "entry_id" not in acols:
+            conn.execute("ALTER TABLE axis_pose_families ADD COLUMN entry_id INTEGER")
+        if acols and "project_id" not in acols:
+            # Pre-per-persona rows become the global defaults, which is what they were.
+            conn.execute("ALTER TABLE axis_pose_families ADD COLUMN project_id INTEGER")
 
         vcols = {r["name"] for r in conn.execute("PRAGMA table_info(prompt_versions)")}
         if "style_lora" not in vcols:  # pre-0.7.9

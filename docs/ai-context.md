@@ -1,5 +1,20 @@
 # AI Context — cold-start orientation
 
+> **2026-07-30 — v0.8.10: pose families, per persona.** `axis_pose_families` maps an
+> emotion axis — or one TIER of it — to a posture family (`pose_library.family`), so an
+> intensity ladder can change posture as it climbs. `project_id IS NULL` rows are the global
+> defaults and a persona's rows overlay them key by key: **two characters must not be forced
+> into the same pose for the same emotion**. Resolution order at render time is per-pose
+> skeleton → persona default → persona family → global family → none; an explicit choice
+> always outranks a family or assigning one would silently overwrite per-pose work. The
+> within-family pick is a NAME HASH and deliberately meaning-blind — it will put "head
+> buried" on Elation — so `entry_id` pins a tier to one entry and the hash is only the
+> fallback. Family-resolved skeletons are re-staged (overwrite) every render rather than
+> cached by id, because the PNG derives from keypoints the user can edit. Two authoring
+> facts: head tilt IS encodable (ears→eyes→nose vertical ordering) unlike palm facing, and
+> seated/crouching figures need foreshortened legs plus a compressed torso or they render as
+> standing figures regardless of leg placement.
+>
 > **2026-07-29 — v0.8.9: ControlNet defaults are 1.0/0.9, and COCO-18 can't encode palms.**
 > Measured A/B (same seed + skeleton): `strength 0.7 / end 0.7` let a strength-1.0 character
 > LoRA override the skeleton entirely — the pose was ignored, which reads as "ControlNet is

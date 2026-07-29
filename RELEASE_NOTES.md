@@ -1,53 +1,69 @@
-# v0.8.9 — Defaults that obey the skeleton, and three ways to hold your arms out
+# v0.8.10 — Pose families: an emotion picks its posture, per character
 
-## The defaults were the problem
+This is the release where a sprite set stops being "one stance with a different face on it".
 
-`strength 0.7 / end 0.7` was too weak to overrule a strength-1.0 character LoRA. Same seed,
-same skeleton, only those two numbers changed: at 0.7/0.7 the pose was ignored, at 1.0/0.9
-it was obeyed. The new defaults are **1.0 / 0.9**.
+## Families
 
-End is held short of 1.0 deliberately — the last steps free of the skeleton let the
-character LoRA settle identity, and stop the skeleton's black background bleeding into the
-frame (which is exactly what happened at 0.9 with a mismatched ControlNet model).
+Every library entry now belongs to a posture family — **standing, crouching, kneeling,
+sitting, lying** — and an emotion axis is assigned to a family. Crucially the assignment
+works **per tier**, so a ladder can change posture as it climbs: annoyance and fury both
+stand, but sorrow stands where despair sits on the floor.
 
-**Your existing personas are migrated too.** A column default only applies to new rows, so
-without that this release would have looked like it did nothing. Personas still sitting on
-the exact old 0.7/0.7 pair are lifted; if you'd tuned those numbers yourself, your values
-are kept.
+Shipped defaults ground the top rung of `sadness` (sitting), `shame` and `fear` (kneeling),
+and `affection` (crouching). Everything else stands. All of it is changeable.
 
-## You can now see which skeleton each pose uses
+## Per character, not per install
 
-Every pose card shows the figure it renders from, so you can scan a set for the odd one out
-instead of opening each pose:
+You said two characters shouldn't strike the same pose for the same emotion, so the map is
+layered: global defaults underneath, a persona's own overrides on top, merged key by key. A
+character inherits until you tell it otherwise, and changing one character never touches
+another. Ayla's grief can lie down while Bruno's hugs his knees.
 
-- **`arms flung wide`** — set on this pose
-- **`↳ hugging knees`** (italic) — inherited from the persona default
-- **`no skeleton`** (amber) — renders from the prompt alone
+## Choosing within a family
 
-## Three arms-wide variants
+A family has several members, and which one you get matters. The automatic spread is a name
+hash — good for variety, **meaning-blind**, and quite capable of handing Elation "hugging
+knees, head buried". So a tier can be **pinned** to a specific entry, and the hash is only
+what happens when you haven't pinned one.
 
-Exactly the three you described:
+## Eight new skeletons
 
-| Entry | Shape | Reads as |
-|---|---|---|
-| **arms wide, palms forward** | elbows dropped, forearms vertical | warding off, defensive |
-| **arms wide, palms up and out** | arms low and open to the sides | helpless, resigned |
-| **arms wide, palms inward** | elbows flung wide, forearms angled back in | exasperated, frustrated |
+**Head position on the same body** — your observation, and it's the sharpest one in here:
 
-**One thing worth knowing:** COCO-18 has no hand joint and no wrist rotation, so a skeleton
-*cannot* encode which way a palm faces. What actually differs between these three is the
-forearm angle — and that's a real, visible difference in silhouette. The palm direction, and
-the emotion riding on it, travel in each entry's `prompt_hint`. That's why they're three
-entries and not one slider: the joints carry the shape, the hint carries the rest.
+| Entry | Reads as |
+|---|---|
+| hugging knees, **head buried** (face pass off) | despair, crying |
+| hugging knees, **head up** | alert, eager |
 
-To get them: Poses tab → **Restore starter poses**. That button now *tops up* the library by
-name rather than replacing the built-ins, so it adds the three new entries and leaves
-everything else — including any edits you've made — untouched.
+Unlike palm facing, head tilt genuinely *is* in the skeleton: nose, eyes and ears are real
+COCO-18 joints, so the vertical ordering carries the tilt (ears→eyes→nose = looking down).
+
+**Sitting, legs extended** — hugging knees is a closed shape, useless for anything open:
+`ankles crossed` (relaxed), `stretched and apart` (sprawled, unguarded), `leaning back on
+hands` (at ease, confident).
+
+**Crouching, for affection**: `squatting down`, `down on one knee, leaning in`, `bending
+forward, arms out`.
+
+Two of these were thrown away and re-authored: seated and crouching figures need
+foreshortened legs *and* a compressed torso, or they render as standing figures no matter
+how the legs are arranged. Contact sheets caught it; code review wouldn't have.
+
+## API
+
+`GET/POST /api/pose-families`, both taking an optional `project_id`. Resolution at render
+time is: per-pose skeleton → persona default → persona family → global family → none. An
+explicit per-pose choice always wins, so assigning a family can never quietly overwrite work
+you did by hand.
 
 ## Upgrade notes
 
-Automatic. The migration runs at boot; no compose change.
+Automatic — migrations add the columns and backfill families from entry names. Hit **Restore
+starter poses** to pull in the eight new entries.
 
-**Image:** `ghcr.io/rhamblen/persona-forge:0.8.9`
+There is **no UI for family assignment yet** — it's API-only this release. That's the next
+piece of work.
+
+**Image:** `ghcr.io/rhamblen/persona-forge:0.8.10`
 
 Full detail in [`CHANGELOG.md`](CHANGELOG.md).

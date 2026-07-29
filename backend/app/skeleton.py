@@ -175,6 +175,24 @@ _ARMS_RELAXED = [[0.385, 0.195], [0.360, 0.318], [0.350, 0.438],
                  [0.615, 0.195], [0.640, 0.318], [0.650, 0.438]]
 
 
+FAMILIES = ["standing", "crouching", "kneeling", "sitting", "lying"]
+
+
+def family_for_name(name: str, category: str = "standing") -> str:
+    """Posture family from an entry name — the catalogue already encodes it as a prefix.
+
+    Mirrors the SQL backfill in db.py; keep the two in step or seeded rows and migrated
+    rows end up in different families.
+    """
+    n = (name or "").strip().lower()
+    for fam in ("crouching", "kneeling", "sitting", "standing"):
+        if n.startswith(fam):
+            return fam
+    if n.startswith("lying"):
+        return "lying"
+    return "sitting" if category == "grounded" else "standing"
+
+
 def _standing(arms: list[list[float]], head: list[list[float]] | None = None,
               legs: list[list[float]] | None = None,
               nose: list[float] | None = None,
@@ -303,6 +321,59 @@ STARTER_POSES: list[dict[str, Any]] = [
             [[0.388, 0.200], [0.262, 0.264], [0.370, 0.352],
              [0.612, 0.200], [0.738, 0.264], [0.630, 0.352]]),
     },
+    # Lowering yourself toward someone — the affection posture the library had no way to
+    # express. All three compress the torso and drop the hips, which is what separates
+    # "coming down to meet you" from "standing there".
+    {
+        "name": "Crouching — squatting down", "category": "grounded", "framing": "full",
+        "face_visible": True,
+        "prompt_hint": "squatting down on their heels, knees wide, crouched low",
+        # Deep squat from the front: knees project forward and WIDE at about hip height,
+        # ankles tuck back in narrow underneath. Hips at 0.72 against a neck at 0.47 is the
+        # compressed torso that reads as "low", not "short".
+        "points": [
+            [0.500, 0.400], [0.500, 0.470],
+            [0.424, 0.484], [0.386, 0.578], [0.402, 0.660],
+            [0.576, 0.484], [0.614, 0.578], [0.598, 0.660],
+            [0.456, 0.716], [0.386, 0.768], [0.446, 0.906],
+            [0.544, 0.722], [0.614, 0.772], [0.554, 0.910],
+            [0.472, 0.384], [0.528, 0.384], [0.444, 0.392], [0.556, 0.392],
+        ],
+    },
+    {
+        "name": "Crouching — down on one knee, leaning in", "category": "grounded",
+        "framing": "full", "face_visible": True,
+        "prompt_hint": "down on one knee, leaning in close, one hand reaching out, tender",
+        # Kneeling leg's ankle is ABSENT — the shin folds back out of a front view's sight,
+        # the same occlusion convention the kneeling poses use. The planted foot forward on
+        # the other side is what makes it read as one knee down rather than a full kneel.
+        "points": [
+            [0.492, 0.404], [0.492, 0.476],
+            [0.416, 0.490], [0.372, 0.596], [0.356, 0.702],
+            [0.568, 0.490], [0.612, 0.590], [0.630, 0.690],
+            [0.454, 0.694], [0.412, 0.844], None,
+            [0.546, 0.700], [0.618, 0.766], [0.640, 0.904],
+            [0.464, 0.388], [0.520, 0.388], [0.436, 0.396], [0.548, 0.396],
+        ],
+    },
+    {
+        "name": "Crouching — bending forward, arms out", "category": "grounded",
+        "framing": "full", "face_visible": True,
+        "prompt_hint": "bending forward at the waist, both arms reaching out to gather "
+                       "someone in, warm and welcoming",
+        # Pitched forward: the head hangs BELOW the neck (neck 0.360, ears 0.392, eyes 0.420,
+        # nose 0.436) so the face comes down and toward the viewer, and the torso foreshortens
+        # to ~20% of height. Keeping the head above the neck — as the first draft did — just
+        # renders an ordinary standing figure however short the torso gets.
+        "points": [
+            [0.500, 0.436], [0.500, 0.360],
+            [0.418, 0.372], [0.372, 0.486], [0.354, 0.606],
+            [0.582, 0.372], [0.628, 0.486], [0.646, 0.606],
+            [0.452, 0.560], [0.442, 0.760], [0.436, 0.946],
+            [0.548, 0.564], [0.558, 0.764], [0.564, 0.948],
+            [0.478, 0.420], [0.522, 0.420], [0.462, 0.392], [0.538, 0.392],
+        ],
+    },
     {
         "name": "Kneeling — upright", "category": "grounded", "framing": "full",
         "face_visible": True, "prompt_hint": "kneeling upright on both knees",
@@ -347,6 +418,58 @@ STARTER_POSES: list[dict[str, Any]] = [
             [0.440, 0.394], [0.498, 0.396], [0.412, 0.402], [0.526, 0.404],
         ],
     },
+    # Seated with the legs EXTENDED rather than folded. Hugging knees is a closed shape —
+    # good for despair, useless for anything open — so the sitting family needs postures that
+    # read relaxed, sprawled and confident. Crossed vs apart vs propped is a real difference
+    # in how guarded the figure looks, and each takes the head variants on top.
+    {
+        "name": "Sitting — legs stretched, ankles crossed", "category": "grounded",
+        "framing": "full", "face_visible": True,
+        "prompt_hint": "sitting on the floor with legs stretched out, ankles crossed, relaxed",
+        # The cross is encoded by the ankles swapping sides: right ankle ends up right of
+        # centre-left, left ankle left of it. Without the swap this is just "legs together".
+        # Legs pointing AT the camera foreshorten hard: the leg run is ~9% of canvas height
+        # against a ~29% torso. Authoring them at standing proportions was what made the
+        # first draft read as a standing figure with crossed ankles.
+        "points": [
+            [0.470, 0.470], [0.470, 0.540],
+            [0.390, 0.554], [0.364, 0.664], [0.348, 0.772],
+            [0.554, 0.554], [0.580, 0.664], [0.596, 0.772],
+            [0.436, 0.826], [0.444, 0.884], [0.548, 0.918],
+            [0.514, 0.832], [0.560, 0.886], [0.456, 0.922],
+            [0.444, 0.454], [0.498, 0.454], [0.416, 0.462], [0.526, 0.462],
+        ],
+    },
+    {
+        "name": "Sitting — legs stretched and apart", "category": "grounded",
+        "framing": "full", "face_visible": True,
+        "prompt_hint": "sitting on the floor with legs stretched out and spread apart, "
+                       "sprawled, unguarded",
+        "points": [
+            [0.470, 0.470], [0.470, 0.540],
+            [0.390, 0.554], [0.364, 0.664], [0.348, 0.772],
+            [0.554, 0.554], [0.580, 0.664], [0.596, 0.772],
+            [0.436, 0.826], [0.372, 0.882], [0.302, 0.916],
+            [0.514, 0.832], [0.586, 0.882], [0.660, 0.916],
+            [0.444, 0.454], [0.498, 0.454], [0.416, 0.462], [0.526, 0.462],
+        ],
+    },
+    {
+        "name": "Sitting — legs stretched, leaning back on hands", "category": "grounded",
+        "framing": "full", "face_visible": True,
+        "prompt_hint": "sitting on the floor, legs stretched out, leaning back propped on "
+                       "both hands behind them, at ease, confident",
+        # Arms go BEHIND and below the hips, which is what makes the torso read as leaning
+        # back rather than the arms simply hanging.
+        "points": [
+            [0.470, 0.486], [0.470, 0.556],
+            [0.388, 0.568], [0.352, 0.700], [0.322, 0.842],
+            [0.552, 0.568], [0.588, 0.700], [0.618, 0.842],
+            [0.436, 0.830], [0.406, 0.884], [0.366, 0.918],
+            [0.514, 0.836], [0.550, 0.886], [0.594, 0.920],
+            [0.444, 0.470], [0.498, 0.470], [0.416, 0.478], [0.526, 0.478],
+        ],
+    },
     {
         "name": "Sitting — hugging knees", "category": "grounded", "framing": "full",
         "face_visible": True, "prompt_hint": "sitting on the floor hugging their knees",
@@ -359,6 +482,45 @@ STARTER_POSES: list[dict[str, Any]] = [
             [0.462, 0.878], [0.418, 0.694], [0.478, 0.872],
             [0.542, 0.878], [0.586, 0.694], [0.526, 0.872],
             [0.470, 0.398], [0.530, 0.398], [0.442, 0.406], [0.558, 0.406],
+        ],
+    },
+    # Same body, different head — and unlike palm facing, head position IS representable:
+    # nose, eyes and ears are real COCO-18 joints, so despair and delight can be told apart
+    # structurally rather than only in the prompt. These two are why a family is worth
+    # having: "hugging knees" is one body with opposite emotional readings.
+    {
+        "name": "Sitting — hugging knees, head buried", "category": "grounded", "framing": "full",
+        "face_visible": False,
+        "prompt_hint": "sitting on the floor hugging their knees, face buried against their "
+                       "knees, crying, inconsolable",
+        # Head dropped forward and DOWN past the neck, into the knees. The whole head cluster
+        # stays present and foreshortened — the same convention as "Standing — head down",
+        # because dropping the joints entirely leaves ControlNet a headless torso to place.
+        # Tilt is encoded by the ordering: ears highest, then eyes, then nose = face pointing
+        # down. face_visible=False keeps FaceDetailer off a face it cannot find.
+        "points": [
+            [0.500, 0.556], [0.500, 0.486],
+            [0.418, 0.492], [0.388, 0.608], [0.522, 0.700],
+            [0.582, 0.492], [0.612, 0.608], [0.478, 0.700],
+            [0.462, 0.878], [0.418, 0.694], [0.478, 0.872],
+            [0.542, 0.878], [0.586, 0.694], [0.526, 0.872],
+            [0.478, 0.542], [0.522, 0.542], [0.464, 0.520], [0.536, 0.520],
+        ],
+    },
+    {
+        "name": "Sitting — hugging knees, head up", "category": "grounded", "framing": "full",
+        "face_visible": True,
+        "prompt_hint": "sitting on the floor hugging their knees, chin resting on their "
+                       "knees, looking up brightly, alert and eager",
+        # Head lifted clear of the knees and tipped back — the inverse ordering of the buried
+        # variant: nose highest, then eyes, then ears = face pointing up.
+        "points": [
+            [0.500, 0.382], [0.500, 0.474],
+            [0.418, 0.492], [0.388, 0.608], [0.522, 0.700],
+            [0.582, 0.492], [0.612, 0.608], [0.478, 0.700],
+            [0.462, 0.878], [0.418, 0.694], [0.478, 0.872],
+            [0.542, 0.878], [0.586, 0.694], [0.526, 0.872],
+            [0.474, 0.396], [0.526, 0.396], [0.446, 0.410], [0.554, 0.410],
         ],
     },
     {

@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import binascii
+import hashlib
 import json
 import os
 import random
@@ -101,6 +102,7 @@ async def _startup() -> None:
         db.init_db()
         logs.info("boot", "database ready", path=str(db.DB_PATH))
         seed_emotion_map()   # first boot only; an edited map is never overwritten
+        seed_axis_families()  # needs the map above to resolve each axis's top tier
         backfill_pose_axes()
     except Exception as exc:  # noqa: BLE001
         logs.error("boot", f"database init failed: {exc}")
@@ -583,14 +585,119 @@ def seed_pose_library(force: bool = False) -> int:
         for p in (q for q in skeleton.STARTER_POSES if q["name"] not in have):
             conn.execute(
                 """INSERT INTO pose_library
-                   (name, category, framing, keypoints_json, prompt_hint, face_visible, source)
-                   VALUES (?, ?, ?, ?, ?, ?, 'builtin')""",
+                   (name, category, framing, keypoints_json, prompt_hint, face_visible,
+                    family, source)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, 'builtin')""",
                 (p["name"], p["category"], p["framing"], json.dumps(p["points"]),
-                 p.get("prompt_hint", ""), 1 if p.get("face_visible", True) else 0))
+                 p.get("prompt_hint", ""), 1 if p.get("face_visible", True) else 0,
+                 skeleton.family_for_name(p["name"], p["category"])))
             added += 1
     if added:
         logs.info("boot", f"seeded the pose library with {added} starter pose(s)")
     return added
+
+
+POSE_FAMILIES = skeleton.FAMILIES
+
+# Which family an axis poses in by default. Everything stands; the axes whose top rung is
+# a collapse get grounded at that rung only — sorrow stands where despair sits. These are a
+# STARTING POINT: /api/pose-families rewrites any of it, including per-tier.
+_DEFAULT_AXIS_FAMILY = "standing"
+_DEFAULT_TOP_TIER_FAMILY = {
+    "sadness": "sitting",     # grief/despair goes to the floor
+    "shame": "kneeling",      # humiliation folds down
+    "fear": "kneeling",       # terror cowers
+    "affection": "crouching",  # top-tier affection lowers itself to meet someone
+}
+
+
+def seed_axis_families(force: bool = False) -> int:
+    """Seed the axis -> family map. No-op once anything is in there.
+
+    Tier ramps are resolved against the LIVE emotion map rather than hard-coded tier
+    numbers, because an axis's ladder length is editable — "the top rung" is the only
+    stable way to say "when this emotion bottoms out, put them on the floor".
+    """
+    with db.connect() as conn:
+        if force:
+            conn.execute("DELETE FROM axis_pose_families")
+        elif conn.execute("SELECT 1 FROM axis_pose_families LIMIT 1").fetchone():
+            return 0
+    n = 0
+    with db.connect() as conn:
+        for group in emotion_map():
+            axis = group["axis"]
+            conn.execute(
+                "INSERT OR REPLACE INTO axis_pose_families (axis, tier, family) VALUES (?, NULL, ?)",
+                (axis, _DEFAULT_AXIS_FAMILY))
+            n += 1
+            fam = _DEFAULT_TOP_TIER_FAMILY.get(axis)
+            tiers = group["tiers"]
+            if fam and tiers:
+                top = max(t["position"] for t in tiers)
+                conn.execute(
+                    "INSERT OR REPLACE INTO axis_pose_families (axis, tier, family) VALUES (?, ?, ?)",
+                    (axis, top, fam))
+                n += 1
+    if n:
+        logs.info("boot", f"seeded {n} axis/tier pose-family assignment(s)")
+    return n
+
+
+def axis_family_map(project_id: int | None = None) -> dict[str, dict[str, Any]]:
+    """axis -> {'default': family, 'tiers': {...}, 'entries': {...}} for one persona.
+
+    Global rows (project_id IS NULL) are read first and a persona's own rows overwrite them
+    key by key, so a character inherits the shipped mapping and diverges only where it has
+    been told to. Ordering the query NULLs-first is what makes that overlay work.
+    """
+    out: dict[str, dict[str, Any]] = {}
+    with db.connect() as conn:
+        for r in conn.execute(
+                "SELECT axis, tier, family, entry_id FROM axis_pose_families "
+                "WHERE project_id IS NULL OR project_id = ? "
+                "ORDER BY (project_id IS NOT NULL), id", (project_id,)):
+            e = out.setdefault(r["axis"], {"default": None, "tiers": {}, "entries": {}})
+            if r["tier"] is None:
+                e["default"] = r["family"]
+                e["entries"][None] = r["entry_id"]
+            else:
+                e["tiers"][r["tier"]] = r["family"]
+                e["entries"][r["tier"]] = r["entry_id"]
+    return out
+
+
+def _family_for(axis: str | None, tier: int | None,
+                project_id: int | None = None) -> tuple[str | None, int | None]:
+    """(family, pinned entry id) for this pose — a tier row wins over the axis row."""
+    if not axis:
+        return None, None
+    e = axis_family_map(project_id).get(axis)
+    if not e:
+        return None, None
+    if tier is not None and tier in e["tiers"]:
+        return e["tiers"][tier], e["entries"].get(tier)
+    return e["default"], e["entries"].get(None)
+
+
+def _family_members(conn, family: str) -> list[Any]:
+    return conn.execute(
+        "SELECT id, name, keypoints_json, face_visible, prompt_hint FROM pose_library "
+        "WHERE family = ? ORDER BY id", (family,)).fetchall()
+
+
+def _family_pick(conn, family: str, pose_name: str) -> Any | None:
+    """Choose one member of `family` for this pose, stably and spread across the set.
+
+    Keyed on the pose NAME, not its row id: a persona rebuilt from scratch keeps the same
+    figure per emotion, and two poses in the same family land on different members instead
+    of the whole axis rendering one identical stance.
+    """
+    members = _family_members(conn, family)
+    if not members:
+        return None
+    h = int(hashlib.sha256(pose_name.strip().lower().encode()).hexdigest()[:8], 16)
+    return members[h % len(members)]
 
 
 def _pose_lib_dict(row: Any) -> dict[str, Any]:
@@ -706,6 +813,95 @@ async def pose_library_reset() -> dict:
     """Top the library up to the shipped starter set — adds what's missing, edits nothing."""
     added = seed_pose_library(force=True)
     return {"restored": added}
+
+
+@app.get("/api/pose-families")
+async def pose_families_get(project_id: int | None = None) -> dict:
+    """The families, their members, and which family each axis/tier poses in.
+
+    `project_id` returns that persona's effective map (its overrides layered over the global
+    defaults); omitting it returns the global defaults alone.
+    """
+    seed_axis_families()
+    with db.connect() as conn:
+        counts = {f: 0 for f in POSE_FAMILIES}
+        members: dict[str, list[dict]] = {f: [] for f in POSE_FAMILIES}
+        for r in conn.execute("SELECT id, name, family, face_visible FROM pose_library "
+                              "ORDER BY family, id"):
+            fam = r["family"] or "standing"
+            counts[fam] = counts.get(fam, 0) + 1
+            members.setdefault(fam, []).append(
+                {"id": r["id"], "name": r["name"], "face_visible": bool(r["face_visible"])})
+    fam_map = axis_family_map(project_id)
+    axes = []
+    for group in emotion_map():
+        e = fam_map.get(group["axis"], {"default": None, "tiers": {}})
+        axes.append({
+            "axis": group["axis"], "label": group["label"],
+            "family": e["default"],
+            # Per-tier, with the effective family resolved so the ramp is readable at a glance.
+            "tiers": [{"tier": t["position"], "label": t["label"],
+                       "family": e["tiers"].get(t["position"]),
+                       "entry_id": e.get("entries", {}).get(t["position"]),
+                       "effective": e["tiers"].get(t["position"]) or e["default"]}
+                      for t in group["tiers"]],
+        })
+    return {"families": POSE_FAMILIES, "counts": counts, "members": members,
+            "axes": axes, "project_id": project_id}
+
+
+class AxisFamilyRequest(BaseModel):
+    axis: str = Field(min_length=1)
+    # None = the axis-wide default; a number targets one rung of the ladder.
+    tier: int | None = None
+    # '' clears the assignment — for a tier that means "fall back to the axis default".
+    family: str = ""
+    # Pin this axis/tier to one library entry; None leaves it on the blind family spread.
+    entry_id: int | None = None
+    # None edits the GLOBAL default; a project id sets that persona's own override, so two
+    # characters can hold different postures for the same emotion.
+    project_id: int | None = None
+
+
+@app.post("/api/pose-families")
+async def pose_family_set(body: AxisFamilyRequest) -> dict:
+    """Assign one axis (or one tier of it) to a posture family."""
+    fam = body.family.strip()
+    if fam and fam not in POSE_FAMILIES:
+        raise HTTPException(400, f"unknown family '{fam}' — one of {', '.join(POSE_FAMILIES)}")
+    # A persona's axis-wide override CAN be cleared (it falls back to the global default);
+    # the global axis-wide row cannot, or the axis would resolve to nothing.
+    if not fam and body.tier is None and body.project_id is None:
+        raise HTTPException(400, "the global axis-wide family cannot be cleared, only changed")
+    with db.connect() as conn:
+        if body.entry_id is not None:
+            row = conn.execute("SELECT family FROM pose_library WHERE id = ?",
+                               (body.entry_id,)).fetchone()
+            if row is None:
+                raise HTTPException(404, f"pose_library entry {body.entry_id} not found")
+            # Pinning an entry from another family would make the two disagree; the entry wins.
+            fam = fam or row["family"]
+            if row["family"] != fam:
+                raise HTTPException(
+                    400, f"entry {body.entry_id} is in the '{row['family']}' family, not '{fam}'")
+        if not fam:
+            conn.execute(
+                "DELETE FROM axis_pose_families WHERE axis = ? AND tier IS ? "
+                "AND project_id IS ?", (body.axis, body.tier, body.project_id))
+        else:
+            conn.execute(
+                "INSERT OR REPLACE INTO axis_pose_families "
+                "(project_id, axis, tier, family, entry_id) VALUES (?, ?, ?, ?, ?)",
+                (body.project_id, body.axis, body.tier, fam, body.entry_id))
+        empty = not conn.execute(
+            "SELECT 1 FROM pose_library WHERE family = ? LIMIT 1", (fam,)).fetchone() if fam else False
+    logs.info("process",
+              ("pose family: " + ("persona " + str(body.project_id) if body.project_id else "global")
+               + f" {body.axis}" + (f" tier {body.tier}" if body.tier is not None else "")
+               + (f" -> {fam}" if fam else " -> cleared")))
+    return {"axis": body.axis, "tier": body.tier, "family": fam or None,
+            "entry_id": body.entry_id, "project_id": body.project_id,
+            "warning": f"the '{fam}' family has no library entries yet" if empty else ""}
 
 
 @app.get("/api/workflows")
@@ -2636,7 +2832,8 @@ def _pose_seed(version_seed: int, pose_id: int) -> int:
     return mixed % 2_147_483_647
 
 
-def _pose_cn_cfg(conn, project_id: int, pose_row: Any) -> dict[str, Any] | None:
+def _pose_cn_cfg(conn, project_id: int, pose_row: Any,
+                 skeleton_override: str | None = None) -> dict[str, Any] | None:
     """Resolve the ControlNet config for one pose, or None to render prompt-only.
 
     Per-pose values win over the persona's defaults; NULL means inherit, so moving the
@@ -2648,7 +2845,9 @@ def _pose_cn_cfg(conn, project_id: int, pose_row: Any) -> dict[str, Any] | None:
     if not proj:
         return None
     cn_name = (proj["pose_controlnet"] or "").strip()
-    skeleton = (pose_row["skeleton_ref"] or "").strip() or (proj["pose_skeleton"] or "").strip()
+    skeleton = ((pose_row["skeleton_ref"] or "").strip()
+                or (proj["pose_skeleton"] or "").strip()
+                or (skeleton_override or "").strip())
     if skeleton and not cn_name:
         # The user picked a figure and is expecting it to be obeyed. Rendering anyway with
         # no ControlNet produces a perfectly good image that ignores the skeleton entirely —
@@ -2735,6 +2934,12 @@ async def _queue_pose(conn, project_id: int, slug: str, version: dict, pose_row:
     """
     seed = pose_row["seed"] or _pose_seed(version.get("seed") or 0, pose_row["id"])
     entry = _pose_library_entry(conn, project_id, pose_row)
+    # Nothing chosen explicitly? Let the pose's emotion axis/tier pick from its family.
+    fam = None
+    if not (pose_row["skeleton_ref"] or "").strip():
+        fam = await _resolve_family_skeleton(conn, slug, pose_row, project_id)
+        if fam and entry is None:
+            entry = dict(fam["entry"])
     # A skeleton fixes where the limbs go but says nothing about what they are doing —
     # "holding a sword" is joint positions plus an object that only the prompt can supply.
     # Without this the figure grips thin air (docs/pose-control.md §3.6).
@@ -2763,11 +2968,13 @@ async def _queue_pose(conn, project_id: int, slug: str, version: dict, pose_row:
         params.update(lora_params)
     params = _apply_stack_triggers(params, stack)
     params = {k: v for k, v in params.items() if v is not None}
-    cn_cfg = _pose_cn_cfg(conn, project_id, pose_row)
+    cn_cfg = _pose_cn_cfg(conn, project_id, pose_row, fam["ref"] if fam else None)
     logs.verbose("process", "queuing pose render", pose_id=pose_row["id"], name=pose_row["name"],
                  workflow=workflow_id, lora=lora_cfg["lora_name"] if lora_cfg else None,
                  lora_stack=len(stack) or None, seed=seed,
-                 controlnet=cn_cfg["controlnet_name"] if cn_cfg else None)
+                 controlnet=cn_cfg["controlnet_name"] if cn_cfg else None,
+                 family=fam["family"] if fam else None,
+                 family_entry=fam["entry"]["name"] if fam else None)
     graph = workflows.build_graph(workflow_id, params, lora_stack=chain, controlnet=cn_cfg)
     prompt_id = await comfy.submit(graph)
     # Pass 1 clears any previous pass-1 output: a re-render invalidates the stored base,
@@ -2821,6 +3028,49 @@ async def _queue_face_pass(conn, project_id: int, slug: str, version: dict, pose
     conn.execute("UPDATE poses SET prompt_id = ?, status = 'facepass' WHERE id = ?",
                  (prompt_id, pose_row["id"]))
     return True
+
+
+async def _stage_family_skeleton(conn, slug: str, entry: Any,
+                                 width: int = 832, height: int = 1216) -> str:
+    """Render a library entry and push it into ComfyUI's input, returning its ref.
+
+    Re-uploaded (overwrite) on every render rather than cached by name: the staged PNG is
+    derived from keypoints the user can edit, and a cache keyed on the entry id would keep
+    serving the pre-edit figure with nothing to show why.
+    """
+    png = skeleton.render_png(json.loads(entry["keypoints_json"]), width, height)
+    up = await comfy.upload_image(png, f"{slug}_fam_{entry['id']}.png", f"pf-skeletons-{slug}")
+    return f"{up['subfolder']}/{up['name']}" if up.get("subfolder") else up["name"]
+
+
+async def _resolve_family_skeleton(conn, slug: str, pose_row: Any,
+                                   project_id: int | None = None) -> dict | None:
+    """The family-assigned figure for this pose, staged and ready — or None.
+
+    Only consulted when the pose has no skeleton of its own and the persona has no default:
+    an explicit choice always outranks a family, or assigning a family would silently
+    overwrite per-pose work.
+    """
+    family, pinned = _family_for(pose_row["axis"], pose_row["tier"], project_id)
+    if not family:
+        return None
+    entry = None
+    if pinned is not None:
+        entry = conn.execute(
+            "SELECT id, name, keypoints_json, face_visible, prompt_hint FROM pose_library "
+            "WHERE id = ?", (pinned,)).fetchone()
+    if entry is None:
+        entry = _family_pick(conn, family, pose_row["name"] or "")
+    if entry is None:
+        logs.warn("process", f"pose family '{family}' has no library entries — "
+                            "this pose renders without structural control",
+                  pose_id=pose_row["id"], axis=pose_row["axis"])
+        return None
+    ref = await _stage_family_skeleton(conn, slug, entry)
+    logs.verbose("process", "pose family resolved a skeleton", pose_id=pose_row["id"],
+                 axis=pose_row["axis"], tier=pose_row["tier"], family=family,
+                 entry=entry["name"])
+    return {"ref": ref, "entry": entry, "family": family}
 
 
 def _annotate_skeletons(conn, project_id: int, rows: list, poses: list[dict]) -> None:

@@ -9,6 +9,45 @@ Every version below is a **published GitHub Release** with a matching
 
 ---
 
+## [0.8.10] — 2026-07-30
+
+**Pose families: an emotion axis picks its posture, per character.** Plus eight new
+skeletons covering head position, extended-leg sitting and crouching.
+
+### Added
+- **`pose_library.family`** — `standing` | `crouching` | `kneeling` | `sitting` | `lying`,
+  derived from the entry-name prefix the catalogue already used. `skeleton.family_for_name()`
+  is the single source of truth, shared by the seeder and the SQL backfill.
+- **`axis_pose_families`** maps an emotion axis — or one rung of its ladder — to a family,
+  which is what lets an axis change posture as intensity climbs: annoyance and fury both
+  stand, sorrow stands where despair sits down. Shipped defaults ground the top tier of
+  `sadness` (sitting), `shame`/`fear` (kneeling) and `affection` (crouching); everything
+  else stands. All of it is editable.
+- **Per-persona overrides.** Rows with `project_id IS NULL` are the global defaults; a
+  persona's own rows are layered over them key by key. Two characters do **not** have to
+  strike the same pose for the same emotion, and a character inherits until told otherwise.
+- **Per-tier entry pinning** (`entry_id`). The within-family spread is a name hash — fine
+  for variety, wrong for meaning, since it will happily give Elation "hugging knees, head
+  buried". Pinning is how a tier gets the figure it actually wants; the spread is only the
+  fallback.
+- `GET/POST /api/pose-families` (both accept `project_id`), and render-time resolution:
+  per-pose skeleton → persona default → persona family → global family → none.
+- **Eight new library entries.** Head position on the same body — `hugging knees, head
+  buried` (face down, `face_visible=false`) vs `head up` — because that flips despair to
+  eager. Extended-leg sitting: `ankles crossed`, `stretched and apart`, `leaning back on
+  hands`. And a crouching family for affection: `squatting down`, `down on one knee, leaning
+  in`, `bending forward, arms out`.
+
+### Notes
+- **Head position IS encodable** — nose, eyes and ears are real COCO-18 joints, so tilt is
+  carried structurally by their vertical ordering (ears→eyes→nose = looking down). This is
+  the opposite of palm facing, which has no joints at all and lives in `prompt_hint`.
+- Seated and crouching figures must be authored with **foreshortened legs and a compressed
+  torso**; at standing proportions they render as standing figures however the legs are
+  arranged. Two drafts here were thrown away for exactly that.
+
+---
+
 ## [0.8.9] — 2026-07-29
 
 **ControlNet defaults that actually control, the skeleton visible on every pose card, and
