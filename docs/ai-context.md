@@ -1,5 +1,13 @@
 # AI Context — cold-start orientation
 
+> **2026-07-29 — v0.8.6: images are read off `/builds`, not fetched from ComfyUI.** `GET
+> /api/image` now serves `type=output` straight from the shared builds mount
+> (`_builds_path()` resolves + guards the path), and only proxies ComfyUI's `/view` for
+> what isn't there — `type=input`/`temp`, which live in ComfyUI's own directories. That is
+> why the Dataset, Poses and sheet grids stay browsable with ComfyUI stopped. Don't
+> "simplify" this back to a straight proxy: both containers bind the *same host path* as
+> `/builds`, so the local read is the authoritative one and the HTTP hop was pure coupling.
+>
 > **2026-07-29 — v0.8.5: the pose library (H3b).** `pose_library` holds **normalised COCO-18
 > keypoints**, not images — `skeleton.py` renders them at any size, which is why the picker has
 > thumbnails and why the H3f editor is possible. Seeded lazily from `skeleton.STARTER_POSES`
@@ -175,7 +183,8 @@ LAN; no Claude/Anthropic in the runtime loop.
 - **Admin / deletion (0.8.3):** `DELETE /api/projects/{id}?delete_files=`,
   `DELETE /api/versions/{id}?force=`, `DELETE /api/projects/{id}/lora/{filename}` — see the
   0.8.3 banner at the top for the guards each one enforces.
-- **Images/builds:** `GET /api/image`, `/api/builds`. **Logs:** `GET /api/logs[/persisted]`.
+- **Images/builds:** `GET /api/image` (0.8.6: disk-first off `/builds`, ComfyUI proxy only as
+  fallback), `/api/builds`. **Logs:** `GET /api/logs[/persisted]`.
 
 ## Data model (SQLite, append-only versioning)
 

@@ -58,6 +58,20 @@ FRONTEND_DIR = _resolve("frontend")
 _version_file = _resolve("VERSION", must_be_dir=False)
 VERSION = _version_file.read_text().strip() if _version_file.is_file() else "0.0.0"
 
+def _builds_path(subfolder: str, filename: str) -> Path | None:
+    """Resolve subfolder/filename inside the builds root. Returns None for an empty
+    filename or a crafted path that escapes /builds."""
+    if not filename:
+        return None
+    path = (BUILDS_ROOT / (subfolder or "") / filename).resolve()
+    try:
+        path.relative_to(BUILDS_ROOT.resolve())
+    except ValueError:
+        logs.warn("local", "refusing a path outside the builds root", path=str(path))
+        return None
+    return path
+
+
 app = FastAPI(title="Persona Forge", version=VERSION)
 
 
@@ -1353,16 +1367,35 @@ async def generate(project_id: int, body: GenerateRequest) -> dict:
     }
 
 
+_IMAGE_MEDIA_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+                      ".webp": "image/webp", ".gif": "image/gif"}
+
+
 @app.get("/api/image")
 async def proxy_image(filename: str, subfolder: str = "", type: str = "output") -> Any:
-    """Proxy ComfyUI images so the browser only ever talks to Persona Forge."""
+    """Serve an image to the browser — from the shared builds mount when we can.
+
+    ComfyUI writes its outputs into /builds, which this container also mounts, so read
+    them straight off disk: the dataset, poses and sheets stay browsable while ComfyUI
+    is stopped. Fall back to proxying ComfyUI only for images that aren't on the mount —
+    type="input"/"temp" live in ComfyUI's own directories.
+    """
+    if type == "output":
+        path = _builds_path(subfolder, filename)
+        if path is not None and path.is_file():
+            return FileResponse(
+                path, media_type=_IMAGE_MEDIA_TYPES.get(path.suffix.lower(), "image/png"))
+
     url = comfy.view_url(filename, subfolder, type)
-    async with httpx.AsyncClient(timeout=30.0) as c:
-        r = await c.get(url)
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as c:
+            r = await c.get(url)
+    except httpx.HTTPError as exc:
+        logs.warn("integration", f"image not on the builds mount and ComfyUI is unreachable: {exc}",
+                  filename=filename, subfolder=subfolder, type=type)
+        raise HTTPException(503, "image not on the builds mount and ComfyUI is unreachable") from exc
     if r.status_code != 200:
         raise HTTPException(r.status_code, "image not found")
-    from fastapi.responses import Response
-
     return Response(content=r.content, media_type=r.headers.get("content-type", "image/png"))
 
 
@@ -1811,15 +1844,10 @@ async def dataset_target(project_id: int, body: DatasetTargetRequest) -> dict:
 
 
 def _delete_dataset_file(subfolder: str, filename: str) -> bool:
-    """Delete one dataset image file from /builds. Guards against a crafted subfolder/filename
-    escaping the builds root before unlinking. Best-effort — returns True if a file was removed."""
-    if not filename:
-        return False
-    path = (BUILDS_ROOT / (subfolder or "") / filename).resolve()
-    try:
-        path.relative_to(BUILDS_ROOT.resolve())  # refuse anything outside /builds
-    except ValueError:
-        logs.warn("local", "refusing to delete outside the builds root", path=str(path))
+    """Delete one dataset image file from /builds. Best-effort — returns True if a file
+    was removed."""
+    path = _builds_path(subfolder, filename)
+    if path is None:
         return False
     try:
         if path.is_file():

@@ -137,9 +137,13 @@ re-renders just the face to put the emotion on it, since a full-body sprite leav
 face too small to read. The two are independently tunable, and because the pre-face image
 is kept, re-rolling an expression takes seconds and can't disturb a body you already
 liked. Poses also stopped sharing one seed, which was quietly making a whole set look
-alike — see [docs/pose-control.md](docs/pose-control.md). Still ahead in Phase H are the
-**pose library** (a different skeleton bound to each emotion tier), ControlNet in the
-dataset build, per-emotion dataset enrichment and selective sprite rebuild — see
+alike — see [docs/pose-control.md](docs/pose-control.md). **v0.8.5 adds the pose library**:
+15 full-body starter skeletons stored as keypoints (not images), pickable per persona or
+per pose, each carrying a prompt hint and a face-visible flag. **v0.8.6 decouples browsing
+from ComfyUI** — images are read off the shared `/builds` mount instead of fetched from
+ComfyUI, so the Dataset, Poses and sheet grids stay usable while ComfyUI is stopped. Still
+ahead in Phase H are ControlNet in the dataset build, per-emotion dataset enrichment and
+selective sprite rebuild — see
 [docs/emotion-depth.md](docs/emotion-depth.md). **Character Studio** (the
 plain-language character-sheet front door that produces the character *card*, not just the
 sprites) follows at 0.9. See the roadmap in [PROJECT_PLAN.md](PROJECT_PLAN.md) and the

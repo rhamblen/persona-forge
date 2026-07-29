@@ -9,6 +9,30 @@ Every version below is a **published GitHub Release** with a matching
 
 ---
 
+## [0.8.6] — 2026-07-29
+
+**Your dataset is visible when ComfyUI is stopped.** Images now come off the shared
+`/builds` mount instead of being fetched from ComfyUI over HTTP.
+
+The images were always on the share — the *thumbnails* weren't. `GET /api/image` proxied
+every request through ComfyUI's `/view` endpoint, so with ComfyUI down the Dataset grid
+loaded its rows and selections but rendered a wall of broken images. Persona Forge mounts
+the same host folder ComfyUI writes into, so the HTTP hop was never needed.
+
+### Fixed
+- `GET /api/image` serves `type=output` **from `/builds` directly** when the file is there,
+  and falls back to proxying ComfyUI only for what isn't (`type=input`/`temp` live in
+  ComfyUI's own directories). Fixes the Dataset, Poses and expression-sheet grids, plus
+  Studio previews, while ComfyUI is stopped, restarting, or busy.
+- A ComfyUI connection failure on that fallback now returns **503 with a clear message**
+  and a logged warning, instead of an unhandled 500.
+
+### Changed
+- New `_builds_path()` helper resolves `subfolder/filename` under the builds root and
+  refuses anything escaping it; `_delete_dataset_file()` now shares that same guard.
+
+---
+
 ## [0.8.5] — 2026-07-29
 
 **The pose library — a skeleton per pose, chosen from a curated set.** (Phase H, stage H3b.)
