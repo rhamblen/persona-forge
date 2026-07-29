@@ -2644,6 +2644,16 @@ def _pose_cn_cfg(conn, project_id: int, pose_row: Any) -> dict[str, Any] | None:
         return None
     cn_name = (proj["pose_controlnet"] or "").strip()
     skeleton = (pose_row["skeleton_ref"] or "").strip() or (proj["pose_skeleton"] or "").strip()
+    if skeleton and not cn_name:
+        # The user picked a figure and is expecting it to be obeyed. Rendering anyway with
+        # no ControlNet produces a perfectly good image that ignores the skeleton entirely —
+        # which reads as "the re-render did nothing" with no error anywhere. Say it loudly.
+        logs.warn("process",
+                  "a skeleton is set but NO ControlNet model is selected — this pose renders "
+                  "WITHOUT structural control and the chosen figure is ignored. Pick a model "
+                  "under Pose structure & face pass.",
+                  project_id=project_id, pose_id=pose_row["id"], skeleton=skeleton)
+        return None
     if not cn_name or not skeleton:
         return None
     reg = conn.execute("SELECT kind FROM controlnets WHERE filename = ?", (cn_name,)).fetchone()
@@ -3421,9 +3431,23 @@ async def set_pose_skeleton(project_id: int, body: SkeletonRequest) -> dict:
                 (ref, lib_id, project_id))
             if cur.rowcount == 0:
                 raise HTTPException(404, "project not found")
+    # A skeleton without a ControlNet model is inert — the render succeeds and ignores it.
+    # Tell the user HERE, while they're choosing, not after a full regenerate looks unchanged.
+    with db.connect() as conn:
+        cn_selected = (conn.execute(
+            "SELECT pose_controlnet FROM projects WHERE id = ?",
+            (project_id,)).fetchone()["pose_controlnet"] or "").strip()
+    warning = "" if cn_selected else (
+        "no ControlNet model is selected, so this skeleton will NOT be used — renders will "
+        "ignore it. Choose one under 'Pose structure & face pass' first.")
+
     logs.info("process", f"pose skeleton set ({label})", project_id=project_id,
-              pose_id=body.pose_id, ref=ref, library_id=lib_id)
-    return {"skeleton": ref, "source": label, "pose_id": body.pose_id, "library_id": lib_id}
+              pose_id=body.pose_id, ref=ref, library_id=lib_id,
+              controlnet=cn_selected or "(none selected)")
+    if warning:
+        logs.warn("process", f"skeleton '{label}' set but {warning}", project_id=project_id)
+    return {"skeleton": ref, "source": label, "pose_id": body.pose_id, "library_id": lib_id,
+            "warning": warning}
 
 
 @app.post("/api/projects/{project_id}/poses/{pose_id}/face-pass")

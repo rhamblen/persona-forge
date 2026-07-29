@@ -1275,9 +1275,15 @@ async function renderPoseControlNet(cfg) {
 
   $("pose-skeleton-current").textContent = cn.skeleton || "no skeleton set";
   const ready = !!(cn.selected && cn.skeleton);
-  $("pose-cn-summary").textContent = ready
+  // A skeleton with no model reads as configured but is inert — the render ignores it and
+  // nothing errors. That state gets its own message; "not configured" hid it.
+  const summary = $("pose-cn-summary");
+  summary.textContent = ready
     ? `ControlNet on · face pass ${(cfg.face_pass || {}).enabled ? "on" : "off"}`
-    : "not configured — poses render from the prompt alone";
+    : cn.skeleton && !cn.selected
+      ? "skeleton set but NO ControlNet model — renders ignore it; pick a model below"
+      : "not configured — poses render from the prompt alone";
+  summary.classList.toggle("warn", !ready && !!cn.skeleton && !cn.selected);
 
   const hint = $("pose-cn-hint");
   if (!controlnetCache.length) {
@@ -1331,10 +1337,13 @@ $("pose-cn-save").addEventListener("click", async () => {
 
 async function setSkeleton(body, label) {
   try {
-    await api(`/api/projects/${state.projectId}/pose-skeleton`, {
+    const r = await api(`/api/projects/${state.projectId}/pose-skeleton`, {
       method: "POST", body: JSON.stringify(body),
     });
-    msg($("poses-msg"), `Skeleton set (${label}). Regenerate poses to use it.`, "ok");
+    // Don't promise the skeleton will be used when nothing can apply it.
+    msg($("poses-msg"), r.warning
+      ? `Skeleton set (${label}) — but ${r.warning}`
+      : `Skeleton set (${label}). Regenerate poses to use it.`, r.warning ? "warn" : "ok");
     loadPoseConfig();
   } catch (e) { msg($("poses-msg"), e.message, "bad"); }
 }

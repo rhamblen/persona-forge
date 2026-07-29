@@ -1,5 +1,14 @@
 # AI Context — cold-start orientation
 
+> **2026-07-29 — v0.8.8: ControlNet needs BOTH a skeleton and a model.** `_pose_cn_cfg()`
+> returns `None` (render with no structural control) if either is missing. The failure mode
+> that caused: skeleton picked, no model selected → poses render from the prompt alone,
+> status `done`, zero errors, and the chosen figure silently discarded. When debugging "the
+> pose didn't change", check `projects.pose_controlnet` BEFORE suspecting the workflow — a
+> clean log is not evidence ControlNet ran. That case now logs at `warn` and both the
+> skeleton picker and the panel summary say it. Deliberately **no auto-select**: 24
+> ControlNets are visible to ComfyUI and a wrong pick yields confident anatomical garbage.
+>
 > **2026-07-29 — v0.8.7: the GPU is SHARED; training gates on it.** UR1's 3090 also serves
 > Ollama (192.168.1.32 — other LAN apps load their own models into it) and Immich's CUDA ML
 > server. A 1500-step rank-16 SDXL run peaks at **~17.8 GB reserved**, so ~8 GB of foreign

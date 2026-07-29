@@ -9,6 +9,34 @@ Every version below is a **published GitHub Release** with a matching
 
 ---
 
+## [0.8.8] — 2026-07-29
+
+**A skeleton with no ControlNet model no longer fails silently.** Picking a different pose
+figure and re-rendering appeared to do nothing, with no error anywhere.
+
+`_pose_cn_cfg()` returns `None` — render without structural control — when *either* the
+skeleton or the ControlNet model is missing. With a skeleton chosen but no model selected,
+every pose therefore rendered from the prompt alone: the run succeeded, 28/28 poses came
+back `done`, and the chosen figure was discarded. Nothing was logged above `verbose`, so
+the logs showed a clean, successful batch.
+
+### Fixed
+- **The skeleton picker no longer promises something that won't happen.** It said "Skeleton
+  set. Regenerate poses to use it" regardless. `POST .../pose-skeleton` now returns a
+  `warning` when no ControlNet model is selected, and the picker shows it instead.
+- **The drop is logged at `warn`**, naming the pose and skeleton, so a re-render that
+  ignores the figure is visible in the log rather than inferable only from the output.
+- **The panel summary distinguishes the two "off" states.** "not configured — poses render
+  from the prompt alone" covered both *nothing set* and *skeleton set but inert*; the second
+  now reads "skeleton set but NO ControlNet model — renders ignore it; pick a model below",
+  in the warning colour.
+
+### Notes
+- Not a regression — this behaviour dates from H3a. It needed a persona with a skeleton and
+  no model selected to become visible.
+
+---
+
 ## [0.8.7] — 2026-07-29
 
 **LoRA training no longer dies on a GPU someone else is using.** The pre-flight now frees

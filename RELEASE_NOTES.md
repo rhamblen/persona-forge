@@ -1,58 +1,51 @@
-# v0.8.7 — Training doesn't start a run the card can't finish
+# v0.8.8 — A skeleton with no ControlNet model can't fail silently any more
 
-Your build died 5 minutes in with an out-of-memory error from `TrainLoraNode`. It wasn't
-the trainer, and it wasn't your dataset. **Something else was using the GPU.**
+Re-rendering with a different pose figure looked like it failed. It didn't fail — it
+**succeeded and ignored the figure**, which is worse, because nothing anywhere said so.
 
-## What was actually happening
+## Why the logs were clean
 
-At the moment training started, the 3090 had **8.4 GB already taken** by other tenants:
+Your persona has **no ControlNet model selected**. Pose rendering only applies structural
+control when it has *both* a skeleton and a model; with one missing it quietly renders from
+the prompt alone. So the batch ran, all 28 poses came back `done`, zero errors, zero
+warnings — and every skeleton you picked was discarded on the way through.
 
-| Holder | VRAM |
+The skeleton picker made it worse by confirming "Skeleton set. Regenerate poses to use it."
+That sentence was not true.
+
+## What changed
+
+- **The picker tells you now.** Choosing a skeleton with no model selected says: *Skeleton
+  set (Sitting — hugging knees) — but no ControlNet model is selected, so this skeleton will
+  NOT be used.*
+- **The log says it too**, at `warn`, naming the pose and skeleton — so this is findable in
+  the log rather than only in the output.
+- **The panel summary stops hiding it.** "not configured — poses render from the prompt
+  alone" described both *nothing set at all* and *skeleton set but inert*. The second now
+  reads **"skeleton set but NO ControlNet model — renders ignore it; pick a model below"**,
+  in the warning colour.
+
+## To actually get your pose figures working
+
+Poses tab → **Pose structure & face pass** → pick a ControlNet model. Both of these are
+installed and available on your ComfyUI:
+
+| Model | File |
 |---|---|
-| Ollama — `minicpm-v`, loaded by another app on your LAN | 4.7 GB |
-| Immich's CUDA machine-learning server | most of the rest |
+| NoobAI openpose (native) | `noobai-openpose-sdxl.safetensors` |
+| xinsir openpose SDXL 1.0 | `xinsir-openpose-sdxl-1.0.safetensors` |
 
-Training peaks at about **17.8 GB reserved**. 17.8 + 8.4 doesn't fit in 24 GB, so it ran
-until the VAE encode asked for one more 58 MB and the card said no. Because the failure
-landed in the VAE rather than the training loop, it read like a trainer bug.
+The NoobAI one matches your checkpoint (NoobAI-XL), so start there. Then set your skeletons
+and regenerate — this time the figures will be obeyed.
 
-## The bug on our side
-
-Persona Forge *does* free VRAM before training — but it was freeing the wrong thing. It
-called "unload the Ollama model", meaning the model **we** are configured to use
-(`llama3.1`). The model actually sitting in VRAM had been loaded by something else. So the
-log said `unloading Ollama model {llama3.1:latest}`, reported success, and 4.7 GB never
-moved.
-
-It now asks Ollama what it's actually holding and evicts **all of it**, logging how much
-came back.
-
-## And a gate, so this can't waste 37 minutes again
-
-After freeing, PF checks the card before committing to the run. If there isn't enough, you
-get this straight away instead of an OOM traceback five minutes later:
-
-> not enough free VRAM to train: 17.0 GB free of 25.3 GB, need ~18 GB. Roughly 8.2 GB is
-> held by other processes on this GPU. Ollama still holds minicpm-v:latest (4.7 GB). Free
-> the card and start the build again.
-
-Tunable via `MIN_TRAIN_VRAM_GB` (default 18, from the measured 17.8 GB peak). Set it to `0`
-to switch the gate off. If ComfyUI can't be reached the gate lets the build through rather
-than blocking it — it should never be the reason a good build doesn't start.
-
-## Before you rebuild
-
-Your card is **clear right now** (0.5 GB used). The Ollama model has been unloaded and
-Immich has released its models, so a build started now has the full 24 GB.
-
-Worth knowing: Immich's ML server and whatever loads `minicpm-v` will both take the GPU
-back when they next have work. If a build gets blocked by the new gate, that's who to look
-at first.
+Nothing selects a model for you: with 24 ControlNets visible to ComfyUI, guessing wrong
+produces confidently mangled anatomy, so the choice stays yours.
 
 ## Upgrade notes
 
-Automatic — no compose change, no migration.
+Automatic — no compose change, no migration. Not a regression; this dates from H3a and
+needed exactly your configuration to surface.
 
-**Image:** `ghcr.io/rhamblen/persona-forge:0.8.7`
+**Image:** `ghcr.io/rhamblen/persona-forge:0.8.8`
 
 Full detail in [`CHANGELOG.md`](CHANGELOG.md).

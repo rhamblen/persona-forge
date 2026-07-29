@@ -393,6 +393,9 @@ code { background: var(--bg-raised); padding: 1px 5px; border-radius: 4px; font-
 .pose-lora-bar .hint code { background: var(--bg-raised); border: 1px solid var(--line);
   border-radius: 5px; padding: 1px 5px; font-size: 12px; }
 .hint.warn { color: var(--warn); }
+/* A skeleton with no ControlNet model renders silently wrong — the summary must not read
+   as muted background text when it's telling you the figure is being ignored. */
+.muted.warn { color: var(--warn); }
 
 /* Pose structure + face pass (Phase H3). Collapsed by default: it carries real dials but
    most sessions only set it once, so it shouldn't crowd the grid. */
