@@ -9,6 +9,47 @@ Every version below is a **published GitHub Release** with a matching
 
 ---
 
+## [0.8.9] — 2026-07-29
+
+**ControlNet defaults that actually control, the skeleton visible on every pose card, and
+three arms-wide variants.**
+
+### Changed
+- **Pose ControlNet defaults raised to `strength 1.0` / `end_percent 0.9`** (from 0.7/0.7).
+  Measured on one seed and one skeleton: at 0.7/0.7 a strength-1.0 character LoRA simply
+  overrode the skeleton and the pose was ignored; at 1.0/0.9 it is obeyed. End is held
+  short of 1.0 so the last steps settle identity and the skeleton's black background
+  doesn't bleed into the frame.
+- **Existing personas are migrated**, not just new ones — a column default only applies to
+  new rows, so without this the change would appear to do nothing. Only personas still on
+  the exact old 0.7/0.7 pair are lifted; anyone who tuned these keeps their values.
+- **"Restore starter poses" now tops up by name instead of replacing the built-ins.** The
+  shipped catalogue grows between releases, and the destructive version charged every edit
+  made to a built-in entry for the privilege of collecting new ones. To restore one entry
+  to shipped state, delete it and restore again.
+
+### Added
+- **The skeleton each pose renders from is shown on its card**, so a set can be reviewed
+  without opening every pose. Inherited-from-persona is styled apart from set-on-this-pose
+  (italic, with a `↳`), and *no skeleton* is called out in the warning colour. `GET
+  .../poses` gained `skeleton_name` and `skeleton_source` (`pose` | `persona` | `custom` |
+  `none`).
+- **Three arms-wide variants** distinguished by what the forearms do:
+  `palms forward` (elbows dropped, forearms vertical — warding off, defensive),
+  `palms up and out` (arms low and open — helpless, resigned), and
+  `palms inward` (elbows flung wide, forearms angled back in — exasperated, frustrated).
+
+### Notes
+- **COCO-18 cannot encode palm orientation.** There is no hand or wrist-rotation joint, so
+  the elbow→wrist vector is the only structural difference available; the palm facing, and
+  the emotional read hanging off it, travel in `prompt_hint`. That split is why these are
+  three entries rather than one — the silhouettes genuinely differ, and the hints carry
+  what the joints can't say.
+- Stripping stance words ("standing, relaxed casual pose") from the prompt was tested and
+  did **not** help; the model choice and strength were what mattered. Prompt unchanged.
+
+---
+
 ## [0.8.8] — 2026-07-29
 
 **A skeleton with no ControlNet model no longer fails silently.** Picking a different pose

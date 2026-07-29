@@ -1,51 +1,53 @@
-# v0.8.8 — A skeleton with no ControlNet model can't fail silently any more
+# v0.8.9 — Defaults that obey the skeleton, and three ways to hold your arms out
 
-Re-rendering with a different pose figure looked like it failed. It didn't fail — it
-**succeeded and ignored the figure**, which is worse, because nothing anywhere said so.
+## The defaults were the problem
 
-## Why the logs were clean
+`strength 0.7 / end 0.7` was too weak to overrule a strength-1.0 character LoRA. Same seed,
+same skeleton, only those two numbers changed: at 0.7/0.7 the pose was ignored, at 1.0/0.9
+it was obeyed. The new defaults are **1.0 / 0.9**.
 
-Your persona has **no ControlNet model selected**. Pose rendering only applies structural
-control when it has *both* a skeleton and a model; with one missing it quietly renders from
-the prompt alone. So the batch ran, all 28 poses came back `done`, zero errors, zero
-warnings — and every skeleton you picked was discarded on the way through.
+End is held short of 1.0 deliberately — the last steps free of the skeleton let the
+character LoRA settle identity, and stop the skeleton's black background bleeding into the
+frame (which is exactly what happened at 0.9 with a mismatched ControlNet model).
 
-The skeleton picker made it worse by confirming "Skeleton set. Regenerate poses to use it."
-That sentence was not true.
+**Your existing personas are migrated too.** A column default only applies to new rows, so
+without that this release would have looked like it did nothing. Personas still sitting on
+the exact old 0.7/0.7 pair are lifted; if you'd tuned those numbers yourself, your values
+are kept.
 
-## What changed
+## You can now see which skeleton each pose uses
 
-- **The picker tells you now.** Choosing a skeleton with no model selected says: *Skeleton
-  set (Sitting — hugging knees) — but no ControlNet model is selected, so this skeleton will
-  NOT be used.*
-- **The log says it too**, at `warn`, naming the pose and skeleton — so this is findable in
-  the log rather than only in the output.
-- **The panel summary stops hiding it.** "not configured — poses render from the prompt
-  alone" described both *nothing set at all* and *skeleton set but inert*. The second now
-  reads **"skeleton set but NO ControlNet model — renders ignore it; pick a model below"**,
-  in the warning colour.
+Every pose card shows the figure it renders from, so you can scan a set for the odd one out
+instead of opening each pose:
 
-## To actually get your pose figures working
+- **`arms flung wide`** — set on this pose
+- **`↳ hugging knees`** (italic) — inherited from the persona default
+- **`no skeleton`** (amber) — renders from the prompt alone
 
-Poses tab → **Pose structure & face pass** → pick a ControlNet model. Both of these are
-installed and available on your ComfyUI:
+## Three arms-wide variants
 
-| Model | File |
-|---|---|
-| NoobAI openpose (native) | `noobai-openpose-sdxl.safetensors` |
-| xinsir openpose SDXL 1.0 | `xinsir-openpose-sdxl-1.0.safetensors` |
+Exactly the three you described:
 
-The NoobAI one matches your checkpoint (NoobAI-XL), so start there. Then set your skeletons
-and regenerate — this time the figures will be obeyed.
+| Entry | Shape | Reads as |
+|---|---|---|
+| **arms wide, palms forward** | elbows dropped, forearms vertical | warding off, defensive |
+| **arms wide, palms up and out** | arms low and open to the sides | helpless, resigned |
+| **arms wide, palms inward** | elbows flung wide, forearms angled back in | exasperated, frustrated |
 
-Nothing selects a model for you: with 24 ControlNets visible to ComfyUI, guessing wrong
-produces confidently mangled anatomy, so the choice stays yours.
+**One thing worth knowing:** COCO-18 has no hand joint and no wrist rotation, so a skeleton
+*cannot* encode which way a palm faces. What actually differs between these three is the
+forearm angle — and that's a real, visible difference in silhouette. The palm direction, and
+the emotion riding on it, travel in each entry's `prompt_hint`. That's why they're three
+entries and not one slider: the joints carry the shape, the hint carries the rest.
+
+To get them: Poses tab → **Restore starter poses**. That button now *tops up* the library by
+name rather than replacing the built-ins, so it adds the three new entries and leaves
+everything else — including any edits you've made — untouched.
 
 ## Upgrade notes
 
-Automatic — no compose change, no migration. Not a regression; this dates from H3a and
-needed exactly your configuration to surface.
+Automatic. The migration runs at boot; no compose change.
 
-**Image:** `ghcr.io/rhamblen/persona-forge:0.8.8`
+**Image:** `ghcr.io/rhamblen/persona-forge:0.8.9`
 
 Full detail in [`CHANGELOG.md`](CHANGELOG.md).

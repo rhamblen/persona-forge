@@ -206,9 +206,9 @@ def apply_controlnet(
             "negative": list(neg_src),
             "control_net": control_src,
             "image": [img_id, 0],
-            "strength": float(cfg.get("strength", 0.7)),
+            "strength": float(cfg.get("strength", 1.0)),
             "start_percent": float(cfg.get("start_percent", 0.0)),
-            "end_percent": float(cfg.get("end_percent", 0.7)),
+            "end_percent": float(cfg.get("end_percent", 0.9)),
         },
     }
 

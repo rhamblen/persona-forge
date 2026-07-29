@@ -1,5 +1,19 @@
 # AI Context — cold-start orientation
 
+> **2026-07-29 — v0.8.9: ControlNet defaults are 1.0/0.9, and COCO-18 can't encode palms.**
+> Measured A/B (same seed + skeleton): `strength 0.7 / end 0.7` let a strength-1.0 character
+> LoRA override the skeleton entirely — the pose was ignored, which reads as "ControlNet is
+> broken". 1.0/0.9 obeys it; end stays short of 1.0 so identity settles and the skeleton's
+> black background doesn't bleed in. **Model choice mattered more than any dial**:
+> `xinsir-openpose-sdxl` on the NoobAI-XL checkpoint bled the black background in and shifted
+> colours red; `noobai-openpose-sdxl` (checkpoint-matched) did neither. Also measured and
+> **disproven**: stripping stance words from the prompt did not help, so don't "fix" prompts
+> for pose control. Column defaults need a matching UPDATE migration or existing personas
+> silently keep the old values. **COCO-18 has no hand joint or wrist rotation** — palm facing
+> is unrepresentable in a skeleton; it lives in `prompt_hint`, which is why the three
+> arms-wide variants differ only by forearm angle. `seed_pose_library(force=True)` now tops
+> up by name rather than replacing built-ins, since the catalogue grows between releases.
+>
 > **2026-07-29 — v0.8.8: ControlNet needs BOTH a skeleton and a model.** `_pose_cn_cfg()`
 > returns `None` (render with no structural control) if either is missing. The failure mode
 > that caused: skeleton picked, no model selected → poses render from the prompt alone,

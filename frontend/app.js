@@ -1479,13 +1479,32 @@ function poseStatusBadge(p) {
   return "";
 }
 
+// Strip the category prefix the library names carry ("Standing — arms crossed"): under a
+// thumbnail the distinguishing half is what matters, and the full name won't fit.
+function shortSkeleton(name) {
+  const i = name.indexOf("—");
+  return (i === -1 ? name : name.slice(i + 1)).trim();
+}
+
 function poseCardHtml(p) {
   const img = p.filename
     ? `<img src="${poseImageUrl(p)}" alt="${esc(p.name)}" loading="lazy" />`
     : '<div class="pose-empty">—</div>';
+  // Which figure this pose renders from, so a set can be reviewed without opening each one.
+  // "inherited" vs "set here" is the distinction that decides whether to change it.
+  const skel = p.skeleton_name
+    ? `<div class="pose-skel ${p.skeleton_source === "persona" ? "inherited" : "own"}"
+         title="${p.skeleton_source === "persona"
+           ? "inherited from the persona default — change it here to override"
+           : p.skeleton_source === "custom"
+             ? "a custom uploaded skeleton, not a library entry"
+             : "set on this pose, overriding the persona default"}">${
+      p.skeleton_source === "persona" ? "↳ " : ""}${esc(shortSkeleton(p.skeleton_name))}</div>`
+    : '<div class="pose-skel none" title="no skeleton — this pose renders from the prompt alone">no skeleton</div>';
   return `<button type="button" class="pose-card${p.id === selectedPoseId ? " sel" : ""}" data-id="${p.id}">
     <div class="pose-thumb">${img}${poseStatusBadge(p)}</div>
     <div class="pose-name">${esc(p.name)}</div>
+    ${skel}
   </button>`;
 }
 

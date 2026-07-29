@@ -568,14 +568,19 @@ def seed_pose_library(force: bool = False) -> int:
     Same posture as the emotion map: the shipped set is a **starting point, not the
     vocabulary** — entries are editable and deletable, and a user who empties the library
     deliberately does not get it silently refilled on the next boot.
+
+    `force` (the Restore button) TOPS UP by name rather than replacing the built-ins. The
+    shipped catalogue grows between releases — 0.8.9 added three arms-wide variants — and
+    the destructive version made collecting them cost every edit made to a built-in entry.
+    Anything already present, edited or not, is left alone; to restore one to shipped state,
+    delete it and restore again.
     """
     with db.connect() as conn:
-        if force:
-            conn.execute("DELETE FROM pose_library WHERE source = 'builtin'")
-        elif conn.execute("SELECT 1 FROM pose_library LIMIT 1").fetchone():
+        have = {r["name"] for r in conn.execute("SELECT name FROM pose_library")}
+        if not force and have:
             return 0
         added = 0
-        for p in skeleton.STARTER_POSES:
+        for p in (q for q in skeleton.STARTER_POSES if q["name"] not in have):
             conn.execute(
                 """INSERT INTO pose_library
                    (name, category, framing, keypoints_json, prompt_hint, face_visible, source)
@@ -698,7 +703,7 @@ async def pose_library_delete(pose_id: int) -> dict:
 
 @app.post("/api/pose-library/reset")
 async def pose_library_reset() -> dict:
-    """Restore the shipped starter set, replacing the built-ins but keeping user entries."""
+    """Top the library up to the shipped starter set — adds what's missing, edits nothing."""
     added = seed_pose_library(force=True)
     return {"restored": added}
 
@@ -2818,6 +2823,36 @@ async def _queue_face_pass(conn, project_id: int, slug: str, version: dict, pose
     return True
 
 
+def _annotate_skeletons(conn, project_id: int, rows: list, poses: list[dict]) -> None:
+    """Tag each pose with the skeleton it will actually render from, and where that came from.
+
+    Which figure a pose uses is otherwise invisible in the grid — it's a per-pose override
+    falling back to a persona default, so "why is this one different?" can only be answered
+    by opening the pose. `skeleton_source` distinguishes the three states that matter:
+    `pose` (overridden here), `persona` (inherited), `custom` (uploaded, not a library entry).
+    """
+    proj = conn.execute(
+        "SELECT pose_library_id, pose_skeleton FROM projects WHERE id = ?",
+        (project_id,)).fetchone()
+    default_id = proj["pose_library_id"] if proj else None
+    default_skel = (proj["pose_skeleton"] or "").strip() if proj else ""
+
+    names = {r["id"]: r["name"] for r in conn.execute("SELECT id, name FROM pose_library")}
+    default_name = names.get(default_id) if default_id is not None else None
+
+    for row, p in zip(rows, poses):
+        own_ref = (row["skeleton_ref"] or "").strip()
+        own_id = row["pose_library_id"]
+        if own_ref:
+            p["skeleton_name"] = names.get(own_id) if own_id is not None else "custom upload"
+            p["skeleton_source"] = "pose" if own_id is not None else "custom"
+        elif default_skel:
+            p["skeleton_name"] = default_name or "custom upload"
+            p["skeleton_source"] = "persona"
+        else:
+            p["skeleton_name"], p["skeleton_source"] = None, "none"
+
+
 @app.get("/api/projects/{project_id}/poses")
 async def poses_list(project_id: int) -> dict:
     await _reconcile_poses(project_id)
@@ -2828,7 +2863,8 @@ async def poses_list(project_id: int) -> dict:
         rows = conn.execute(
             "SELECT * FROM poses WHERE project_id = ? ORDER BY position, id", (project_id,)
         ).fetchall()
-    poses = [_pose_dict(r) for r in rows]
+        poses = [_pose_dict(r) for r in rows]
+        _annotate_skeletons(conn, project_id, rows, poses)
     # 'facepass' is pass 2 — still in flight, so it has to keep the UI polling.
     pending = sum(1 for p in poses if p["status"] in ("pending", "facepass"))
 
@@ -3325,9 +3361,11 @@ async def set_pose_lora(project_id: int, body: PoseLoraRequest) -> dict:
 
 class PoseControlNetRequest(BaseModel):
     controlnet: str = ""                                     # registry filename, '' disables
-    strength: float = Field(default=0.7, ge=0.0, le=2.0)
+    # 0.8.9 defaults, measured: 0.7/0.7 left the skeleton too weak to overrule a
+    # strength-1.0 character LoRA, so the pose was silently ignored.
+    strength: float = Field(default=1.0, ge=0.0, le=2.0)
     start_percent: float = Field(default=0.0, ge=0.0, le=1.0)
-    end_percent: float = Field(default=0.7, ge=0.0, le=1.0)
+    end_percent: float = Field(default=0.9, ge=0.0, le=1.0)
     face_pass: bool = True
     face_denoise: float = Field(default=0.6, ge=0.1, le=1.0)
 

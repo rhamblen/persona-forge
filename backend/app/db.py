@@ -290,11 +290,14 @@ _POSE_H3_COLUMNS = [
 # Persona-level pose-render defaults (Phase H3, 0.8.4).
 _PROJECT_H3_COLUMNS = [
     ("pose_controlnet", "TEXT NOT NULL DEFAULT ''"),        # filename from the registry
-    ("pose_cn_strength", "REAL NOT NULL DEFAULT 0.7"),
+    # 0.8.9: measured up from 0.7/0.7. At 0.7 strength ending at 0.7 the skeleton was too
+    # weak to overrule a strength-1.0 character LoRA — an A/B on the same seed showed the
+    # pose simply ignored, which read as "ControlNet doesn't work". 1.0/0.9 obeys it.
+    ("pose_cn_strength", "REAL NOT NULL DEFAULT 1.0"),
     ("pose_cn_start", "REAL NOT NULL DEFAULT 0.0"),
-    # Structure is decided early; leaving the last third free keeps the character LoRA
-    # in charge of identity instead of the skeleton flattening it.
-    ("pose_cn_end", "REAL NOT NULL DEFAULT 0.7"),
+    # Held just short of 1.0: the last steps free of the skeleton let the character LoRA
+    # settle identity, and stop the skeleton's black background bleeding into the frame.
+    ("pose_cn_end", "REAL NOT NULL DEFAULT 0.9"),
     ("pose_skeleton", "TEXT NOT NULL DEFAULT ''"),          # default skeleton for the set
     ("pose_library_id", "INTEGER"),                         # which library entry it came from
     ("pose_face_pass", "INTEGER NOT NULL DEFAULT 1"),
@@ -329,6 +332,14 @@ def init_db() -> None:
         if "pose_lora" not in cols:  # pre-0.6.2
             conn.execute("ALTER TABLE projects ADD COLUMN pose_lora TEXT NOT NULL DEFAULT ''")
             conn.execute("ALTER TABLE projects ADD COLUMN pose_lora_strength REAL NOT NULL DEFAULT 1.0")
+        # 0.8.9: lift personas still sitting on the old, too-weak ControlNet defaults.
+        # A column DEFAULT only applies to new rows, so without this every existing persona
+        # keeps 0.7/0.7 and the fix looks like it did nothing. Only the exact old pair is
+        # touched — anyone who tuned these deliberately keeps their values.
+        if "pose_cn_strength" in cols:
+            conn.execute(
+                "UPDATE projects SET pose_cn_strength = 1.0, pose_cn_end = 0.9 "
+                "WHERE pose_cn_strength = 0.7 AND pose_cn_end = 0.7")
         if "train_started_at" not in cols:  # pre-0.6.2
             conn.execute("ALTER TABLE projects ADD COLUMN train_started_at REAL NOT NULL DEFAULT 0")
             conn.execute("ALTER TABLE projects ADD COLUMN train_steps INTEGER NOT NULL DEFAULT 0")

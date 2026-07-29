@@ -266,6 +266,43 @@ STARTER_POSES: list[dict[str, Any]] = [
             [[0.388, 0.200], [0.290, 0.246], [0.192, 0.160],
              [0.612, 0.200], [0.710, 0.246], [0.808, 0.160]]),
     },
+    # Three arms-wide variants that differ by what the FOREARMS do. COCO-18 has no hand or
+    # wrist-rotation joint, so a skeleton cannot encode palm facing at all — the elbow-to-
+    # wrist vector is the only structural difference available, and the palm direction (with
+    # the emotional read that hangs off it) has to travel in `prompt_hint`. That split is
+    # why these are three entries rather than one: the silhouettes really are different, and
+    # the hints carry what the joints can't say.
+    {
+        "name": "Standing — arms wide, palms forward", "category": "standing", "framing": "full",
+        "face_visible": True,
+        "prompt_hint": "arms out to the sides, forearms raised, both palms facing forward, "
+                       "warding off, defensive",
+        # Elbows dropped and tucked, forearms near-vertical: the "stop, back off" shape.
+        "points": _standing(
+            [[0.388, 0.200], [0.306, 0.292], [0.286, 0.148],
+             [0.612, 0.200], [0.694, 0.292], [0.714, 0.148]]),
+    },
+    {
+        "name": "Standing — arms wide, palms up and out", "category": "standing", "framing": "full",
+        "face_visible": True,
+        "prompt_hint": "arms held low and open to the sides, both palms turned upward, "
+                       "helpless, resigned, imploring",
+        # Arms angled DOWN and out — the open-handed "what else can I do" shape.
+        "points": _standing(
+            [[0.388, 0.200], [0.298, 0.300], [0.222, 0.396],
+             [0.612, 0.200], [0.702, 0.300], [0.778, 0.396]]),
+    },
+    {
+        "name": "Standing — arms wide, palms inward", "category": "standing", "framing": "full",
+        "face_visible": True,
+        "prompt_hint": "elbows flung out wide, forearms angled back in toward the body, "
+                       "both palms facing inward, exasperated, frustrated",
+        # Elbows wider than the flung-wide pose but wrists brought back IN toward the torso:
+        # the "gesturing at themselves in exasperation" shape.
+        "points": _standing(
+            [[0.388, 0.200], [0.262, 0.264], [0.370, 0.352],
+             [0.612, 0.200], [0.738, 0.264], [0.630, 0.352]]),
+    },
     {
         "name": "Kneeling — upright", "category": "grounded", "framing": "full",
         "face_visible": True, "prompt_hint": "kneeling upright on both knees",
