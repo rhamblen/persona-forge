@@ -2,7 +2,23 @@
 
 > Design doc, written 2026-07-29. Folds the "LitRPG Interactive Simulation" proposal into
 > the existing Phase G (source ingestion) and Phase E (Character Studio) specs.
-> **Nothing here is built yet.**
+>
+> ## ⚠️ MOVED — this doc now lives in the Lore Forge repo
+>
+> Later the same day, `lore-forge` became **its own repo, GHCR image and version line**
+> rather than a scratch harness: <https://github.com/rhamblen/lore-forge>. The design of
+> record is now **`lore-forge/docs/design.md`**, which carries this text plus status
+> annotations. **Edit that copy, not this one.**
+>
+> **Built and released there as v0.1.0 (2026-07-29):** L0 (intake + parse to chaptered
+> text — JSON/JSONL, EPUB, PDF, TXT) and L1 (chunk + embed + index + cited-passage query).
+> L2 onward is still design.
+>
+> What this means for Persona Forge: the §2 framing of the harness as "temporary, designed
+> to be deleted" is softened — the four merge-first rules still hold and the shipped code
+> honours them, but the **L6 merge is now a decision to make when Phase E exists**, not a
+> foregone conclusion. Lore Forge could equally stay standalone with PF importing from its
+> file contract.
 
 ## 0. The two corrections that shape this doc
 
