@@ -1,87 +1,68 @@
-# v0.8.4 — Structural pose control
+# v0.8.5 — The pose library
 
-Poses in a set came out looking like each other. There were **three separable causes**, and it
-was worth pulling them apart before building anything:
+0.8.4 could drive a pose from *one* skeleton. This adds the set — **15 full-body starter
+poses**, pickable for a whole persona or for a single pose.
 
-1. **Every pose rendered at the same seed.** Same prompt, same LoRA, same seed, differing only
-   by a short expression suffix — diffusion is deterministic in the seed, so a near-identical
-   picture is the *expected* result, not a mystery.
-2. **Posture prose is weakly obeyed.** The checkpoint spends its budget on subject and style,
-   and a character LoRA pulls hard toward the stance its dataset over-represented.
-3. **Nothing constrained where the limbs went.** The prompt was the only lever on posture, and
-   it is the wrong kind of lever.
-
-This release fixes 1 and 3. Fixing 3 makes 2 stop mattering.
-
-## Three layers, two passes
-
-A pose is now three independently tunable layers:
-
-| Layer | What it sets | Mechanically | Re-tuning costs |
-|---|---|---|---|
-| **base** | prompt, character LoRA, seed | pass 1 | full re-render |
-| **body** | the skeleton, ControlNet strength and reach | conditioning on pass 1 | full re-render |
-| **face** | the emotion, and how hard it's pushed | pass 2 | **face pass only** |
-
-That asymmetry is the point. The face is the layer most likely to need another try — it carries
-the emotion, and its denoise is the dial nobody gets right first time — and it is the only one
-that can be re-run **without losing a body you already liked**. So the pass-1 image is kept, and
-**"Re-roll face" takes 14 seconds against ~104 for a full re-render**, with the pose held fixed.
-
-## Calibrated, not guessed
-
-Face-pass denoise defaults to **0.60** because that was measured on your box, not chosen from a
-range:
-
-- **0.45** — barely moves an expression. Not a useful default.
-- **0.60** — a genuinely furious, shouting face, identity intact.
-- **0.75** — the jaw disintegrates. Past the cliff.
-
-That independently reproduces the threshold the Track A expression workflow arrived at the hard
-way, which is about as much confidence as a setting like this gets.
-
-## Two things worth knowing before you run it
-
-**ControlNet beats posture prose outright.** A neutral standing skeleton, with a prompt asking
-for *"furious, shouting, leaning forward aggressively, one fist clenched and raised"*, renders a
-calm woman standing at rest. The skeleton wins. This is why the next stage binds a *different*
-skeleton per emotion tier — it isn't a convenience, it's the only way an emotion's body happens.
-
-**The face pass needs an anime-capable checkpoint.** On base SDXL the face comes out flat at
-every denoise setting. Confirmed as a 2×2 over {base SDXL, NoobAI} × {no character LoRA, LoRA at
-1.0}: the **checkpoint** is the deciding variable, and the character LoRA emotes perfectly well
-at full strength — it is not the limiting factor. The Poses tab now warns when a persona is
-pinned to a base checkpoint, because it presents as a broken feature rather than a wrong model.
-
-*(`sweetie pie` is currently on `!first/sd_xl_base_1.0` and will render flat faces until it
-moves to NoobAI-XL.)*
-
-## Setup
-
-Two OpenPose ControlNets are already installed on UR1 and **register themselves** on first use:
-
-| File | For |
+| | |
 |---|---|
-| `noobai-openpose-sdxl.safetensors` | NoobAI-XL / Illustrious — first choice |
-| `xinsir-openpose-sdxl-1.0.safetensors` | any other SDXL checkpoint |
+| **Standing** (10) | neutral · weight on one hip · arms crossed · hands on hips · arms overhead · shrugging · head down · covering face · fists clenched · arms flung wide |
+| **Grounded** (5) | kneeling upright · kneeling slumped · sitting legs to one side · hugging knees · lying down |
 
-On the **Poses** tab, open *Pose structure & face pass*: pick a ControlNet, click **Use built-in
-standing skeleton**, and Apply. Poses render prompt-only until both a ControlNet *and* a skeleton
-are set, so nothing changes until you opt in.
+These map onto the emotion tiers you already have: `despair` wants the slumped kneel,
+`elation` wants arms flung wide, `humiliation` wants covering face, `pride` wants hands on
+hips.
 
-## Coming next (stage H3b/H3c)
+## How to use it
 
-A **pose library** — many skeletons, bound per emotion tier, so `despair` gets a slumped kneel
-and `elation` gets arms flung wide — plus ControlNet in the **dataset build**, which is what
-teaches the LoRA what this character's body does at all.
+Poses tab → *Pose structure & face pass* → **Choose skeleton…** for the whole set, or open a
+pose and hit **Skeleton…** to override just that one. Thumbnails are rendered live from the
+stored keypoints, so what you see in the picker is the actual data.
+
+## Two things each entry carries
+
+**A prompt hint**, appended automatically. A skeleton encodes a grip but not the sword — and
+a front-view kneeling skeleton honestly looks like a short standing figure. The hint resolves
+both. It's why kneeling works at all.
+
+**A face-visible flag.** Head down, covering face and the slumped kneel switch the face pass
+**off by default** — FaceDetailer can't find a face that isn't there, and forcing it repaints
+a hand into something mangled. Your explicit per-pose setting still wins.
+
+## Two things measured along the way
+
+**Automatic pose extraction doesn't work for the poses that need it.** I generated five
+grounded poses and ran DWPose over them: **every one returned "no person detected"**, under
+two different detectors, including a clean hugging-knees figure. The only pose it detected
+was a standing one. DWPose is trained on photographic upright humans. So the library is
+hand-authored keypoints by design, not as a stopgap — importing from an image stays useful
+for standing references only.
+
+**A standing-only character LoRA overpowers the skeleton.** A kneeling skeleton at strength
+0.7 rendered a *standing* figure with the character LoRA loaded, and kneeled correctly at the
+same 0.7 with it removed — checked against the submitted graph, so the wiring was right. A
+LoRA that has never seen its character kneel fights any skeleton that isn't standing, and at
+moderate strength it wins.
+
+That is the case for the next stage in one measurement. **Since you're rebuilding the LoRA
+anyway, this is the moment**: stage H3c puts ControlNet into the *dataset build*, so the LoRA
+learns the character kneeling and sitting rather than only standing. Teach it first, then
+pose it — otherwise the only lever is raising ControlNet strength until identity suffers.
+
+## Coming next
+
+- **H3c — ControlNet in the dataset build.** The fix for the above, and the thing that makes
+  every other pose stage work properly.
+- **H3g — Blender as the skeleton source** *(new, your suggestion)*. Pose an armature, read
+  the bone positions, project to COCO-18. No render and no detector, so the headless
+  limitation on UR1 doesn't bite — and one 3D pose yields many skeletons from different
+  camera angles, which is variety no hand-authored set can match. Written up in
+  [`docs/pose-control.md`](docs/pose-control.md) §6.2.
 
 ## Upgrade notes
 
-Schema migration is automatic (seven nullable columns on `poses`, seven on `projects`, and the
-`controlnets` table). Existing poses render exactly as before until you opt in. **No compose
-change**, but the image gains a dependency (Pillow), so pull rather than reuse a cached layer.
+Automatic. The library seeds itself on first read; existing poses are untouched until you
+pick a skeleton. No compose change.
 
-**Image:** `ghcr.io/rhamblen/persona-forge:0.8.4`
+**Image:** `ghcr.io/rhamblen/persona-forge:0.8.5`
 
-Full detail in [`CHANGELOG.md`](CHANGELOG.md); design and measurements in
-[`docs/pose-control.md`](docs/pose-control.md).
+Full detail in [`CHANGELOG.md`](CHANGELOG.md).

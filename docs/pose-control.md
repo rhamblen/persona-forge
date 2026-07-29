@@ -181,6 +181,17 @@ mouth. Stored on the row so a good render can be reproduced exactly.
 made of — every entry is a whole-figure skeleton, and `framing` stops being a filter that
 excludes most of the set and becomes a record of what the skeleton actually covers.
 
+> **Shipped and verified 0.8.5.** All 15 authored as normalised COCO-18 keypoints in
+> `backend/app/skeleton.py`, checked as a rendered contact sheet, then four of them
+> (arms-raised, kneeling, hugging-knees, lying-down) **driven through ControlNet against a
+> real render** — each produced its pose correctly. Worth recording why that test mattered:
+> a front-view kneeling skeleton *looks* like a short standing figure, and I expected it to
+> fail. It didn't — the skeleton plus its `prompt_hint` resolved the ambiguity, which is
+> precisely the job `prompt_hint` exists to do. Two rounds of correction were needed first:
+> the head was sized too small (making every figure read ~10 heads tall) and kneeling had
+> ankles *below* the knees, which rendered as an ordinary standing pose. Occluded joints are
+> now `None`, as OpenPose itself reports them.
+
 Starter set, standing first because it is the workhorse:
 
 | Category | Entries |
@@ -355,6 +366,24 @@ Two entry points into the library:
 - **Harvest from a render** — the persona's own best sprite becomes a reusable skeleton.
   Cheap, and it turns a lucky render into a repeatable asset.
 
+> **Measured 2026-07-28: extraction does not work for the poses that need it most.** Five
+> grounded poses were rendered and run through `DWPreprocessor`; **every one returned
+> "no person detected"**, under both `yolox_l.torchscript.pt` and `yolo_nas_l_fp16.onnx`,
+> including a clean, well-formed hugging-knees figure. The only pose it detected was a
+> *standing* one — and that one only because the prompt had failed to produce the sitting
+> pose asked for. DWPose's body detector is trained on photographic upright humans and does
+> not fire on kneeling, curled or seated anime figures.
+>
+> Two consequences. **Hand-authored keypoints are the primary source for grounded poses**,
+> not a stopgap awaiting an importer. And **extraction stays in the plan for standing
+> references only** — it is genuinely useful for harvesting a good standing render, and
+> useless for the rest, so the UI should not present it as the general way to add a pose.
+>
+> A third thing fell out of the same run: two of the five prompts didn't produce the
+> requested pose at all (a "sitting" prompt rendered a standing figure; "lying down"
+> rendered an empty room). That is the premise of this whole document reproducing itself on
+> demand.
+
 ---
 
 ## 5. The traps, stated up front
@@ -437,6 +466,75 @@ Two specifics:
   habits. Building H3c means enrichment (H1c) inherits it for free.
 
 ---
+
+## 6.2 Blender as the skeleton source (stage H3g — planned)
+
+> User, 2026-07-29: *"could we use Blender to create the ControlNet body shapes… then use
+> that to feed back to Persona Forge and then create the sprite. Maybe a series of body
+> shapes and a batch process for building the sprites."*
+
+**Yes, and it is the right long-term source** — better than both hand-authoring and DWPose
+extraction, for a reason specific to this project's constraints.
+
+**The key insight: we don't need Blender to render anything.** The obstacle that has dogged
+the Blender track is that it runs headless on UR1 with no viewport screenshots. That
+limitation is irrelevant here, because a skeleton is **coordinates, not pixels**. Pose an
+armature, read the bone head/tail positions, project them through the camera with
+`bpy_extras.object_utils.world_to_camera_view`, and emit normalised COCO-18 keypoints
+straight into `pose_library`. No render, no detector, no image round-trip.
+
+That also sidesteps the failure measured in §4: DWPose can't find a kneeling anime figure,
+but Blender *knows* where the joints are — there is nothing to detect.
+
+**What it buys beyond convenience:**
+
+- **The camera-angle multiplier.** One 3D pose yields many 2D skeletons — front, 3/4, side,
+  low angle. 15 poses × 8 angles is 120 anatomically exact entries, and view variety is
+  precisely what a character LoRA lacks (§6.1). This is impossible by hand and is the
+  strongest argument for the whole approach.
+- **Guaranteed consistent scale and footing.** One camera and one floor plane makes the
+  §5 sprite-jitter risk structurally impossible instead of a discipline to maintain.
+- **Real occlusion.** A raycast per joint tells us which are hidden, so they can be emitted
+  as absent exactly as OpenPose reports them — and `face_visible` stops being a hand-set
+  flag and becomes a computed fact.
+
+**Mapping notes (the fiddly part).** VRM/Mixamo humanoid rigs map cleanly onto COCO-18,
+with two exceptions worth writing down now: OpenPose's `neck` is the **midpoint of the
+shoulders**, not a bone, and the eyes/ears must be derived as offsets along the head bone's
+local axes. Both are arithmetic, not judgement.
+
+**On "use a prompt to trigger Blender".** Worth separating two things. Having an LLM emit
+bone rotations directly is unreliable — models are poor at 3D joint angles, and a plausible
+sentence produces a dislocated shoulder. The better shape is a **curated set of rigged poses
+or Mixamo/BVH clips**, where the prompt *selects and blends* rather than invents, and the
+camera sweep supplies the variety. That keeps the LLM doing what it is good at (matching an
+intent to a named pose) and geometry doing what it is good at.
+
+**Batch.** Straightforward once the above exists, and it fits the existing machinery: pose
+set × camera angles → keypoint sets → `pose_library` → bind per tier → the `jobs.py` engine
+renders the sprite set unattended, exactly as `lora_build` already does.
+
+**Sequencing.** This is additive, not a rewrite: it is another *source* feeding the same
+`pose_library` table, so nothing built in H3b is wasted. Worth doing after H3c, because
+H3c is what makes the LoRA able to follow a skeleton at all (§6.3).
+
+## 6.3 Measured: a standing-only LoRA overpowers the skeleton
+
+**2026-07-28.** A kneeling skeleton, correctly staged and applied at strength 0.7, rendered
+a **standing** figure — with the character LoRA loaded. Removing the LoRA and changing
+nothing else produced a correct kneel at the same 0.7. Verified against the submitted graph,
+so this is not a wiring fault: ControlNet was present, pointed at the right skeleton file.
+
+**A character LoRA trained only on standing shots fights any skeleton that isn't standing,
+and at moderate strength it wins.** Two consequences:
+
+1. **This is the empirical case for H3c.** "Teach it first, then pose it" was an argument
+   in §6.1; it is now a measurement. A LoRA that has never seen its character kneel cannot
+   be made to kneel by conditioning alone without pushing strength high enough to damage
+   identity.
+2. **Until a persona's dataset contains posed shots**, expect to raise ControlNet strength
+   for large postural changes — and expect identity to suffer as you do. The honest fix is
+   the dataset, not the dial.
 
 ## 7. Open decisions — need the user before building
 

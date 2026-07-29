@@ -24,7 +24,7 @@ from typing import Any, Literal
 
 import httpx
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -508,6 +508,185 @@ async def controlnet_delete(cn_id: int) -> dict:
         ).rowcount
     logs.info("process", f"ControlNet '{row['name']}' unregistered", cleared_from=cleared)
     return {"deleted": cn_id, "cleared_from_personas": cleared}
+
+
+# --------------------------------------------------------------------------- #
+# Pose library (Phase H3b, 0.8.5)
+#
+# Global, like the concept-LoRA and ControlNet libraries: a skeleton is character-agnostic,
+# which is exactly why curating one set is worth the effort.
+#
+# Note on sourcing (measured, docs/pose-control.md §4): DWPose extraction returns "no person
+# detected" for kneeling/sitting/lying anime figures, so **hand-authored keypoints are the
+# primary source** for grounded poses rather than something to be replaced by an importer.
+# --------------------------------------------------------------------------- #
+
+POSE_CATEGORIES = ("standing", "grounded", "props", "monster")
+POSE_FRAMINGS = ("full", "cowboy", "bust")
+
+
+class PoseLibraryIn(BaseModel):
+    name: str
+    keypoints: list[Any]
+    category: str = "standing"
+    framing: str = "full"
+    prompt_hint: str = ""
+    prop_slot: str = ""
+    face_visible: bool = True
+    notes: str = ""
+    parent_id: int | None = None
+
+
+class PoseLibraryPatch(BaseModel):
+    name: str | None = None
+    keypoints: list[Any] | None = None
+    category: str | None = None
+    framing: str | None = None
+    prompt_hint: str | None = None
+    prop_slot: str | None = None
+    face_visible: bool | None = None
+    notes: str | None = None
+
+
+def seed_pose_library(force: bool = False) -> int:
+    """Write the shipped starter set into the DB. No-op once anything is in there.
+
+    Same posture as the emotion map: the shipped set is a **starting point, not the
+    vocabulary** — entries are editable and deletable, and a user who empties the library
+    deliberately does not get it silently refilled on the next boot.
+    """
+    with db.connect() as conn:
+        if force:
+            conn.execute("DELETE FROM pose_library WHERE source = 'builtin'")
+        elif conn.execute("SELECT 1 FROM pose_library LIMIT 1").fetchone():
+            return 0
+        added = 0
+        for p in skeleton.STARTER_POSES:
+            conn.execute(
+                """INSERT INTO pose_library
+                   (name, category, framing, keypoints_json, prompt_hint, face_visible, source)
+                   VALUES (?, ?, ?, ?, ?, ?, 'builtin')""",
+                (p["name"], p["category"], p["framing"], json.dumps(p["points"]),
+                 p.get("prompt_hint", ""), 1 if p.get("face_visible", True) else 0))
+            added += 1
+    if added:
+        logs.info("boot", f"seeded the pose library with {added} starter pose(s)")
+    return added
+
+
+def _pose_lib_dict(row: Any) -> dict[str, Any]:
+    d = dict(row)
+    try:
+        d["keypoints"] = json.loads(d.pop("keypoints_json") or "[]")
+    except json.JSONDecodeError:
+        d["keypoints"] = []
+    d["face_visible"] = bool(d["face_visible"])
+    return d
+
+
+@app.get("/api/pose-library")
+async def pose_library_list() -> dict:
+    seed_pose_library()
+    with db.connect() as conn:
+        rows = conn.execute("SELECT * FROM pose_library ORDER BY category, name").fetchall()
+    return {
+        "poses": [_pose_lib_dict(r) for r in rows],
+        "categories": list(POSE_CATEGORIES),
+        "framings": list(POSE_FRAMINGS),
+    }
+
+
+@app.get("/api/pose-library/{pose_id}/preview.png")
+async def pose_library_preview(pose_id: int, width: int = 208, height: int = 304) -> Any:
+    """Render an entry's skeleton at any size — the picker's thumbnail, and the proof that
+    what is stored is keypoints rather than a picture."""
+    if not (32 <= width <= 2048 and 32 <= height <= 2048):
+        raise HTTPException(400, "preview size out of range")
+    with db.connect() as conn:
+        row = conn.execute("SELECT keypoints_json FROM pose_library WHERE id = ?",
+                           (pose_id,)).fetchone()
+    if row is None:
+        raise HTTPException(404, "pose not found")
+    try:
+        png = skeleton.render_png(json.loads(row["keypoints_json"]), width, height)
+    except (json.JSONDecodeError, skeleton.SkeletonError) as exc:
+        raise HTTPException(422, f"stored keypoints are not renderable: {exc}") from exc
+    return Response(content=png, media_type="image/png",
+                    headers={"Cache-Control": "no-cache"})
+
+
+@app.post("/api/pose-library", status_code=201)
+async def pose_library_add(body: PoseLibraryIn) -> dict:
+    if body.category not in POSE_CATEGORIES:
+        raise HTTPException(400, f"category must be one of {', '.join(POSE_CATEGORIES)}")
+    if body.framing not in POSE_FRAMINGS:
+        raise HTTPException(400, f"framing must be one of {', '.join(POSE_FRAMINGS)}")
+    try:
+        skeleton.normalise_points(body.keypoints)      # validate before storing
+    except skeleton.SkeletonError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    source = "edited" if body.parent_id else "imported"
+    with db.connect() as conn:
+        cur = conn.execute(
+            """INSERT INTO pose_library (name, category, framing, keypoints_json, prompt_hint,
+                                         prop_slot, face_visible, source, parent_id, notes)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (body.name, body.category, body.framing, json.dumps(body.keypoints),
+             body.prompt_hint, body.prop_slot, 1 if body.face_visible else 0,
+             source, body.parent_id, body.notes))
+        row = conn.execute("SELECT * FROM pose_library WHERE id = ?", (cur.lastrowid,)).fetchone()
+    logs.info("process", f"pose '{body.name}' added to the library", kind=body.category)
+    return {"pose": _pose_lib_dict(row)}
+
+
+@app.patch("/api/pose-library/{pose_id}")
+async def pose_library_update(pose_id: int, body: PoseLibraryPatch) -> dict:
+    fields = {k: v for k, v in body.model_dump().items() if v is not None}
+    if not fields:
+        raise HTTPException(400, "nothing to update")
+    if "category" in fields and fields["category"] not in POSE_CATEGORIES:
+        raise HTTPException(400, f"category must be one of {', '.join(POSE_CATEGORIES)}")
+    if "framing" in fields and fields["framing"] not in POSE_FRAMINGS:
+        raise HTTPException(400, f"framing must be one of {', '.join(POSE_FRAMINGS)}")
+    if "keypoints" in fields:
+        try:
+            skeleton.normalise_points(fields["keypoints"])
+        except skeleton.SkeletonError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        fields["keypoints_json"] = json.dumps(fields.pop("keypoints"))
+    if "face_visible" in fields:
+        fields["face_visible"] = 1 if fields["face_visible"] else 0
+    with db.connect() as conn:
+        if conn.execute("SELECT 1 FROM pose_library WHERE id = ?", (pose_id,)).fetchone() is None:
+            raise HTTPException(404, "pose not found")
+        sets = ", ".join(f"{k} = ?" for k in fields)
+        conn.execute(f"UPDATE pose_library SET {sets} WHERE id = ?", (*fields.values(), pose_id))
+        row = conn.execute("SELECT * FROM pose_library WHERE id = ?", (pose_id,)).fetchone()
+    return {"pose": _pose_lib_dict(row)}
+
+
+@app.delete("/api/pose-library/{pose_id}")
+async def pose_library_delete(pose_id: int) -> dict:
+    """Remove an entry. Poses already rendered from it keep their staged skeleton — the
+    skeleton image lives in ComfyUI's input, so curating the library can't invalidate a
+    render that already happened."""
+    with db.connect() as conn:
+        row = conn.execute("SELECT * FROM pose_library WHERE id = ?", (pose_id,)).fetchone()
+        if row is None:
+            raise HTTPException(404, "pose not found")
+        conn.execute("DELETE FROM pose_library WHERE id = ?", (pose_id,))
+        cleared = conn.execute(
+            "UPDATE poses SET pose_library_id = NULL WHERE pose_library_id = ?",
+            (pose_id,)).rowcount
+    logs.info("process", f"pose '{row['name']}' removed from the library", unlinked=cleared)
+    return {"deleted": pose_id, "unlinked_poses": cleared}
+
+
+@app.post("/api/pose-library/reset")
+async def pose_library_reset() -> dict:
+    """Restore the shipped starter set, replacing the built-ins but keeping user entries."""
+    added = seed_pose_library(force=True)
+    return {"restored": added}
 
 
 @app.get("/api/workflows")
@@ -2291,7 +2470,8 @@ async def _reconcile_poses(project_id: int) -> None:
                 "UPDATE poses SET base_filename = ?, base_subfolder = ?, filename = ?, "
                 "subfolder = ? WHERE id = ?",
                 (out["filename"], out["subfolder"], out["filename"], out["subfolder"], job["id"]))
-            face_cfg = _pose_face_cfg(conn, project_id, job)
+            face_cfg = _pose_face_cfg(conn, project_id, job,
+                                      _pose_library_entry(conn, project_id, job))
             started = False
             if face_cfg and slug:
                 if version is None:
@@ -2400,15 +2580,39 @@ def _pose_cn_cfg(conn, project_id: int, pose_row: Any) -> dict[str, Any] | None:
     }
 
 
-def _pose_face_cfg(conn, project_id: int, pose_row: Any) -> dict[str, Any] | None:
-    """Face-pass settings for one pose, or None when the pass is switched off."""
+def _pose_library_entry(conn, project_id: int, pose_row: Any) -> dict[str, Any] | None:
+    """The library entry behind this pose's skeleton — per-pose first, else the persona's."""
+    lib_id = pose_row["pose_library_id"]
+    if lib_id is None:
+        proj = conn.execute("SELECT pose_library_id FROM projects WHERE id = ?",
+                            (project_id,)).fetchone()
+        lib_id = proj["pose_library_id"] if proj else None
+    if lib_id is None:
+        return None
+    row = conn.execute("SELECT * FROM pose_library WHERE id = ?", (lib_id,)).fetchone()
+    return _pose_lib_dict(row) if row else None
+
+
+def _pose_face_cfg(conn, project_id: int, pose_row: Any,
+                   entry: dict[str, Any] | None = None) -> dict[str, Any] | None:
+    """Face-pass settings for one pose, or None when the pass is switched off.
+
+    An explicit per-pose setting always wins. Otherwise a skeleton that hides the face
+    (`face_visible = false` — head down, covering face) turns the pass off by default:
+    FaceDetailer cannot find a face that isn't there, and forcing it repaints a hand into
+    something mangled. The default should not fight the pose.
+    """
     proj = conn.execute(
         "SELECT pose_face_pass, pose_face_denoise FROM projects WHERE id = ?",
         (project_id,)).fetchone()
     if not proj:
         return None
     enabled = pose_row["face_pass"]
-    if (proj["pose_face_pass"] if enabled is None else enabled) != 1:
+    if enabled is None:
+        if entry is not None and not entry.get("face_visible", True):
+            return None
+        enabled = proj["pose_face_pass"]
+    if enabled != 1:
         return None
     denoise = pose_row["face_denoise"]
     return {"denoise": proj["pose_face_denoise"] if denoise is None else denoise}
@@ -2437,10 +2641,18 @@ async def _queue_pose(conn, project_id: int, slug: str, version: dict, pose_row:
     what a gesture/pose LoRA is for.
     """
     seed = pose_row["seed"] or _pose_seed(version.get("seed") or 0, pose_row["id"])
+    entry = _pose_library_entry(conn, project_id, pose_row)
+    # A skeleton fixes where the limbs go but says nothing about what they are doing —
+    # "holding a sword" is joint positions plus an object that only the prompt can supply.
+    # Without this the figure grips thin air (docs/pose-control.md §3.6).
+    modifier = pose_row["modifier"] or ""
+    hint = (entry or {}).get("prompt_hint") or ""
+    if hint and hint.lower() not in modifier.lower():
+        modifier = f"{modifier}, {hint}" if modifier else hint
     params = {
         **_version_prompt_params(version),
         "seed": seed,
-        "expression": pose_row["modifier"] or None,
+        "expression": modifier or None,
         "output_prefix": f"{slug}/images/pose_{pose_row['id']}",
     }
     stack = _parse_lora_stack(version.get("lora_stack_json"))
@@ -2822,6 +3034,8 @@ async def pose_preset(project_id: int, body: PresetRequest) -> dict:
 class PoseUpdate(BaseModel):
     name: str | None = None
     modifier: str | None = None
+    # '' clears the per-pose skeleton, falling back to the persona's default (Phase H3b).
+    skeleton_ref: str | None = None
 
 
 @app.patch("/api/projects/{project_id}/poses/{pose_id}")
@@ -2831,6 +3045,13 @@ async def pose_update(project_id: int, pose_id: int, body: PoseUpdate) -> dict:
         sets.append("name = ?"); vals.append(body.name.strip())
     if body.modifier is not None:
         sets.append("modifier = ?"); vals.append(body.modifier.strip())
+    if body.skeleton_ref is not None:
+        ref = body.skeleton_ref.strip()
+        sets.append("skeleton_ref = ?"); vals.append(ref)
+        # Clearing the skeleton clears its provenance too, or the grid would keep claiming
+        # the pose came from a library entry it no longer uses.
+        if not ref:
+            sets.append("pose_library_id = NULL")
     if not sets:
         raise HTTPException(422, "nothing to update")
     vals += [pose_id, project_id]
@@ -3053,9 +3274,11 @@ async def set_pose_controlnet(project_id: int, body: PoseControlNetRequest) -> d
 
 
 class SkeletonRequest(BaseModel):
+    # 'library' renders a stored entry at the target size — the normal path since H3b.
     # 'builtin' renders the shipped standing skeleton; 'image' takes a base64 PNG so a
-    # skeleton exported from anywhere else can be used without a multipart dependency.
-    mode: str = "builtin"
+    # skeleton authored elsewhere can be used without a multipart dependency.
+    mode: str = "library"
+    library_id: int | None = None
     image_b64: str = ""
     width: int = Field(default=832, ge=256, le=2048)
     height: int = Field(default=1216, ge=256, le=2048)
@@ -3072,7 +3295,23 @@ async def set_pose_skeleton(project_id: int, body: SkeletonRequest) -> dict:
     """
     detail = await get_project(project_id)
     slug = detail["project"]["slug"]
-    if body.mode == "builtin":
+    lib_id = None
+    if body.mode == "library":
+        if body.library_id is None:
+            raise HTTPException(400, "library_id is required for mode 'library'")
+        with db.connect() as conn:
+            row = conn.execute("SELECT * FROM pose_library WHERE id = ?",
+                               (body.library_id,)).fetchone()
+        if row is None:
+            raise HTTPException(404, "pose not found in the library")
+        try:
+            # Rendered fresh at the target size — this is why keypoints are stored rather
+            # than a picture: one entry serves every resolution without rescaling artefacts.
+            png = skeleton.render_png(json.loads(row["keypoints_json"]), body.width, body.height)
+        except (json.JSONDecodeError, skeleton.SkeletonError) as exc:
+            raise HTTPException(422, f"stored keypoints are not renderable: {exc}") from exc
+        label, lib_id = row["name"], row["id"]
+    elif body.mode == "builtin":
         png = skeleton.render_png(skeleton.STANDING_NEUTRAL, body.width, body.height)
         label = "standing-neutral"
     elif body.mode == "image":
@@ -3085,7 +3324,7 @@ async def set_pose_skeleton(project_id: int, body: SkeletonRequest) -> dict:
             raise HTTPException(400, "image_b64 is empty")
         label = "uploaded"
     else:
-        raise HTTPException(400, "mode must be 'builtin' or 'image'")
+        raise HTTPException(400, "mode must be 'library', 'builtin' or 'image'")
 
     target = f"pose_{body.pose_id}" if body.pose_id else "default"
     up = await comfy.upload_image(png, f"{slug}_{target}.png", f"pf-skeletons-{slug}")
@@ -3093,18 +3332,20 @@ async def set_pose_skeleton(project_id: int, body: SkeletonRequest) -> dict:
 
     with db.connect() as conn:
         if body.pose_id:
-            cur = conn.execute("UPDATE poses SET skeleton_ref = ? WHERE id = ? AND project_id = ?",
-                               (ref, body.pose_id, project_id))
+            cur = conn.execute(
+                "UPDATE poses SET skeleton_ref = ?, pose_library_id = ? "
+                "WHERE id = ? AND project_id = ?", (ref, lib_id, body.pose_id, project_id))
             if cur.rowcount == 0:
                 raise HTTPException(404, "pose not found")
         else:
-            cur = conn.execute("UPDATE projects SET pose_skeleton = ? WHERE id = ?",
-                               (ref, project_id))
+            cur = conn.execute(
+                "UPDATE projects SET pose_skeleton = ?, pose_library_id = ? WHERE id = ?",
+                (ref, lib_id, project_id))
             if cur.rowcount == 0:
                 raise HTTPException(404, "project not found")
     logs.info("process", f"pose skeleton set ({label})", project_id=project_id,
-              pose_id=body.pose_id, ref=ref)
-    return {"skeleton": ref, "source": label, "pose_id": body.pose_id}
+              pose_id=body.pose_id, ref=ref, library_id=lib_id)
+    return {"skeleton": ref, "source": label, "pose_id": body.pose_id, "library_id": lib_id}
 
 
 @app.post("/api/projects/{project_id}/poses/{pose_id}/face-pass")
@@ -3130,7 +3371,8 @@ async def pose_face_reroll(project_id: int, pose_id: int, denoise: float | None 
             raise HTTPException(409, "this pose is still rendering")
         if not row["base_filename"]:
             raise HTTPException(400, "no base render to work from — generate this pose first")
-        face_cfg = _pose_face_cfg(conn, project_id, row)
+        face_cfg = _pose_face_cfg(conn, project_id, row,
+                                  _pose_library_entry(conn, project_id, row))
         if denoise is not None:
             face_cfg = {"denoise": denoise}
         elif face_cfg is None:

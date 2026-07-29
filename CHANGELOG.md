@@ -9,6 +9,57 @@ Every version below is a **published GitHub Release** with a matching
 
 ---
 
+## [0.8.5] — 2026-07-29
+
+**The pose library — a skeleton per pose, chosen from a curated set.** (Phase H, stage H3b.)
+
+0.8.4 could drive a pose from *one* skeleton. This adds the set: 15 full-body starter poses
+stored as **normalised COCO-18 keypoints**, pickable per persona or per individual pose.
+
+### Added
+- **Pose library** (`pose_library`, `/api/pose-library` CRUD + reset) — global, because a
+  skeleton is character-agnostic. Seeded on first read with **10 standing** poses (neutral,
+  weight on one hip, arms crossed, hands on hips, arms overhead, shrugging, head down,
+  covering face, fists clenched, arms flung wide) and **5 grounded** (kneeling upright,
+  kneeling slumped, sitting legs to one side, hugging knees, lying down).
+- **Skeleton picker** — a thumbnail grid, filterable by category, on the Poses tab (for the
+  whole set) and in the pose editor (for one pose). Thumbnails are rendered **server-side
+  from the stored keypoints** at request time, so the grid shows the data, not a cached PNG.
+- **`prompt_hint` per entry**, appended to the render prompt automatically. A skeleton
+  encodes a grip but not the sword — without the hint the figure holds thin air. It is also
+  what resolves front-view ambiguity: a kneeling skeleton looks like a short standing one.
+- **`face_visible` per entry** — poses that hide the face (head down, covering face, kneeling
+  slumped) switch the face pass **off by default**, because FaceDetailer either no-ops or
+  repaints a hand into a mess. An explicit per-pose setting still wins.
+- `GET /api/pose-library/{id}/preview.png` renders any entry at any size.
+
+### Changed
+- `poses.pose_library_id` and `projects.pose_library_id` record which entry produced a
+  skeleton, so provenance survives and an entry can be re-rendered at a different size.
+- `PATCH .../poses/{id}` accepts `skeleton_ref`; clearing it clears the library link too.
+
+### Notes
+- **Keypoints, not pictures.** Entries are resolution-independent and editable — the
+  groundwork for the H3f stickman editor, and why the picker can render thumbnails at all.
+- **Measured: DWPose extraction cannot source these poses.** Five grounded poses were
+  rendered and run through `DWPreprocessor`; **every one returned "no person detected"**
+  under two different detectors, including a clean hugging-knees figure. The only pose it
+  detected was standing. Hand-authored keypoints are therefore the primary source for
+  grounded poses, not a stopgap — extraction stays useful for standing references only.
+- **Measured: a standing-only character LoRA overpowers the skeleton.** A kneeling skeleton
+  at strength 0.7 renders standing *with* the LoRA and kneels correctly *without* it,
+  verified against the submitted graph. This is the empirical case for stage H3c (ControlNet
+  in the dataset build): a LoRA that has never seen its character kneel can't be conditioned
+  into kneeling without pushing strength far enough to cost identity.
+- Authoring the set took two rounds of correction, both caught by rendering a contact sheet
+  before shipping: the head was sized too small (every figure read ~10 heads tall) and
+  kneeling had ankles *below* the knees, which rendered as an ordinary standing pose.
+  Occluded joints are now `None`, as OpenPose itself reports them.
+- **Verified** against live ComfyUI: seeding and its idempotence, the CRUD guards
+  (400/404/422), preview rendering, binding at both persona and pose level, `prompt_hint`
+  reaching the prompt, `face_visible` suppressing the face pass (`pending → done` with no
+  `facepass` stage), and the picker driven in a browser with all 15 thumbnails loading.
+
 ## [0.8.4] — 2026-07-28
 
 **Structural pose control — ControlNet drives the body, a second pass drives the face.**

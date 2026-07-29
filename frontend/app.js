@@ -1339,9 +1339,98 @@ async function setSkeleton(body, label) {
   } catch (e) { msg($("poses-msg"), e.message, "bad"); }
 }
 
-$("pose-skeleton-builtin").addEventListener("click", () => {
+// --- pose library picker -----------------------------------------------------
+let poseLibCache = null;
+let skelTarget = null;      // null = the persona default, else a pose id
+let skelFilter = "";
+
+async function loadPoseLibrary(force) {
+  if (poseLibCache && !force) return poseLibCache;
+  poseLibCache = (await api("/api/pose-library")).poses || [];
+  return poseLibCache;
+}
+
+function renderSkelGrid() {
+  const grid = $("skel-grid");
+  const poses = poseLibCache.filter((p) => !skelFilter || p.category === skelFilter);
+  grid.innerHTML = poses.map((p) => `
+    <button type="button" class="skel-card" data-id="${p.id}" title="${esc(p.prompt_hint || p.name)}">
+      <img src="/api/pose-library/${p.id}/preview.png?width=132&height=193" alt="${esc(p.name)}" />
+      <span class="skel-name">${esc(p.name)}</span>
+      ${p.face_visible ? "" : '<span class="skel-tag">face hidden</span>'}
+    </button>`).join("") || '<p class="muted">Nothing in this category.</p>';
+  const cats = ["", ...new Set(poseLibCache.map((p) => p.category))];
+  $("skel-filter").innerHTML = cats.map((c) =>
+    `<button type="button" class="chip${c === skelFilter ? " sel" : ""}" data-cat="${esc(c)}">${
+      c ? esc(c) : "all"}</button>`).join("");
+}
+
+async function openSkeletonPicker(poseId, label) {
   if (!state.projectId) return;
-  setSkeleton({ mode: "builtin", width: 832, height: 1216 }, "built-in standing");
+  skelTarget = poseId || null;
+  $("skel-modal-title").textContent = poseId
+    ? `Choose a skeleton — ${label}`
+    : "Choose a skeleton for the whole set";
+  msg($("skel-msg"), "");
+  $("skel-modal").hidden = false;
+  try {
+    await loadPoseLibrary();
+    renderSkelGrid();
+  } catch (e) { msg($("skel-msg"), e.message, "bad"); }
+}
+
+function closeSkeletonPicker() { $("skel-modal").hidden = true; skelTarget = null; }
+
+$("skel-cancel").addEventListener("click", closeSkeletonPicker);
+$("skel-modal").addEventListener("click", (e) => {
+  if (e.target === $("skel-modal")) closeSkeletonPicker();
+});
+
+$("skel-filter").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-cat]");
+  if (!b) return;
+  skelFilter = b.dataset.cat;
+  renderSkelGrid();
+});
+
+$("skel-grid").addEventListener("click", async (e) => {
+  const card = e.target.closest(".skel-card");
+  if (!card) return;
+  const id = Number(card.dataset.id);
+  const entry = poseLibCache.find((p) => p.id === id);
+  const body = { mode: "library", library_id: id, width: 832, height: 1216 };
+  if (skelTarget) body.pose_id = skelTarget;
+  const wasPose = skelTarget;
+  closeSkeletonPicker();
+  await setSkeleton(body, entry ? entry.name : "library pose");
+  if (wasPose) loadPoses();
+});
+
+$("skel-clear").addEventListener("click", async () => {
+  const poseId = skelTarget;
+  closeSkeletonPicker();
+  try {
+    if (poseId) {
+      await api(`/api/projects/${state.projectId}/poses/${poseId}`, {
+        method: "PATCH", body: JSON.stringify({ skeleton_ref: "" }),
+      });
+      loadPoses();
+    } else {
+      await api(`/api/projects/${state.projectId}/pose-controlnet`, {
+        method: "POST", body: JSON.stringify({ controlnet: "" }),
+      });
+      loadPoseConfig();
+    }
+    msg($("poses-msg"), "Skeleton cleared — this pose renders from the prompt alone.", "ok");
+  } catch (e) { msg($("poses-msg"), e.message, "bad"); }
+});
+
+$("pose-skeleton-lib").addEventListener("click", () => openSkeletonPicker(null));
+
+$("pose-ed-skel").addEventListener("click", () => {
+  if (selectedPoseId == null) return;
+  const p = (posesCache || []).find((x) => x.id === selectedPoseId);
+  openSkeletonPicker(selectedPoseId, p ? p.name : "");
 });
 
 $("pose-skeleton-upload").addEventListener("click", () => $("pose-skeleton-file").click());

@@ -147,16 +147,195 @@ def render_png(points: Iterable[Any], width: int, height: int,
     return buf.getvalue()
 
 
-# A single neutral standing pose, used to prove the render path before the pose library
-# lands (docs/pose-control.md, H3b). Normalised against a portrait canvas: full figure,
-# head near the top, feet just above the bottom edge.
-STANDING_NEUTRAL: list[list[float]] = [
-    [0.500, 0.100],  # nose
-    [0.500, 0.170],  # neck
-    [0.385, 0.180], [0.360, 0.305], [0.350, 0.425],   # right arm
-    [0.615, 0.180], [0.640, 0.305], [0.650, 0.425],   # left arm
-    [0.440, 0.495], [0.435, 0.715], [0.430, 0.940],   # right leg
-    [0.560, 0.495], [0.565, 0.715], [0.570, 0.940],   # left leg
-    [0.482, 0.090], [0.518, 0.090],                   # eyes
-    [0.462, 0.096], [0.538, 0.096],                   # ears
+# --------------------------------------------------------------------------- #
+# The starter pose library (docs/pose-control.md §3.5)
+#
+# All full-body, all authored against a portrait canvas at a **consistent scale and
+# footing** — a set whose figures sit at different sizes makes SillyTavern jitter as it
+# swaps sprites, so this is a property of the library, not of any one entry.
+#
+# `framing` records what the skeleton covers, `face_visible` drives the face pass default
+# (FaceDetailer cannot find a face that is hidden or turned away, and forcing it there
+# repaints a hand into something mangled), and `prompt_hint` carries anything the skeleton
+# implies but cannot encode — a grip says nothing about *what* is being held.
+# --------------------------------------------------------------------------- #
+
+# Head geometry, sized against the figure rather than eyeballed. A standing figure spanning
+# y 0.05..0.95 is ~7.5 heads tall, which puts the head at ~0.118 of canvas height and ~0.125
+# of width — so the ears sit at x 0.500 ± 0.058, not the much narrower spread that a first
+# pass tends to produce. Getting this wrong makes every pose read as a 10-head giant.
+_NOSE = [0.500, 0.115]
+_NECK = [0.500, 0.185]
+_HEAD_UP = [[0.470, 0.100], [0.530, 0.100],    # eyes
+            [0.442, 0.108], [0.558, 0.108]]    # ears
+
+_LEGS_STRAIGHT = [[0.440, 0.505], [0.435, 0.720], [0.430, 0.942],
+                  [0.560, 0.505], [0.565, 0.720], [0.570, 0.942]]
+_ARMS_RELAXED = [[0.385, 0.195], [0.360, 0.318], [0.350, 0.438],
+                 [0.615, 0.195], [0.640, 0.318], [0.650, 0.438]]
+
+
+def _standing(arms: list[list[float]], head: list[list[float]] | None = None,
+              legs: list[list[float]] | None = None,
+              nose: list[float] | None = None,
+              neck: list[float] | None = None) -> list[list[float]]:
+    """A standing figure varying only the parts a pose actually changes."""
+    return ([nose or list(_NOSE), neck or list(_NECK)]
+            + arms + (legs or _LEGS_STRAIGHT) + (head or _HEAD_UP))
+
+
+STANDING_NEUTRAL: list[list[float]] = _standing(_ARMS_RELAXED)
+
+
+STARTER_POSES: list[dict[str, Any]] = [
+    {
+        "name": "Standing — neutral", "category": "standing", "framing": "full",
+        "face_visible": True, "prompt_hint": "", "points": STANDING_NEUTRAL,
+    },
+    {
+        "name": "Standing — weight on one hip", "category": "standing", "framing": "full",
+        "face_visible": True, "prompt_hint": "relaxed contrapposto stance",
+        # Hips tilt one way and shoulders the other — the whole point of contrapposto.
+        "points": _standing(
+            [[0.393, 0.201], [0.370, 0.323], [0.362, 0.443],
+             [0.622, 0.191], [0.645, 0.313], [0.652, 0.433]],
+            legs=[[0.445, 0.497], [0.452, 0.717], [0.470, 0.942],
+                  [0.560, 0.515], [0.548, 0.725], [0.530, 0.947]]),
+    },
+    {
+        "name": "Standing — arms crossed", "category": "standing", "framing": "full",
+        "face_visible": True, "prompt_hint": "arms folded across the chest",
+        # Forearms cross the midline, so each wrist ends up on the far side of the body.
+        "points": _standing(
+            [[0.385, 0.200], [0.352, 0.333], [0.560, 0.347],
+             [0.615, 0.200], [0.648, 0.333], [0.440, 0.363]]),
+    },
+    {
+        "name": "Standing — hands on hips", "category": "standing", "framing": "full",
+        "face_visible": True, "prompt_hint": "hands on hips",
+        "points": _standing(
+            [[0.385, 0.195], [0.330, 0.345], [0.425, 0.492],
+             [0.615, 0.195], [0.670, 0.345], [0.575, 0.492]]),
+    },
+    {
+        "name": "Standing — arms raised overhead", "category": "standing", "framing": "full",
+        "face_visible": True, "prompt_hint": "both arms raised above the head",
+        "points": _standing(
+            [[0.390, 0.212], [0.338, 0.128], [0.372, 0.038],
+             [0.610, 0.212], [0.662, 0.128], [0.628, 0.038]],
+            head=[[0.470, 0.118], [0.530, 0.118], [0.442, 0.126], [0.558, 0.126]],
+            nose=[0.500, 0.133], neck=[0.500, 0.202]),
+    },
+    {
+        "name": "Standing — shrugging", "category": "standing", "framing": "full",
+        "face_visible": True, "prompt_hint": "shrugging, palms turned up",
+        # Shoulders ride up toward the ears and the forearms turn outward.
+        "points": _standing(
+            [[0.392, 0.166], [0.348, 0.302], [0.298, 0.386],
+             [0.608, 0.166], [0.652, 0.302], [0.702, 0.386]],
+            head=[[0.470, 0.108], [0.530, 0.108], [0.442, 0.116], [0.558, 0.116]],
+            nose=[0.500, 0.123], neck=[0.500, 0.190]),
+    },
+    {
+        "name": "Standing — head down", "category": "standing", "framing": "full",
+        "face_visible": False, "prompt_hint": "head bowed, looking down",
+        "points": _standing(
+            [[0.385, 0.203], [0.362, 0.325], [0.352, 0.445],
+             [0.615, 0.203], [0.638, 0.325], [0.648, 0.445]],
+            head=[[0.474, 0.152], [0.526, 0.152], [0.446, 0.138], [0.554, 0.138]],
+            nose=[0.500, 0.162], neck=[0.500, 0.193]),
+    },
+    {
+        "name": "Standing — covering face", "category": "standing", "framing": "full",
+        "face_visible": False, "prompt_hint": "both hands covering the face",
+        "points": _standing(
+            [[0.388, 0.207], [0.398, 0.318], [0.466, 0.162],
+             [0.612, 0.207], [0.602, 0.318], [0.534, 0.162]]),
+    },
+    {
+        "name": "Standing — fists clenched at sides", "category": "standing", "framing": "full",
+        "face_visible": True, "prompt_hint": "fists clenched at their sides",
+        "points": _standing(
+            [[0.388, 0.197], [0.372, 0.322], [0.368, 0.462],
+             [0.612, 0.197], [0.628, 0.322], [0.632, 0.462]]),
+    },
+    {
+        "name": "Standing — arms flung wide", "category": "standing", "framing": "full",
+        "face_visible": True, "prompt_hint": "arms thrown wide open",
+        "points": _standing(
+            [[0.388, 0.200], [0.290, 0.246], [0.192, 0.160],
+             [0.612, 0.200], [0.710, 0.246], [0.808, 0.160]]),
+    },
+    {
+        "name": "Kneeling — upright", "category": "grounded", "framing": "full",
+        "face_visible": True, "prompt_hint": "kneeling upright on both knees",
+        # Kneeling is a shorter figure, so the head sits well below where it stands, and
+        # the knee — not the ankle — is the ground contact. The lower leg folds back behind
+        # the body, where a front view can't see it: the ankles are **absent**, exactly as
+        # OpenPose would report an occluded joint. Putting them below the knees instead is
+        # what made the first draft of this pose render as an ordinary standing figure.
+        "points": [
+            [0.500, 0.345], [0.500, 0.415],
+            [0.398, 0.428], [0.374, 0.538], [0.366, 0.648],
+            [0.602, 0.428], [0.626, 0.538], [0.634, 0.648],
+            [0.452, 0.726], [0.444, 0.940], None,
+            [0.548, 0.726], [0.556, 0.940], None,
+            [0.470, 0.330], [0.530, 0.330], [0.442, 0.338], [0.558, 0.338],
+        ],
+    },
+    {
+        "name": "Kneeling — slumped", "category": "grounded", "framing": "full",
+        "face_visible": False, "prompt_hint": "kneeling, slumped, head bowed, arms slack",
+        "points": [
+            [0.500, 0.432], [0.500, 0.478],
+            [0.410, 0.492], [0.386, 0.596], [0.398, 0.716],
+            [0.590, 0.492], [0.614, 0.596], [0.602, 0.716],
+            [0.454, 0.766], [0.446, 0.944], None,
+            [0.546, 0.766], [0.554, 0.944], None,
+            [0.472, 0.424], [0.528, 0.424], [0.444, 0.410], [0.556, 0.410],
+        ],
+    },
+    {
+        "name": "Sitting — on the floor, legs to one side", "category": "grounded",
+        "framing": "full", "face_visible": True,
+        "prompt_hint": "sitting on the floor, legs folded to one side",
+        # Thigh out to one side, shin folding *back* underneath — without the fold this
+        # reads as legs stretched straight out, which is a different pose entirely.
+        "points": [
+            [0.468, 0.408], [0.476, 0.478],
+            [0.394, 0.492], [0.370, 0.604], [0.390, 0.718],
+            [0.580, 0.492], [0.602, 0.604], [0.598, 0.712],
+            [0.450, 0.848], [0.644, 0.876], [0.556, 0.940],
+            [0.540, 0.860], [0.694, 0.912], [0.602, 0.960],
+            [0.440, 0.394], [0.498, 0.396], [0.412, 0.402], [0.526, 0.404],
+        ],
+    },
+    {
+        "name": "Sitting — hugging knees", "category": "grounded", "framing": "full",
+        "face_visible": True, "prompt_hint": "sitting on the floor hugging their knees",
+        # Knees come up in *front* of the hips, so knee y is above hip y here, and the feet
+        # tuck back in close underneath.
+        "points": [
+            [0.500, 0.412], [0.500, 0.478],
+            [0.418, 0.492], [0.388, 0.608], [0.522, 0.700],
+            [0.582, 0.492], [0.612, 0.608], [0.478, 0.700],
+            [0.462, 0.878], [0.418, 0.694], [0.478, 0.872],
+            [0.542, 0.878], [0.586, 0.694], [0.526, 0.872],
+            [0.470, 0.398], [0.530, 0.398], [0.442, 0.406], [0.558, 0.406],
+        ],
+    },
+    {
+        "name": "Lying down — on their side", "category": "grounded", "framing": "full",
+        "face_visible": True, "prompt_hint": "lying on their side on the ground",
+        # A horizontal figure: the spine runs left-to-right rather than top-to-bottom, so
+        # it has to be authored across the frame or it renders as a small diagonal smear.
+        "points": [
+            [0.150, 0.812], [0.258, 0.818],
+            [0.268, 0.788], [0.318, 0.876], [0.412, 0.906],
+            [0.272, 0.848], [0.344, 0.912], [0.452, 0.900],
+            [0.552, 0.816], [0.700, 0.842], [0.856, 0.862],
+            [0.558, 0.856], [0.706, 0.886], [0.860, 0.906],
+            [0.166, 0.786], [0.206, 0.784], [0.222, 0.804], [0.238, 0.800],
+        ],
+    },
 ]

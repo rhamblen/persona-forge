@@ -1,5 +1,20 @@
 # AI Context — cold-start orientation
 
+> **2026-07-29 — v0.8.5: the pose library (H3b).** `pose_library` holds **normalised COCO-18
+> keypoints**, not images — `skeleton.py` renders them at any size, which is why the picker has
+> thumbnails and why the H3f editor is possible. Seeded lazily from `skeleton.STARTER_POSES`
+> and **not reseeded once anything exists** (emptying it deliberately must stay empty). Two
+> per-entry fields do real work: `prompt_hint` is appended to the render prompt (a skeleton
+> encodes a grip but not the sword, and it disambiguates a front-view kneel from a short
+> stand), and `face_visible=false` turns the face pass off by default — an explicit per-pose
+> setting still wins. Two measurements not to re-derive: **DWPose returns "no person detected"
+> for every kneeling/sitting/lying anime figure** (two detectors tried), so hand-authored
+> keypoints are the primary source and extraction is standing-only; and **a standing-only
+> character LoRA overpowers the skeleton** — a kneeling skeleton at strength 0.7 renders
+> standing with the LoRA and kneels without it, which is the empirical case for H3c. When
+> authoring poses, render a contact sheet first: head-size and ankle-below-knee errors both
+> shipped past code review and were only visible as pictures. Occluded joints are `None`.
+
 > **2026-07-28 — v0.8.4: structural pose control (H3a).** Pose renders are now **two passes
 > carrying three tunable layers** — *base* (prompt/LoRA/seed) and *body* (skeleton) both settle
 > in pass 1; *face* is pass 2. **Keep the pass-1 image** (`poses.base_filename`): re-running the
@@ -379,7 +394,14 @@ LAN; no Claude/Anthropic in the runtime loop.
   dial stays authoritative; per-pose seeds are **derived** from the version seed, not random, so a
   set is still reproducible. The defaults are measured against the live box, not chosen — see the
   `docs/pose-control.md` §4.0 calibration before changing them.
-- **Remaining:** **H3b** (pose library — many skeletons, bound per emotion tier) and **H3c**
+- **0.8.5:** **Phase H3b — the pose library.** See the header note. Key design calls: keypoints
+  are the source of truth and the PNG is derived (resolution-independent, editable, and the
+  precondition for the stickman editor); the library is global because a skeleton is
+  character-agnostic; deleting an entry unlinks poses rather than invalidating renders, since the
+  staged skeleton lives in ComfyUI's input.
+- **Remaining:** **H3c** (ControlNet in the dataset build — now the priority, see the measured
+  LoRA-vs-skeleton finding), **H3g** (Blender as a skeleton source: read bone positions and
+  project to COCO-18 — no render, so headless is fine; see `docs/pose-control.md` §6.2), and
   (ControlNet in the dataset build, which is what teaches the LoRA the body at all); rest of
   **Phase H1** (dataset layers + emotion enrichment behind the
   baseline gate, `lora_builds` versioning, per-axis selective rebuild — see `docs/emotion-depth.md`)

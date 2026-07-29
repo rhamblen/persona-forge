@@ -564,15 +564,16 @@
                   <button class="btn" id="pose-cn-save">Apply</button>
                 </div>
                 <div class="pose-lora-row">
-                  <button class="chip" id="pose-skeleton-builtin"
-                          title="Render the shipped standing skeleton and use it for this persona">
-                    Use built-in standing skeleton
+                  <button class="chip" id="pose-skeleton-lib"
+                          title="Choose a skeleton from the pose library for the whole set">
+                    Choose skeleton…
                   </button>
                   <button class="chip" id="pose-skeleton-upload"
                           title="Upload your own OpenPose skeleton image">Upload skeleton…</button>
                   <input id="pose-skeleton-file" type="file" accept="image/png,image/jpeg" hidden />
                   <code class="export-folder" id="pose-skeleton-current"></code>
                 </div>
+                <p class="hint" id="pose-cn-lorahint"></p>
                 <p class="hint" id="pose-cn-hint"></p>
                 <p class="hint warn" id="pose-cn-warning" hidden></p>
               </details>
@@ -628,6 +629,8 @@
                         title="Re-render only the face over the same body — seconds, and the pose can't change">
                   Re-roll face
                 </button>
+                <button class="btn" id="pose-ed-skel"
+                        title="Pick the skeleton that fixes this pose's body">Skeleton…</button>
                 <button class="btn btn-ghost" id="pose-ed-zoom" title="Zoom the current image">⤢ Zoom</button>
                 <button class="btn btn-ghost" id="pose-ed-delete">Delete</button>
               </div>
@@ -663,6 +666,24 @@
   </div>
 
   <!-- concept-LoRA library (Phase H1b) — registered pose/gesture LoRAs, shared by every persona -->
+  <div class="modal-backdrop" id="skel-modal" hidden>
+    <div class="modal modal-wide">
+      <h2 id="skel-modal-title">Choose a skeleton</h2>
+      <p class="muted small">
+        The skeleton fixes where the body goes — far more reliable than asking the prompt.
+        Each entry stores <strong>keypoints</strong>, not a picture, so it renders at whatever size
+        the pose needs. Entries that hide the face turn the face pass off by default.
+      </p>
+      <div class="skel-filter" id="skel-filter"></div>
+      <div id="skel-grid" class="skel-grid"></div>
+      <p class="hint" id="skel-msg"></p>
+      <div class="modal-actions">
+        <button class="btn" id="skel-clear">Use no skeleton</button>
+        <button class="btn btn-ghost" id="skel-cancel">Cancel</button>
+      </div>
+    </div>
+  </div>
+
   <div class="modal-backdrop" id="lib-modal" hidden>
     <div class="modal modal-wide">
       <h2>Concept LoRA library</h2>

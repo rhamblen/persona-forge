@@ -407,6 +407,19 @@ code { background: var(--bg-raised); padding: 1px 5px; border-radius: 4px; font-
 .pose-cn-panel input[type="checkbox"] { width: auto; margin: 0; }
 .pose-cn-panel .export-folder { align-self: center; }
 
+/* Pose library picker (Phase H3b). Thumbnails are rendered server-side from the stored
+   keypoints, so the grid is showing the actual data rather than a cached picture. */
+.skel-filter { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+.skel-grid { display: grid; gap: 10px; max-height: 58vh; overflow-y: auto;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
+.skel-card { position: relative; background: var(--bg-raised); border: 1px solid var(--line);
+  border-radius: 10px; padding: 6px; cursor: pointer; text-align: center; color: inherit; }
+.skel-card:hover { border-color: var(--accent); }
+.skel-card img { display: block; width: 100%; border-radius: 6px; background: #000; }
+.skel-name { display: block; font-size: 12px; margin-top: 5px; line-height: 1.25; }
+.skel-tag { position: absolute; top: 9px; right: 9px; font-size: 10px; padding: 1px 5px;
+  border-radius: 4px; background: var(--bg); border: 1px solid var(--line); color: var(--muted); }
+
 .build-progress { margin-top: 12px; }
 .build-progress .ds-bar-track { margin-bottom: 6px; }
 .ds-controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }

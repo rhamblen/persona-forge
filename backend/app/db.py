@@ -234,6 +234,35 @@ CREATE TABLE IF NOT EXISTS controlnets (
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_controlnets_file ON controlnets(filename);
+
+-- Phase H3b (0.8.5): the pose library. Global, not per persona — a skeleton is
+-- character-agnostic, which is the whole reason it is worth curating one set.
+--
+-- **Keypoints are the source of truth; the PNG is derived.** They are stored normalised
+-- 0..1 so one entry renders at any target resolution, and an entry can be edited later
+-- without re-authoring. ComfyUI can save POSE_KEYPOINT but has no node that loads it back,
+-- so rendering happens app-side (`skeleton.py`).
+--
+-- `prompt_hint` carries what a skeleton cannot encode: joint positions describe a grip but
+-- say nothing about the sword being gripped, and the two must reach the render together or
+-- the figure holds thin air. `face_visible` is false for poses that hide or turn away the
+-- face, where FaceDetailer would either no-op or repaint a hand into a mess.
+CREATE TABLE IF NOT EXISTS pose_library (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    name           TEXT NOT NULL,
+    category       TEXT NOT NULL DEFAULT 'standing',  -- standing | grounded | props | monster
+    framing        TEXT NOT NULL DEFAULT 'full',      -- full | cowboy | bust
+    keypoints_json TEXT NOT NULL,                     -- 18 normalised [x,y] or null entries
+    prompt_hint    TEXT NOT NULL DEFAULT '',
+    prop_slot      TEXT NOT NULL DEFAULT '',          -- 'sword' | 'book' | '' — reusable grip
+    face_visible   INTEGER NOT NULL DEFAULT 1,
+    source         TEXT NOT NULL DEFAULT 'builtin',   -- builtin | imported | harvested | edited
+    parent_id      INTEGER REFERENCES pose_library(id),   -- lineage when edited from another
+    notes          TEXT NOT NULL DEFAULT '',
+    created_at     TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_pose_library_cat ON pose_library(category, name);
 """
 
 # Per-pose ControlNet + face-pass columns (Phase H3, 0.8.4). Nullable on purpose: NULL
@@ -243,6 +272,9 @@ _POSE_H3_COLUMNS = [
     # The skeleton driving this pose, as a ComfyUI *input* path. '' = no ControlNet,
     # render prompt-only exactly as before H3.
     ("skeleton_ref", "TEXT NOT NULL DEFAULT ''"),
+    # Phase H3b: which library entry produced `skeleton_ref`. Provenance, so the grid can
+    # show what a pose was built from and re-render it at a different size.
+    ("pose_library_id", "INTEGER"),
     # Per-pose seed. Before H3 every pose in a set rendered at the version's single seed,
     # which is most of why they came out looking the same (docs/pose-control.md §0a).
     ("seed", "INTEGER NOT NULL DEFAULT 0"),
@@ -264,6 +296,7 @@ _PROJECT_H3_COLUMNS = [
     # in charge of identity instead of the skeleton flattening it.
     ("pose_cn_end", "REAL NOT NULL DEFAULT 0.7"),
     ("pose_skeleton", "TEXT NOT NULL DEFAULT ''"),          # default skeleton for the set
+    ("pose_library_id", "INTEGER"),                         # which library entry it came from
     ("pose_face_pass", "INTEGER NOT NULL DEFAULT 1"),
     # 0.60 measured, not guessed: 0.45 barely moves an expression and 0.75 destroys the
     # face. See docs/pose-control.md §4.0.
