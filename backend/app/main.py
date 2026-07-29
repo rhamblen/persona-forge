@@ -2083,6 +2083,54 @@ class TrainNotReady(RuntimeError):
     """Precondition for training not met (already running, dataset not staged)."""
 
 
+# Measured on the 3090: a 1500-step rank-16 SDXL run peaked at 17.8 GB reserved. Below
+# this much FREE VRAM the run dies partway through — usually in the VAE encode — after
+# minutes of apparently-healthy progress. Set to 0 to disable the gate.
+MIN_TRAIN_VRAM_GB = float(os.getenv("MIN_TRAIN_VRAM_GB", "18"))
+
+
+async def _require_train_vram() -> None:
+    """Refuse to start a long run the card can't finish.
+
+    The GPU is shared. ComfyUI being idle does NOT mean the VRAM is free — Ollama, Immich's
+    ML server or another container can be holding a third of the card. ComfyUI's reported
+    `vram_free` IS the device-wide figure (measured: it read 17.0 GB free while nvidia-smi
+    showed 8.4 GB held by other processes, and 24.9 GB once they released), so it is the
+    right number to gate on. Checking here turns a 5-minute run that dies in a torch
+    traceback into an immediate, explicit message naming how much is actually free.
+    """
+    if MIN_TRAIN_VRAM_GB <= 0:
+        return
+    try:
+        info = await comfy.vram()
+    except (comfy.ComfyError, httpx.HTTPError) as exc:
+        logs.warn("integration", f"could not read VRAM before training: {exc} — starting anyway")
+        return
+
+    free_gb, total_gb = info["free"] / 1e9, info["total"] / 1e9
+    held_gb = (info["total"] - info["free"] - info["comfy_reserved"]) / 1e9
+    logs.info("integration",
+              f"VRAM check: {free_gb:.1f} GB free of {total_gb:.1f} GB "
+              f"({held_gb:.1f} GB held by other processes)",
+              device=info["name"], needed_gb=MIN_TRAIN_VRAM_GB)
+    if free_gb >= MIN_TRAIN_VRAM_GB:
+        return
+
+    resident = ""
+    try:
+        models = await ollama.resident()
+        if models:
+            resident = " Ollama still holds " + ", ".join(
+                f"{m['name']} ({m['vram_bytes'] / 1e9:.1f} GB)" for m in models) + "."
+    except Exception:  # noqa: BLE001
+        pass
+    raise TrainNotReady(
+        f"not enough free VRAM to train: {free_gb:.1f} GB free of {total_gb:.1f} GB, "
+        f"need ~{MIN_TRAIN_VRAM_GB:.0f} GB. Roughly {held_gb:.1f} GB is held by other "
+        f"processes on this GPU.{resident} Free the card (or lower MIN_TRAIN_VRAM_GB) "
+        f"and start the build again.")
+
+
 async def _start_lora_training(project_id: int, steps: int, rank: int,
                                learning_rate: float) -> dict:
     """Kick off one LoRA training run and mark the project `training`.
@@ -2109,15 +2157,17 @@ async def _start_lora_training(project_id: int, steps: int, rank: int,
     trigger = (proj["trigger_word"] if proj else "") or default_trigger(slug)
     checkpoint = version.get("checkpoint") or comfy.DEFAULT_CHECKPOINT
 
-    # Training needs VRAM headroom (an OOM here is the #1 failure). Free ComfyUI's
-    # models and unload the Ollama model first.
+    # Training needs VRAM headroom (an OOM here is the #1 failure). Free ComfyUI's models
+    # and evict EVERY model Ollama holds — not just ours, since other apps share that
+    # Ollama and their model pins the same card.
     logs.info("process", "preparing to train LoRA — freeing VRAM",
               project_id=project_id, trigger=trigger, steps=steps, rank=rank)
     try:
-        await ollama.unload()
+        await ollama.unload_all()
     except ollama.OllamaError:
         pass
     await comfy.free_memory()
+    await _require_train_vram()
 
     params = {
         "checkpoint": checkpoint,

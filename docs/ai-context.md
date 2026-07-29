@@ -1,5 +1,19 @@
 # AI Context — cold-start orientation
 
+> **2026-07-29 — v0.8.7: the GPU is SHARED; training gates on it.** UR1's 3090 also serves
+> Ollama (192.168.1.32 — other LAN apps load their own models into it) and Immich's CUDA ML
+> server. A 1500-step rank-16 SDXL run peaks at **~17.8 GB reserved**, so ~8 GB of foreign
+> tenancy is enough to OOM it — and the OOM surfaces in the **VAE encode** (`group_norm`),
+> not the training loop, which misleads. Two things follow. (1) The pre-flight calls
+> `ollama.unload_all()`, not `unload()`: unloading only `OLLAMA_MODEL` was a silent no-op
+> whenever another app's model held the VRAM. (2) `_require_train_vram()` blocks below
+> `MIN_TRAIN_VRAM_GB` (default 18) — it **fails open** if ComfyUI can't be read, deliberately.
+> Measured fact worth not re-deriving: ComfyUI's `/system_stats` `vram_free` is the
+> **device-wide** free figure, so it does see other tenants (17.0 GB free while nvidia-smi
+> showed 8.4 GB held; 24.9 GB once released). Note `get_gpu_metrics` on the Unraid MCP is
+> **cached** — two calls can return an identical stale timestamp, which will fake a
+> disagreement with ComfyUI's live number.
+>
 > **2026-07-29 — v0.8.6: images are read off `/builds`, not fetched from ComfyUI.** `GET
 > /api/image` now serves `type=output` straight from the shared builds mount
 > (`_builds_path()` resolves + guards the path), and only proxies ComfyUI's `/view` for

@@ -39,6 +39,26 @@ async def system_stats() -> dict[str, Any]:
         return r.json()
 
 
+async def vram() -> dict[str, float]:
+    """Free/total VRAM (bytes) on ComfyUI's primary device, plus what ComfyUI itself holds.
+
+    `free` is the whole device's free memory as CUDA reports it, so it already accounts
+    for OTHER tenants on the card (Ollama, Immich's ML, another container). That is the
+    number a training pre-flight has to look at — ComfyUI being idle says nothing about
+    whether 18 GB is actually available.
+    """
+    devices = (await system_stats()).get("devices") or []
+    if not devices:
+        raise ComfyError("ComfyUI reported no CUDA devices")
+    d = devices[0]
+    return {
+        "name": d.get("name", "?"),
+        "free": float(d.get("vram_free") or 0),
+        "total": float(d.get("vram_total") or 0),
+        "comfy_reserved": float(d.get("torch_vram_total") or 0),
+    }
+
+
 async def object_info(node: str | None = None) -> dict[str, Any]:
     """Node schemas — used to populate model/sampler dropdowns from live state."""
     url = f"{COMFYUI_URL}/object_info" + (f"/{node}" if node else "")

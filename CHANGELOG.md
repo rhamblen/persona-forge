@@ -9,6 +9,41 @@ Every version below is a **published GitHub Release** with a matching
 
 ---
 
+## [0.8.7] — 2026-07-29
+
+**LoRA training no longer dies on a GPU someone else is using.** The pre-flight now frees
+what is actually resident and refuses to start a run the card can't finish.
+
+A 1500-step build failed after 5 minutes with `TrainLoraNode: Allocation on device 0 would
+exceed allowed memory` — 16.25 GiB allocated, 30 MiB free. The card had **8.4 GB held by
+other tenants**: Ollama was holding `minicpm-v` (4.7 GB, loaded by a different app on the
+LAN) and Immich's CUDA ML server had the rest. Training peaks at ~17.8 GB reserved, so
+17.8 + 8.4 overran the 24 GB card. The OOM landed in the VAE encode (`group_norm`), which
+is why it looked like a training bug rather than a capacity one.
+
+### Fixed
+- **The pre-flight unload was a no-op.** It called `ollama.unload()`, which unloads only the
+  configured `OLLAMA_MODEL` (`llama3.1`). The model actually pinning VRAM was one another
+  app had loaded, so the log cheerfully reported "unloading Ollama model" while 4.7 GB
+  stayed put. New `ollama.unload_all()` reads `/api/ps` and evicts **every** resident model,
+  logging what it freed.
+
+### Added
+- **VRAM gate before training** (`_require_train_vram`). After freeing, PF reads ComfyUI's
+  device VRAM and refuses to start below `MIN_TRAIN_VRAM_GB` (default **18**, measured from
+  the 17.8 GB peak), naming how much is free, how much other processes hold, and which
+  Ollama models are still resident. Fails in seconds with an actionable message instead of
+  minutes into a run. Set `MIN_TRAIN_VRAM_GB=0` to disable; if ComfyUI can't be read the
+  gate fails **open** rather than blocking a legitimate build.
+- `comfy.vram()` and `ollama.resident()` expose the underlying readings.
+
+### Notes
+- ComfyUI's reported `vram_free` is the **device-wide** figure, not just its own pool —
+  verified against nvidia-smi at 8.4 GB held (ComfyUI read 17.0 GB free) and again once
+  released (24.9 GB free). That is why gating on it detects other tenants at all.
+
+---
+
 ## [0.8.6] — 2026-07-29
 
 **Your dataset is visible when ComfyUI is stopped.** Images now come off the shared

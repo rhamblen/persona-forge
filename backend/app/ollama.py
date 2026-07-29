@@ -190,6 +190,52 @@ async def unload(model: str | None = None) -> dict[str, Any]:
     return {"unloaded": True, "model": model}
 
 
+async def resident() -> list[dict[str, Any]]:
+    """Every model Ollama currently holds in VRAM, with its size in bytes.
+
+    Ollama is shared: other apps on the LAN load their own models into it. Anything
+    asking "how much VRAM can I have?" needs the real occupancy, not our own model.
+    """
+    async with httpx.AsyncClient(timeout=6.0) as c:
+        r = await c.get(f"{OLLAMA_URL}/api/ps")
+        r.raise_for_status()
+        return [
+            {"name": m.get("name", ""), "vram_bytes": int(m.get("size_vram") or 0)}
+            for m in r.json().get("models", [])
+        ]
+
+
+async def unload_all() -> dict[str, Any]:
+    """Evict EVERY resident model, not just ours.
+
+    Unloading only OLLAMA_MODEL was a no-op whenever another app had loaded a different
+    model — the VRAM that actually blocked training stayed pinned, and the run OOM'd
+    minutes later with no hint that Ollama was holding a third of the card.
+    """
+    try:
+        models = await resident()
+    except httpx.HTTPError as exc:
+        logs.warn("integration", f"could not read Ollama residency: {exc}", url=OLLAMA_URL)
+        raise OllamaError(f"could not read Ollama residency: {exc}") from exc
+    if not models:
+        logs.verbose("integration", "Ollama holds no models in VRAM")
+        return {"unloaded": [], "freed_bytes": 0}
+
+    freed, done = 0, []
+    for m in models:
+        try:
+            await _set_keep_alive(0, m["name"])
+        except httpx.HTTPError as exc:
+            logs.warn("integration", f"could not unload '{m['name']}': {exc}")
+            continue
+        freed += m["vram_bytes"]
+        done.append(m["name"])
+    logs.info("integration",
+              f"unloaded {len(done)} Ollama model(s), freeing {freed / 1e9:.1f} GB of VRAM",
+              models=done)
+    return {"unloaded": done, "freed_bytes": freed}
+
+
 async def suggest_prompt(instruction: str, mode: str, current: dict[str, str],
                          model: str | None = None) -> dict[str, str]:
     """Return {character, style, negative} suggested by Ollama.
