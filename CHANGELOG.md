@@ -9,6 +9,42 @@ Every version below is a **published GitHub Release** with a matching
 
 ---
 
+## [0.8.11] — 2026-07-30
+
+**Skeletons can be projected from a posed 3D body instead of hand-typed.** H3g's projection
+half, as `backend/app/skeleton_import.py`.
+
+### Added
+- **`project_bones()`** — world-space bone positions in, 18 normalised COCO-18 keypoints out,
+  ready to drop into a `pose_library` entry. **No Blender dependency**, so it is unit-testable
+  offline; Blender's only job is handing over a dict of positions.
+- **`match_bones()`** with alias matching for Rigify, Mixamo and plain bone names. Unmatched
+  bones are **dropped, not guessed** — a wrong joint renders as a broken body, an absent one
+  renders as an occlusion, which OpenPose emits routinely anyway.
+- **`describe()`** — the sanity figures worth reading before saving an entry: height fraction,
+  hip y, whether the head landed below the neck, unmatched joints, anything off-canvas.
+  Deliberately not a validator; an unusual pose can be correct.
+
+### Why
+Of 11 entries hand-authored across 0.8.9–0.8.10, **five needed re-authoring** — every failure
+the same class, a pose defensible as numbers and wrong as a picture (legs at standing
+proportions on a seated figure; a head left above the neck while bending forward). Projecting
+a posed body removes that class by construction.
+
+### Notes
+- **Perspective, not orthographic**, on purpose: it is what produces real foreshortening.
+  Measured on synthetic rigs — a seated figure with legs toward camera projects a shin→ankle
+  span of 0.049 against a standing 0.237.
+- **Fixed scale, not per-pose fit.** Scale comes from a reference *standing* height, so a
+  crouch stays shorter than a stand (0.438 vs 0.855 of canvas height). Auto-fitting each pose
+  would make every figure the same frame height and set SillyTavern jittering between sprites.
+  `ref_height`, `figure_fraction` and `footing` are library-wide constants — keep them equal
+  across entries.
+- The render-and-look loop stays mandatory. Projection lowers the error rate; it does not
+  remove the need to look at a contact sheet.
+
+---
+
 ## [0.8.10] — 2026-07-30
 
 **Pose families: an emotion axis picks its posture, per character.** Plus eight new

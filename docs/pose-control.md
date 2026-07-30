@@ -467,7 +467,77 @@ Two specifics:
 
 ---
 
-## 6.2 Blender as the skeleton source (stage H3g — planned)
+## 6.2 Blender as the skeleton source (stage H3g — **projection half BUILT 0.8.11**)
+
+> **Status 2026-07-30.** The projection is implemented and tested as
+> `backend/app/skeleton_import.py` — no Blender dependency, so it is unit-testable offline.
+> What remains is the extraction: handing it a dict of posed bone positions (snippet below).
+
+### Why this exists — the measured case
+
+Across the 11 library entries hand-authored on 2026-07-29/30, **five needed re-authoring**
+(~45%), and every failure was the same class: a projection that is defensible as numbers and
+wrong as a picture.
+
+| Entry | What went wrong by hand |
+|---|---|
+| `hugging knees, head buried` | head joints dropped entirely → rendered headless |
+| `legs stretched, ankles crossed` | authored at standing leg proportions → read as standing |
+| `legs stretched and apart` | same |
+| `legs stretched, leaning back on hands` | same |
+| `bending forward, arms out` | head left above the neck → read as standing |
+
+Projecting a posed 3D body removes that class **by construction**. Measured on synthetic rigs:
+a seated figure with legs toward the camera projects a shin→ankle span of **0.049** against a
+standing **0.237** — the foreshortening happens for free — and bending the head forward puts
+the nose below the neck automatically.
+
+### Two properties `project_bones()` enforces that eyeballing does not
+
+1. **Fixed scale, not per-pose fit.** The world→canvas scale derives from a *reference standing
+   height*, never the current pose's extent. Auto-fitting would inflate a seated figure to a
+   standing figure's frame height, and a set whose figures differ in size makes SillyTavern
+   jitter as it swaps sprites. Verified: standing occupies 0.855 of canvas height, the seated
+   pose 0.438.
+2. **Anchored footing.** The ground plane maps to a fixed canvas y, so every figure stands,
+   sits and kneels on the same floor.
+
+Keep `ref_height`, `figure_fraction` and `footing` **identical across every entry** — they are
+properties of the library, not of one pose.
+
+### The extraction snippet (run in Blender via the MCP)
+
+Bone *heads* map onto COCO-18 joints naturally in a Rigify-style rig: `hand.L`'s head is the
+wrist, `foot.L`'s head is the ankle. Name matching is loose and alias-based
+(`BONE_ALIASES`), so Rigify, Mixamo and plain names all work — unmatched bones are dropped
+rather than guessed at, because a wrong joint renders as a broken body while an absent one
+renders as an occlusion, which OpenPose emits routinely.
+
+```python
+import bpy, json
+arm = bpy.data.objects["Armature"]          # the posed armature
+M = arm.matrix_world
+out = {b.name: tuple(M @ b.head) for b in arm.pose.bones}
+print(json.dumps(out))                      # feed to skeleton_import.project_bones()
+```
+
+Then, on the Persona Forge side:
+
+```python
+from app import skeleton_import as si
+pts = si.project_bones(bones, ref_height=1.75)   # 18 normalised [x, y] or None
+print(si.describe(pts))                          # sanity figures — read before saving
+```
+
+`describe()` is **not** a validator (an unusual pose can be correct). It surfaces the numbers
+whose surprises have meant a bad entry: total height fraction, hip y, whether the head landed
+below the neck, how many joints the rig failed to match, and anything off-canvas.
+
+**The render-and-look loop is still mandatory.** Every one of the five failures above was
+invisible in the coordinates and obvious as a contact sheet. Projection lowers the error rate;
+it does not remove the need to look.
+
+## 6.2.1 Original plan (retained for context)
 
 > User, 2026-07-29: *"could we use Blender to create the ControlNet body shapes… then use
 > that to feed back to Persona Forge and then create the sprite. Maybe a series of body
