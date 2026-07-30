@@ -1,5 +1,22 @@
 # AI Context — cold-start orientation
 
+> **2026-07-30 — v0.8.11: skeletons are PROJECTED, not typed.** `backend/app/
+> skeleton_import.py` turns world-space bone positions into 18 normalised COCO-18 keypoints.
+> It has **no Blender dependency** on purpose — unit-testable offline, and Blender's only job
+> is handing over a dict of positions (extraction snippet in `docs/pose-control.md` §6.2).
+> The case is measured, not aesthetic: **5 of 11 hand-authored entries needed re-authoring**,
+> every failure the same class — coordinates defensible as numbers and wrong as a picture.
+> Two properties it enforces that eyeballing did not, and that you must NOT "simplify" away:
+> **perspective not orthographic** (that is what gives real foreshortening — seated legs
+> toward camera give a shin→ankle span of 0.049 vs standing 0.237), and **scale from a
+> reference STANDING height, never per-pose auto-fit** (a crouch must stay shorter than a
+> stand — 0.438 vs 0.855 of canvas height; equalising frame heights makes ST jitter between
+> sprites). `ref_height` / `figure_fraction` / `footing` are library-wide constants. Unmatched
+> bones are DROPPED, not guessed — a wrong joint renders a broken body, an absent one renders
+> as an occlusion. `describe()` is a sanity report, not a validator. **The render-and-look
+> loop stays mandatory**; projection lowers the error rate, it does not remove the need to
+> look at a contact sheet.
+>
 > **2026-07-30 — v0.8.10: pose families, per persona.** `axis_pose_families` maps an
 > emotion axis — or one TIER of it — to a posture family (`pose_library.family`), so an
 > intensity ladder can change posture as it climbs. `project_id IS NULL` rows are the global
