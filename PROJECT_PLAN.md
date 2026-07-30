@@ -685,6 +685,40 @@ complete release. A `VERSION` file at the repo root tracks the current build.
   charter. Transform-not-reproduce (private use; summarised behavioural profiles). The
   most advanced piece; an alternative seed feeding Phases E + F.
 
+### Wireframe authoring workspace — a self-contained brief for skeleton work ⬜ NOT STARTED (added 2026-07-30)
+
+**Requirement from the user, 2026-07-30.** Authoring pose skeletons ("persona wireframes") needs
+its **own scoped workspace** — a page/brief carrying enough context that a session can do
+wireframe work *without loading the rest of the project*. The explicit driver is **token cost**:
+skeleton authoring needs COCO-18 geometry, the family model and the authoring pitfalls, and
+none of the ComfyUI/LoRA-training/SillyTavern/VRM context. Today all of that arrives together
+via `docs/ai-context.md`, which is the wrong granularity for this job.
+
+**Not started deliberately** — recorded now, built later.
+
+- **What it must contain** (so a cold session is productive with nothing else loaded):
+  - COCO-18 joint order, the `LIMBS` bone list, and the normalised-0..1 convention.
+  - The `_standing(arms, head=, legs=, ...)` composition helpers and existing part clusters.
+  - The **posture families** (`standing | crouching | kneeling | sitting | lying`), how
+    `axis_pose_families` binds a family to an emotion axis/tier, per-persona overrides, and
+    `entry_id` pinning.
+  - The **authoring pitfalls that have actually cost rework** (~45% of hand-authored entries
+    needed a second pass): seated/crouching figures need foreshortened legs *and* a compressed
+    torso or they render as standing; head tilt is carried by ears→eyes→nose vertical ordering;
+    palm facing is **not** encodable and belongs in `prompt_hint`; occluded joints are `None`.
+  - **The mandatory loop: render a contact sheet and look at it before saving.** Every one of
+    those failures was invisible in the coordinates and obvious as a picture.
+  - What to do with the output: add to `skeleton.STARTER_POSES` (shipped catalogue, versioned)
+    vs `POST /api/pose-library` (per-install data) — and that "Restore starter poses" tops up
+    by name, which is how a release delivers new entries.
+- **Likely vehicle: a skill, not a doc.** `.claude/skills/` loads on demand only when the task
+  matches, which is exactly the token behaviour asked for — a plain doc still has to be read.
+  Pattern already proven by the `avatar-builder` skill. A short `docs/wireframes.md` can carry
+  the human-readable half.
+- **Pairs with H3g (Blender as skeleton source).** The workspace is where that bone→COCO-18
+  projection would be documented and driven, since Blender authoring is the reason the
+  catalogue can grow to the 2–3×-expressions size the user wants.
+
 ### Future infrastructure — dedicated training GPU / parallel builds ⬜ HARDWARE-GATED (added 2026-07-26)
 
 **Trigger: the user is swapping UR1's RTX 3060 (12 GB) for a second RTX 3090 (24 GB), giving
