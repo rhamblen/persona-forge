@@ -1,76 +1,111 @@
-# v0.8.12 — The dataset is posed
+# v0.8.13 — Persona Forge grew a tool surface
 
-## The measurement this fixes
+An MCP endpoint is now served from the **same process** as the web app, at `/mcp`. Always
+on, no flag, no second container. Everything the UI does, an agent can reach — through the
+same code paths.
 
-2026-07-28, on the live box: a kneeling skeleton, correctly staged and applied at strength
-0.7, rendered a **standing** figure with the character LoRA loaded — and knelt correctly with
-the LoRA removed.
+## Why a facade, not the API
 
-That is not a ControlNet bug. A LoRA trained only on standing shots has no idea what this
-character looks like kneeling, so the skeleton forces geometry the LoRA has never seen, the
-two fight, and the result is melted anatomy. No amount of render-time tuning fixes it.
+The ~80 HTTP endpoints are shaped for the frontend: one per widget. Handing an agent all of
+them also hands it every knob this project spent months measuring, and it will get them
+wrong — ControlNet at 0.7/0.7 instead of 1.0/0.9, a face pass at denoise 0.45 that does
+nothing, an expression word left in the character prompt that then leaks a smile into
+`grief`.
 
-**Teach the body first, then pose it.** That's this release.
+So `backend/app/mcp_server.py` is **19 tools named for intentions**, each carrying its
+invariant in the docstring where the model reads it before choosing. The rule that shapes
+the list:
 
-## What's in it
+> **A measured number is not an argument.**
 
-Every *other* full-body dataset candidate now renders against a skeleton from the pose
-library. Close-ups are never posed — they exist to teach identity at high frequency, and a
-skeleton over a face crop constrains nothing.
+Every fact this project paid for in GPU hours lives behind a tool or in a docstring — never
+in a parameter an agent has to guess. Tools call the app's own endpoints in-process over
+`httpx.ASGITransport`, so a tool and the UI button beside it run the identical code path and
+cannot drift.
 
-Skeletons are walked **round-robin across posture families** — standing, crouching, kneeling,
-sitting, lying — rather than in id or name order. The shipped catalogue is standing-heavy (13
-of its 24 entries), so walking it in order would have handed a 30-image batch mostly standing
-figures, which is the exact gap this closes. The rotation continues across batches, the way
-framing rotation already did.
+This does **not** change the settled decision that the backend talks to ComfyUI over its
+native HTTP API rather than MCP. MCP is for the agent; HTTP is for the app.
 
-On the Dataset tab: a **Posed body shots** toggle and a strength dial. Both preconditions —
-a ControlNet model and a non-empty pose library — are set on the Poses tab, so the hint names
-whichever one is missing rather than letting Generate fail after you've chosen a count.
+## Scope — read + queue, deliberately
 
-It needed **no new workflow file**. ControlNet touches conditioning, LoRAs touch model/CLIP,
-so the existing splice drops into `base-character` and `base-character-lora` untouched and
-composes with the concept-LoRA chain.
+| Can | Cannot |
+|---|---|
+| Inspect anything — projects, versions, dataset, LoRA, poses, export, jobs, logs | Delete a project, purge a dataset, drop a version |
+| Create a project; append a prompt version | Roll back — the append-only history is the undo |
+| Queue generate / dataset / train / poses / export | Start or restart containers |
+| Add poses and presets | Copy anything into SillyTavern |
 
-## Four calls worth knowing about
+The append-only version history is the safety net for everything a tool *can* write: a bad
+prompt is a new row you roll back from, not a lost one. Exports stay **staged** — moving
+sprites into SillyTavern remains a deliberate human step.
 
-**Half the body shots, not all of them.** The un-posed half keeps the spread of views and
-camera angles that the largely front-facing library can't supply yet. Posing everything would
-have traded view variety for posture variety instead of gaining both.
+## The Lore Forge handoff
 
-**Its own strength — 0.6/0.7, against the sprite path's 1.0/0.9.** The two uses want opposite
-things. A sprite render wants the skeleton obeyed; a dataset build wants posture variety the
-checkpoint still finishes naturally. At 1.0 the dataset becomes a set of stiff mannequins and
-the LoRA learns the stick figure's habits rather than the character's body.
+`persona_create_from_dossier` consumes a dossier from Lore Forge's `lore_dossier` /
+`lore_cast`. The contract lives in the new `backend/app/handoff.py`, **mirrored verbatim**
+in both repos — pure stdlib, so the two copies diff byte for byte, and a dossier whose
+`contract_version` major does not match is refused rather than mis-parsed.
 
-**Stance words are dropped from a posed candidate's prompt.** 0.8.9 measured that stripping
-stance words from an *agreeing* prompt didn't help — that still holds. This is the other case:
-"walking forward, mid-stride" against a kneeling skeleton is an outright contradiction.
+Neither app knows the other exists; the agent carries the object across. That is what lets
+the two stay separate repos, images, ports and version lines instead of merging — and it
+retires the planned source-ingestion phase here, which would have rebuilt Lore Forge inside
+Persona Forge.
 
-**A misconfigured posed batch is refused, not rendered.** 0.8.8 taught this on a single sprite
-(skeleton set, no model → renders fine, ignores the figure). Here the silent version costs ~30
-renders and an hour of GPU, and the output *looks* correct — it just teaches the LoRA nothing.
+What the tool enforces so an agent cannot get it wrong:
 
-## What's verified, and what isn't
+- The character prompt is **appearance facts only**, as prose. A fact mentioning an
+  expression is dropped **whole** rather than reworded — rewriting prose into tags drops
+  detail and breaks garments, and a smile in the identity renders `grief` as someone crying
+  and smiling at once. Dropped facts come back named, never silently lost.
+- Role, motivation and speech go to `sheet_summary` for the character *card*, not the image
+  prompt. A diffusion model cannot render a motivation.
+- Tier sets the size of the build: primary earns the full expression set and a LoRA,
+  secondary 8 expressions, filler a single sprite.
+- The canon cursor travels with the object — export `as_of_chapter=10` and the project only
+  knows the book to that point, with `withheld_facts` reporting how much was held back.
 
-Verified offline against the real templates: the splice adds exactly three nodes, every
-consumer of the raw conditioning is repointed, the dataset strength and end reach the apply
-node, ControlNet composes with the LoRA chain, union models get `SetUnionControlNetType`, and
-turning it off leaves the graph byte-identical. Candidate maths: posed shots are always body
-shots, each draws a distinct skeleton, batches continue rather than restart, and no posed
-prompt carries a stance word.
+## Fixed — expression budgets sampled a corner of the map
 
-**No image has been rendered yet.** The render-and-look loop is unchanged: build a batch and
-read the contact sheet. The thing to watch for is stiffness — if the bodies read as posed
-mannequins rather than a character who happens to be standing that way, lower the strength
-before changing anything else.
+Resolving a tier's labels in map order spent a secondary character's budget of eight
+entirely inside the first two axes. Measured:
 
-## Upgrade notes
+    Neutral, Annoyance, Anger, Nervousness, Fear, Disappointment, Sadness, Grief
 
-Automatic. Three nullable columns are added to `projects` on boot; posed shots are **off by
-default**, so an existing persona's next batch behaves exactly as it did before until you turn
-it on. No compose change.
+A cast member who can only ever look unhappy. Resolution is now **axis-major** — one tier
+from each axis before a second from any:
 
-**Image:** `ghcr.io/rhamblen/persona-forge:0.8.12`
+    Neutral, Annoyance, Nervousness, Disappointment, Amusement, Approval,
+    Disapproval, Embarrassment
 
-Full detail in [`CHANGELOG.md`](CHANGELOG.md).
+Same fix and the same reasoning as 0.8.12's family-major skeleton spread: a budget must
+sample the space, not a corner of it. `neutral` is always first, because it is
+SillyTavern's fallback for a missing sprite and a truncated budget must never be what drops
+it.
+
+## Also
+
+- Startup moved from `@app.on_event("startup")` to a **lifespan** — the MCP session manager
+  needs a task group held open around the whole run, and Starlette ignores the `on_event`
+  lists once a lifespan is supplied. `_startup()` itself is unchanged.
+- Every tool returns an object, never a bare array: an empty array serialises to zero MCP
+  content blocks, which reads as a malfunction rather than as "there are none".
+- `backend/requirements.txt` gains `mcp==1.27.2` — the official SDK rather than a
+  hand-rolled JSON-RPC endpoint (the transport spec still moves), and rather than
+  `fastapi-mcp`, which derives one tool per route and is precisely the thing being avoided.
+- **Compose is unchanged.** New dependency, same image build, same service definition.
+
+## Verified
+
+Real MCP client round trip against a running server — `initialize`, `tools/list` (19),
+`tools/call` with live payloads (ComfyUI 0.29.0 and Ollama both answered). The full handoff
+was exercised through real code: a dossier at `as_of_chapter=10` withheld a chapter-31 fact,
+dropped an expression fact from the looks prompt and named it, seeded the project with the
+resolved NoobAI-XL checkpoint, added neutral-first expressions, and refused a
+`contract_version: 9.0` dossier. The route resolves at exactly `/mcp` — a bare POST returns
+400, the protocol rejecting the body, not a 307 redirect. Frontend and REST API unaffected
+by the lifespan change.
+
+## Upgrade
+
+`docker compose pull && docker compose up -d`. No compose or `.env` change.
+Documentation: [`docs/mcp.md`](docs/mcp.md).

@@ -1,5 +1,23 @@
 # AI Context — cold-start orientation
 
+> **2026-07-31 — v0.8.13: Persona Forge has a tool surface.** An MCP endpoint is served
+> **in-process at `/mcp`**, always on. It is a **curated facade** — 19 tools named for
+> intentions — not a route-to-tool dump, and that is the whole point: the ~80 HTTP
+> endpoints carry every knob this project measured in GPU hours, and an agent handed all of
+> them gets them wrong. **A measured number is not an argument.** Scope is **read + queue**:
+> no deletes, no purges, no rollback, no container control. New `handoff.py` (**mirrored
+> verbatim** from Lore Forge, pure stdlib — change one, copy to the other) makes the LF→PF
+> seam a versioned contract instead of a shared-mount convention, which is what lets the two
+> apps stay separate repos rather than merging: the agent carries the object across, neither
+> service depends on the other. Also **fixed**: resolving a tier's expression labels in map
+> order gave a secondary character eight *negative* expressions (`Neutral, Annoyance, Anger,
+> Nervousness, Fear, Disappointment, Sadness, Grief`) — resolution is now **axis-major**,
+> same fix and same reasoning as 0.8.12's family-major skeleton spread, with `neutral`
+> always first because it is ST's fallback for a missing sprite. Startup is now a
+> **lifespan** rather than `on_event` (the session manager needs a task group held open;
+> Starlette ignores `on_event` once a lifespan exists) — `_startup()` itself is unchanged,
+> and **compose is unchanged**. Full detail: `docs/mcp.md`.
+>
 > **2026-07-30 — v0.8.12: the dataset is POSED (H3c).** Every *other* full-body dataset
 > candidate now renders against a `pose_library` skeleton, which is what makes the sprite
 > path's skeletons work at all: §6.3's measurement is that a standing-only LoRA **overpowers**
@@ -248,18 +266,24 @@ LAN; no Claude/Anthropic in the runtime loop.
 | `backend/app/db.py` | SQLite schema + `connect()` |
 | `backend/app/logs.py` | Levels + categories, ring buffer + rolling JSONL |
 | `backend/app/workflows.py` | Workflow templates + parameter manifests (node IDs not hardcoded) |
+| `backend/app/mcp_server.py` | 19 agent tools at `/mcp` — in-process facade over the endpoints, read + queue scope |
+| `backend/app/handoff.py` | The versioned Lore Forge contract. **Mirrored verbatim in lore-forge; change one, copy to the other** |
 | `frontend/index.html`, `app.js`, `style.css` | The SPA (no build step); served as static files |
 | `workflows/base-character.json` + `.manifest.json` | The base-character API graph + its manifest |
 | `workflows/base-character-lora.json` + `.manifest.json` | Studio variant with a full `LoraLoader` (model+CLIP) for an external style LoRA; auto-selected when a version has `style_lora` set (0.7.9) |
 | `docker/docker-compose.yml` | The stack: persona-forge + docker-socket-proxy + networks |
 | `docker/.env` | Tracked, non-secret config (the only `.env` git tracks) |
 | `PROJECT_PLAN.md` | Master spec + phased roadmap (this repo's "project brief") |
+| `docs/mcp.md` | The MCP tool surface: tool list, scope table, the LF handoff, expression-budget reasoning, client config |
 | `docs/ui-style.md` | UI design tokens from the user's esp32-shutter-hub card |
 | `docs/emotion-depth.md` | Phase H design: emotion axes×tiers, dataset layers + per-emotion LoRA enrichment, selective sprite rebuild, and the post-1.0 ST emotion state engine |
 | `CHANGELOG.md` / `RELEASE_NOTES.md` | Keep-a-Changelog / current release body (rewritten each release) |
 
 ## API surface
 
+- **MCP (0.8.13):** `POST /mcp` — the agent tool surface, in-process, always on. Not part
+  of the REST API and not called by the frontend; see `docs/mcp.md`. A bare POST with no
+  MCP envelope correctly returns 400.
 - **Health/status:** `GET /api/health`, `/api/comfyui/status`, `/api/storage/status`.
 - **Models/workflows:** `GET /api/models?kind=` (returns `default`), `/api/workflows[/{id}]`.
 - **Concept LoRA library (0.8.0):** `GET/POST /api/concept-loras`, `PATCH/DELETE

@@ -9,6 +9,66 @@ Every version below is a **published GitHub Release** with a matching
 
 ---
 
+## [0.8.13] — 2026-07-31
+
+**Persona Forge grew a tool surface.** An MCP endpoint is served from the same process as
+the web app at `/mcp` — always on, no flag, no second container. Everything the UI does an
+agent can now reach, through the same code paths.
+
+### Added
+- **19 MCP tools** (`backend/app/mcp_server.py`), a curated facade rather than a
+  route-to-tool dump. The ~80 HTTP endpoints are shaped for the frontend; handing an agent
+  all of them also hands it every knob this project spent months measuring, and it will get
+  them wrong — ControlNet at 0.7/0.7, a face pass at denoise 0.45 that does nothing, an
+  expression word left in the character prompt. The rule that shapes the list: **a measured
+  number is not an argument.** Each tool is named for an intention and carries its
+  invariant in the docstring where the model reads it before choosing.
+- **`persona_project`** folds project, dataset, LoRA, poses and export state into one call
+  — the "where is this build up to" question, answered without guessing from pipeline order.
+- **`persona_create_from_dossier`** — the Lore Forge handoff, consuming the object defined
+  by the new `handoff.py` (mirrored verbatim from Lore Forge; a dossier whose
+  `contract_version` major does not match is refused, not mis-parsed). Neither app knows
+  the other exists — the agent carries the object across, which is what lets the two stay
+  separate repos rather than merging.
+- **`handoff.py`** enforces the prompt rules so an agent cannot break them: the character
+  prompt is appearance facts as prose, any fact mentioning an expression dropped **whole**
+  rather than reworded, and dropped facts returned named. Role and motivation go to
+  `sheet_summary` for the character card — a diffusion model cannot render a motivation.
+
+### Fixed
+- **Expression budgets sample the whole map, not a corner of it.** Resolving a tier's
+  labels in map order spent a secondary character's budget of eight entirely inside the
+  first two axes — measured: `Neutral, Annoyance, Anger, Nervousness, Fear, Disappointment,
+  Sadness, Grief`, a cast member who can only ever look unhappy. Resolution is now
+  axis-major (one tier from each axis before a second from any), giving `Neutral,
+  Annoyance, Nervousness, Disappointment, Amusement, Approval, Disapproval, Embarrassment`.
+  Same fix, same reasoning, as the family-major dataset skeleton spread in 0.8.12.
+  `neutral` is always first — it is SillyTavern's fallback for a missing sprite, so a
+  truncated budget must never be what drops it.
+
+### Scope — read + queue, deliberately
+An agent can inspect anything and start any job. It **cannot** delete a project, purge a
+dataset, drop a prompt version, roll back, or start/restart containers; those stay in the
+UI. The append-only version history is the safety net for what it can do: a bad prompt
+written by a tool is a new row you can roll back from, not a lost one. Exports stay
+**staged** — no tool here copies anything into SillyTavern.
+
+### Changed
+- Startup moved from `@app.on_event("startup")` to a lifespan. The MCP session manager
+  needs a task group held open around the whole run, and Starlette ignores the `on_event`
+  lists once a lifespan is supplied. `_startup()` is unchanged.
+- `backend/requirements.txt` gains `mcp==1.27.2` — the official SDK rather than a
+  hand-rolled JSON-RPC endpoint (the transport spec still moves) and rather than
+  `fastapi-mcp` (one tool per route, which is the thing being avoided).
+- **Compose is unchanged.** New dependency, same image build and same service definition.
+
+### Docs
+- New [`docs/mcp.md`](docs/mcp.md) — tool list, scope table, the handoff contract, the
+  expression-budget reasoning, and the `mcp-remote` client config for connecting both
+  forges at once.
+
+---
+
 ## [0.8.12] — 2026-07-30
 
 **The dataset is posed.** Phase H3c: dataset body shots are driven by pose-library skeletons,

@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import binascii
+import contextlib
 import hashlib
 import json
 import os
@@ -21,7 +22,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, AsyncIterator, Literal
 
 import httpx
 from fastapi import FastAPI, HTTPException
@@ -29,7 +30,7 @@ from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import comfy, db, docker_ctl, jobs, logs, ollama, skeleton, workflows
+from . import comfy, db, docker_ctl, jobs, logs, mcp_server, ollama, skeleton, workflows
 
 COMFYUI_URL = comfy.COMFYUI_URL
 BUILDS_ROOT = Path(os.getenv("BUILDS_ROOT", "/builds"))
@@ -73,7 +74,27 @@ def _builds_path(subfolder: str, filename: str) -> Path | None:
     return path
 
 
-app = FastAPI(title="Persona Forge", version=VERSION)
+@contextlib.asynccontextmanager
+async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    """Startup, then the MCP session manager for the life of the process.
+
+    A lifespan rather than `@app.on_event("startup")` because the MCP endpoint needs a
+    task group held open around the whole run — Starlette ignores the on_event lists once
+    a lifespan is supplied, so the two cannot coexist. `_startup()` below is unchanged.
+    """
+    await _startup()
+    try:
+        async with mcp_server.session():
+            yield
+    finally:
+        await mcp_server.aclose()
+
+
+app = FastAPI(title="Persona Forge", version=VERSION, lifespan=_lifespan)
+
+# The agent-facing tool surface, served by this same process at /mcp. See mcp_server.py:
+# it is a curated facade over the endpoints below, not a route-to-tool dump.
+mcp_server.install(app)
 
 
 @app.middleware("http")
@@ -88,8 +109,8 @@ async def _log_requests(request: Any, call_next: Any):
     return response
 
 
-@app.on_event("startup")
 async def _startup() -> None:
+    """Called from `_lifespan` at the top of the file."""
     logs.info("boot", f"Persona Forge {VERSION} starting")
     logs.info("boot", "config", comfyui_url=COMFYUI_URL, builds_root=str(BUILDS_ROOT),
               db_dir=str(DB_DIR), log_dir=str(LOG_DIR), frontend=str(FRONTEND_DIR))
@@ -137,6 +158,10 @@ async def _startup() -> None:
     # The background job worker — advances builds (train → expressions) unattended,
     # independent of any open browser. Runs for the life of the container.
     asyncio.create_task(jobs.run_worker())
+
+    logs.info("boot", "MCP tool surface mounted", path="/mcp",
+              tools=len(await mcp_server.mcp.list_tools()),
+              contract_version=mcp_server.handoff.CONTRACT_VERSION)
 
     logs.info("boot", "startup complete")
 

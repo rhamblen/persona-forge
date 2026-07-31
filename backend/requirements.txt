@@ -2,3 +2,11 @@ fastapi==0.115.6
 uvicorn[standard]==0.34.0
 httpx==0.28.1
 pillow==12.3.0
+# Agent tool surface (see backend/app/mcp_server.py). The official SDK rather than a
+# hand-rolled JSON-RPC endpoint, because the transport spec still moves and protocol
+# drift is not a thing worth owning; and rather than fastapi-mcp, which derives one tool
+# per route — that would hand an agent all ~80 endpoints and every measured knob behind
+# them, losing the entire point of a curated facade. Incremental weight over what FastAPI
+# already pulls is small (sse-starlette, httpx-sse, pydantic-settings); starlette,
+# pydantic, httpx and anyio are already here.
+mcp==1.27.2
