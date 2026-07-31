@@ -9,6 +9,83 @@ Every version below is a **published GitHub Release** with a matching
 
 ---
 
+## [0.8.12] — 2026-07-30
+
+**The dataset is posed.** Phase H3c: dataset body shots are driven by pose-library skeletons,
+so the LoRA learns what this character's body *does* — not just what their face looks like.
+
+### Added
+- **Posed dataset candidates.** Every *other* full-body candidate renders against a
+  `pose_library` skeleton. Close-ups are never posed — they exist to teach identity at high
+  frequency, and a skeleton over a face crop constrains nothing.
+- **Family-major skeleton spread** (`_dataset_skeleton_spread`) — entries are walked
+  round-robin across posture families (standing / crouching / kneeling / sitting / lying)
+  rather than in id or name order, so the standing-heavy shipped catalogue can't hand a batch
+  mostly standing figures. The rotation continues across batches, as the framing one already did.
+- **Its own dials**, on `projects`: `dataset_cn_enabled` (off by default),
+  `dataset_cn_strength` (0.6), `dataset_cn_end` (0.7). The ControlNet *model* is shared with
+  the sprite path (`pose_controlnet`) — one persona, one checkpoint family.
+- **`POST /api/projects/{id}/dataset-controlnet`**, and a `controlnet` block on
+  `GET /api/projects/{id}/dataset` reporting the model, the library size and whether the
+  toggle is usable.
+- **Dataset tab**: a *Posed body shots* toggle + strength, with a hint that names the missing
+  precondition (no ControlNet model / empty pose library) instead of letting Generate fail.
+- **`DATASET_CN_FRAMING`** — a stance-neutral framing used on posed candidates, plus the
+  library entry's `prompt_hint`.
+- **`controlnet: bool | null`** on `POST .../dataset/generate` — a per-batch override; null
+  inherits the persona's setting.
+
+### Changed
+- `_dataset_variation()` takes `posed=` and swaps the canned body framing for the neutral one.
+  New siblings `_dataset_is_body()`, `_dataset_posed()` and `_dataset_posed_ordinal()`.
+- `_controlnet_kind()` lifted out of `_pose_cn_cfg()` — both paths need the registry's `kind`
+  to decide whether a union model gets `SetUnionControlNetType`.
+
+### Why
+`docs/pose-control.md` §6.3, measured 2026-07-28: a kneeling skeleton at strength 0.7 renders
+**standing** with the character LoRA loaded, and kneels without it. A LoRA trained only on
+standing shots has no idea what the character looks like kneeling, so no amount of render-time
+ControlNet produces a good kneel — the skeleton forces the geometry, the LoRA fights it, and it
+lands as melted anatomy. Teach the body first, then pose it. Everything H3a–H3b built on the
+sprite side depends on this.
+
+### Design calls not to unpick
+- **Half the body shots, not all.** The un-posed half keeps `DATASET_BODY_FRAMINGS`' spread of
+  views and camera angles, which the largely front-facing library cannot supply yet. Posing
+  everything would trade view variety for posture variety instead of gaining both. H3g's camera
+  sweep is what removes the tradeoff — revisit the ratio then.
+- **Stance words are stripped from a posed candidate's prompt.** Not a contradiction of 0.8.9,
+  which measured stripping them from an *agreeing* prompt; here "walking forward, mid-stride"
+  against a kneeling skeleton actively disagrees.
+- **0.6/0.7, not the sprite path's 1.0/0.9.** A sprite render wants the skeleton obeyed; a
+  dataset build wants posture variety the checkpoint still finishes naturally. At 1.0 the
+  dataset becomes stiff mannequins and the LoRA learns the stick figure's habits. The endpoint
+  warns above 0.90 rather than refusing.
+- **A misconfigured posed batch is refused (400), not rendered.** 0.8.8's silent-ignore costs
+  one sprite; here it would cost ~30 renders and an hour of GPU while looking perfectly fine.
+- **`_dataset_posed_ordinal` indexes by posed-candidate count, not `n`.** Indexing on `n` gave
+  the adjacent pairs in "poses" mode the same skeleton twice running and covered half the
+  library it should have.
+- **`dataset_generate` must NOT call `seed_pose_library()`.** It is the obvious way to make
+  the empty-library case "just work", and it silently breaks 0.8.5's rule that a library
+  emptied on purpose stays empty — refilling the starter set the user had just deleted and
+  then posing a batch from it. The empty case is refused instead.
+
+### Verified
+Offline, against the real templates and manifests: the splice adds exactly three nodes; every
+consumer of the raw conditioning is repointed (the 0.8.8 silent-ignore class); the dataset
+strength/end reach the apply node; ControlNet composes with the concept-LoRA chain; union models
+get `SetUnionControlNetType`; `controlnet=None` leaves the template byte-identical. Candidate
+maths: posed shots are always body shots, each posed candidate draws a distinct skeleton,
+batches continue rather than restart, and no posed prompt carries a stance word.
+
+**Not verified: what the posed images look like.** No render has been made. The
+render-and-look loop is unchanged — build a batch and read the contact sheet, watching for
+stiffness; if the bodies read as posed mannequins rather than a character standing that way,
+lower `dataset_cn_strength` before changing anything else. Needed no new workflow file.
+
+---
+
 ## [0.8.11] — 2026-07-30
 
 **Skeletons can be projected from a posed 3D body instead of hand-typed.** H3g's projection

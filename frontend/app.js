@@ -851,8 +851,48 @@ async function loadDataset() {
   }
 }
 
+// Phase H3c. The toggle depends on two things set on the *Poses* tab — a ControlNet model
+// and a non-empty pose library — so it has to explain a missing one here rather than let
+// Generate fail: by the time a batch is refused the user has already picked a count.
+function renderDatasetPosed(cn) {
+  const box = $("ds-posed"), str = $("ds-posed-strength"), hint = $("ds-posed-hint");
+  if (!cn || !box) return;
+  const ready = !!cn.model && cn.library > 0;
+  if (document.activeElement !== box) box.checked = cn.enabled;
+  if (document.activeElement !== str) str.value = cn.strength;
+  box.disabled = !ready;
+  str.disabled = !cn.enabled;
+  let text = "";
+  if (!cn.model) {
+    text = "Posed shots need a ControlNet model — pick one under “Pose structure & face pass” on the Poses tab.";
+  } else if (!cn.library) {
+    text = "The pose library is empty — add skeletons on the Poses tab, or restore the starter set.";
+  } else if (cn.enabled) {
+    text = `Every other full-body shot is posed from ${cn.library} library skeleton${cn.library === 1 ? "" : "s"}, ` +
+           `cycling posture families. Close-ups stay un-posed, and the un-posed body shots keep the camera-angle spread.`;
+  }
+  hint.textContent = text;
+  hint.hidden = !text;
+  hint.className = "hint small" + (ready ? "" : " bad");
+}
+
+async function saveDatasetPosed() {
+  if (!state.projectId) return;
+  const enabled = $("ds-posed").checked;
+  const strength = parseFloat($("ds-posed-strength").value);
+  try {
+    const r = await api(`/api/projects/${state.projectId}/dataset-controlnet`, {
+      method: "POST",
+      body: JSON.stringify({ enabled, strength: isNaN(strength) ? 0.6 : strength, end_percent: 0.7 }),
+    });
+    if (r.warning) msg($("ds-msg"), r.warning, "bad");
+    loadDataset();
+  } catch (e) { msg($("ds-msg"), e.message, "bad"); }
+}
+
 function renderDataset(data) {
   const { target, counts, reached, generating, images } = data;
+  renderDatasetPosed(data.controlnet);
   if ($("ds-target").value === "" || document.activeElement !== $("ds-target")) $("ds-target").value = target;
   $("ds-count").textContent = `${counts.selected} / ${target} selected`;
   $("ds-count").className = reached ? "ok" : "";
@@ -908,13 +948,16 @@ async function datasetGenerate(count) {
   const poseVariety = mode !== "off";
   msg($("ds-msg"), `Queuing ${count} image${count === 1 ? "" : "s"}…`);
   try {
-    const { queued } = await api(`/api/projects/${state.projectId}/dataset/generate`, {
+    // `controlnet` is deliberately not sent: the checkbox persists on the persona, so the
+    // batch inherits it and there is one place to look for what a build will do.
+    const { queued, posed } = await api(`/api/projects/${state.projectId}/dataset/generate`, {
       method: "POST",
       body: JSON.stringify({ count, pose_variety: poseVariety, mode: poseVariety ? mode : "both" }),
     });
     const how = { both: " across varied faces & poses", faces: " of close-up faces + expressions",
                   poses: " of full-body poses & views" }[mode] || "";
-    msg($("ds-msg"), `Queued ${queued}${how}. They'll appear below as ComfyUI finishes them.`, "ok");
+    const cn = posed ? `, ${posed} posed from skeletons` : "";
+    msg($("ds-msg"), `Queued ${queued}${how}${cn}. They'll appear below as ComfyUI finishes them.`, "ok");
     startDatasetPolling();
     loadDataset();
   } catch (e) {
@@ -951,6 +994,8 @@ $("ds-grid").addEventListener("click", (e) => {
 });
 $("ds-generate").addEventListener("click", () => datasetGenerate(30));
 $("ds-more").addEventListener("click", () => datasetGenerate(10));
+$("ds-posed").addEventListener("change", saveDatasetPosed);
+$("ds-posed-strength").addEventListener("change", saveDatasetPosed);
 $("ds-purge").addEventListener("click", async () => {
   if (!state.projectId) return;
   if (!confirm("Delete all unselected candidates? They're removed from the dataset and from disk. Selected images are kept. This can't be undone.")) return;

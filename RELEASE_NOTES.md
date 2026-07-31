@@ -1,61 +1,76 @@
-# v0.8.11 — Skeletons projected from a posed body, not typed by hand
+# v0.8.12 — The dataset is posed
 
-## The case, in numbers
+## The measurement this fixes
 
-Of the 11 library entries authored by hand across 0.8.9 and 0.8.10, **five needed
-re-authoring**. Every failure was the same kind: coordinates that are defensible as numbers
-and wrong as a picture.
+2026-07-28, on the live box: a kneeling skeleton, correctly staged and applied at strength
+0.7, rendered a **standing** figure with the character LoRA loaded — and knelt correctly with
+the LoRA removed.
 
-| Entry | What went wrong |
-|---|---|
-| `hugging knees, head buried` | head joints dropped → rendered headless |
-| `legs stretched, ankles crossed` | standing leg proportions → read as standing |
-| `legs stretched and apart` | same |
-| `legs stretched, leaning back on hands` | same |
-| `bending forward, arms out` | head above the neck → read as standing |
+That is not a ControlNet bug. A LoRA trained only on standing shots has no idea what this
+character looks like kneeling, so the skeleton forces geometry the LoRA has never seen, the
+two fight, and the result is melted anatomy. No amount of render-time tuning fixes it.
 
-Projecting from a posed 3D body removes that class of error **by construction** — the body is
-anatomically consistent because it came from a body.
+**Teach the body first, then pose it.** That's this release.
 
-## What's in this release
+## What's in it
 
-`project_bones()` takes world-space bone positions and returns 18 normalised COCO-18
-keypoints, ready to drop straight into a library entry. It has **no Blender dependency**, so
-it's testable offline and Blender's only job is handing over a dict of positions.
+Every *other* full-body dataset candidate now renders against a skeleton from the pose
+library. Close-ups are never posed — they exist to teach identity at high frequency, and a
+skeleton over a face crop constrains nothing.
 
-Bone names are matched loosely — Rigify (`forearm.L`), Mixamo (`mixamorig:LeftArm`) and plain
-names all work. Unmatched bones are **dropped rather than guessed**: a wrong joint renders as
-a broken body, an absent one renders as an occlusion, which OpenPose emits routinely anyway.
+Skeletons are walked **round-robin across posture families** — standing, crouching, kneeling,
+sitting, lying — rather than in id or name order. The shipped catalogue is standing-heavy (13
+of its 24 entries), so walking it in order would have handed a 30-image batch mostly standing
+figures, which is the exact gap this closes. The rotation continues across batches, the way
+framing rotation already did.
 
-`describe()` gives the sanity figures worth reading before you save — height fraction, hip y,
-whether the head landed below the neck, unmatched joints, anything off-canvas. It's not a
-validator; an unusual pose can be perfectly correct.
+On the Dataset tab: a **Posed body shots** toggle and a strength dial. Both preconditions —
+a ControlNet model and a non-empty pose library — are set on the Poses tab, so the hint names
+whichever one is missing rather than letting Generate fail after you've chosen a count.
 
-## Two things it gets right that eyeballing didn't
+It needed **no new workflow file**. ControlNet touches conditioning, LoRAs touch model/CLIP,
+so the existing splice drops into `base-character` and `base-character-lora` untouched and
+composes with the concept-LoRA chain.
 
-**Foreshortening comes free.** Perspective projection, not orthographic, on purpose. Measured
-on synthetic rigs: a seated figure with legs toward the camera projects a shin→ankle span of
-**0.049** against a standing **0.237**. That's the exact error that cost three rewrites.
+## Four calls worth knowing about
 
-**Fixed scale, not per-pose fit.** The scale comes from a reference *standing* height, so a
-crouch stays genuinely shorter than a stand — 0.438 of canvas height against 0.855.
-Auto-fitting each pose would give every figure the same frame height and set SillyTavern
-jittering as it swaps sprites. `ref_height`, `figure_fraction` and `footing` are library-wide
-constants: keep them identical across every entry.
+**Half the body shots, not all of them.** The un-posed half keeps the spread of views and
+camera angles that the largely front-facing library can't supply yet. Posing everything would
+have traded view variety for posture variety instead of gaining both.
 
-## Still to do
+**Its own strength — 0.6/0.7, against the sprite path's 1.0/0.9.** The two uses want opposite
+things. A sprite render wants the skeleton obeyed; a dataset build wants posture variety the
+checkpoint still finishes naturally. At 1.0 the dataset becomes a set of stiff mannequins and
+the LoRA learns the stick figure's habits rather than the character's body.
 
-The **extraction** half — running the snippet in Blender to read a posed armature. It's
-documented in [`docs/pose-control.md`](docs/pose-control.md) §6.2 and needs the BlenderMCP
-addon's socket server running, which is a button in Blender's sidebar.
+**Stance words are dropped from a posed candidate's prompt.** 0.8.9 measured that stripping
+stance words from an *agreeing* prompt didn't help — that still holds. This is the other case:
+"walking forward, mid-stride" against a kneeling skeleton is an outright contradiction.
 
-And the render-and-look loop stays mandatory. Projection lowers the error rate; it doesn't
-remove the need to look at a contact sheet.
+**A misconfigured posed batch is refused, not rendered.** 0.8.8 taught this on a single sprite
+(skeleton set, no model → renders fine, ignores the figure). Here the silent version costs ~30
+renders and an hour of GPU, and the output *looks* correct — it just teaches the LoRA nothing.
+
+## What's verified, and what isn't
+
+Verified offline against the real templates: the splice adds exactly three nodes, every
+consumer of the raw conditioning is repointed, the dataset strength and end reach the apply
+node, ControlNet composes with the LoRA chain, union models get `SetUnionControlNetType`, and
+turning it off leaves the graph byte-identical. Candidate maths: posed shots are always body
+shots, each draws a distinct skeleton, batches continue rather than restart, and no posed
+prompt carries a stance word.
+
+**No image has been rendered yet.** The render-and-look loop is unchanged: build a batch and
+read the contact sheet. The thing to watch for is stiffness — if the bodies read as posed
+mannequins rather than a character who happens to be standing that way, lower the strength
+before changing anything else.
 
 ## Upgrade notes
 
-Automatic — new module, no schema change, no compose change.
+Automatic. Three nullable columns are added to `projects` on boot; posed shots are **off by
+default**, so an existing persona's next batch behaves exactly as it did before until you turn
+it on. No compose change.
 
-**Image:** `ghcr.io/rhamblen/persona-forge:0.8.11`
+**Image:** `ghcr.io/rhamblen/persona-forge:0.8.12`
 
 Full detail in [`CHANGELOG.md`](CHANGELOG.md).

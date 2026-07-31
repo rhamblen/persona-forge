@@ -1,5 +1,33 @@
 # AI Context — cold-start orientation
 
+> **2026-07-30 — v0.8.12: the dataset is POSED (H3c).** Every *other* full-body dataset
+> candidate now renders against a `pose_library` skeleton, which is what makes the sprite
+> path's skeletons work at all: §6.3's measurement is that a standing-only LoRA **overpowers**
+> a kneeling skeleton, so render-time ControlNet alone can never produce a good kneel. Teach
+> the body first, then pose it. Four things not to "simplify": **(1)** close-ups are never
+> posed (they carry identity) and only *half* the body shots are — the un-posed half keeps
+> `DATASET_BODY_FRAMINGS`' camera-angle spread, which the front-facing library can't supply
+> until H3g's camera sweep lands. **(2)** A posed candidate's framing is replaced by the
+> stance-neutral `DATASET_CN_FRAMING` + the entry's `prompt_hint`; this does not contradict
+> 0.8.9 (which measured stripping stance words from an *agreeing* prompt — here the canned
+> framing actively disagrees with the skeleton). **(3)** Dataset dials are **separate** from
+> the sprite ones — `dataset_cn_strength` 0.6 / `dataset_cn_end` 0.7 against the sprite path's
+> 1.0/0.9, because a sprite wants the skeleton obeyed and a dataset wants variety the
+> checkpoint still finishes; at 1.0 the LoRA learns the stick figure's habits. The *model* is
+> shared (`pose_controlnet`) on purpose. **(4)** A misconfigured posed batch is **refused
+> (400)**, not rendered — 0.8.8's silent-ignore costs one sprite, this would cost ~30 renders
+> and look fine. Entries are walked family-major round-robin (`_dataset_skeleton_spread`) so a
+> standing-heavy catalogue doesn't give a standing-heavy dataset; `_dataset_posed_ordinal`
+> indexes by **posed-candidate count, not `n`** (indexing on `n` gave adjacent "poses"-mode
+> pairs the same skeleton and covered half the library). **`dataset_generate` must never call
+> `seed_pose_library()`** — the tempting fix for the empty-library case, and it breaks 0.8.5's
+> "an emptied library stays empty" by refilling the starter set the user deleted and posing
+> from it. Skeletons upload once per batch,
+> scoped to the call so an edited entry always re-stages. **Graph + candidate maths verified
+> offline; no image rendered yet — render a batch and look for stiffness, and if the bodies
+> read as mannequins drop `dataset_cn_strength` first.** Design + measurements:
+> `docs/pose-control.md` §6.1.
+>
 > **2026-07-30 — v0.8.11: skeletons are PROJECTED, not typed.** `backend/app/
 > skeleton_import.py` turns world-space bone positions into 18 normalised COCO-18 keypoints.
 > It has **no Blender dependency** on purpose — unit-testable offline, and Blender's only job
@@ -252,6 +280,11 @@ LAN; no Claude/Anthropic in the runtime loop.
 - **Admin / deletion (0.8.3):** `DELETE /api/projects/{id}?delete_files=`,
   `DELETE /api/versions/{id}?force=`, `DELETE /api/projects/{id}/lora/{filename}` — see the
   0.8.3 banner at the top for the guards each one enforces.
+- **Posed dataset (0.8.12):** `POST /api/projects/{id}/dataset-controlnet`
+  (`{enabled, strength, end_percent}`); `GET /api/projects/{id}/dataset` gained a `controlnet`
+  block (`enabled`, `model`, `strength`, `end_percent`, `library` count) so the Dataset tab can
+  say *why* the toggle is unavailable — both preconditions are set on the Poses tab.
+  `POST .../dataset/generate` takes `controlnet: bool | null` (null = the persona's setting).
 - **Images/builds:** `GET /api/image` (0.8.6: disk-first off `/builds`, ComfyUI proxy only as
   fallback), `/api/builds`. **Logs:** `GET /api/logs[/persisted]`.
 
@@ -477,14 +510,22 @@ LAN; no Claude/Anthropic in the runtime loop.
   precondition for the stickman editor); the library is global because a skeleton is
   character-agnostic; deleting an entry unlinks poses rather than invalidating renders, since the
   staged skeleton lives in ComfyUI's input.
-- **Remaining:** **H3c** (ControlNet in the dataset build — now the priority, see the measured
-  LoRA-vs-skeleton finding), **H3g** (Blender as a skeleton source: read bone positions and
-  project to COCO-18 — no render, so headless is fine; see `docs/pose-control.md` §6.2), and
-  (ControlNet in the dataset build, which is what teaches the LoRA the body at all); rest of
+- **0.8.12:** **Phase H3c — ControlNet in the dataset build.** See the header note. Key design
+  calls: half the body shots rather than all (posture variety must not cost the view variety
+  the library can't yet supply); dataset dials separate from the sprite ones, model shared;
+  a misconfigured posed batch is refused rather than rendered; the skeleton spread is
+  family-major so a standing-heavy catalogue can't produce a standing-heavy dataset. Needed no
+  new workflow file — `apply_controlnet` splices into anything declaring a `controlnet`
+  manifest block, which `base-character`/`base-character-lora` already do.
+- **Remaining:** **H3g's extraction half** (drive `project_bones()` from a posed Blender rig —
+  the projection shipped in 0.8.11; see `docs/pose-control.md` §6.2), the **wireframe authoring
+  workspace/skill** (`PROJECT_PLAN.md`), rest of
   **Phase H1** (dataset layers + emotion enrichment behind the
   baseline gate, `lora_builds` versioning, per-axis selective rebuild — see `docs/emotion-depth.md`)
   · Character Studio at **0.9** · 1.0 release. The **dataset side of the weak-LoRA fix is now
-  complete** (0.7.2 pose + 0.7.3 framing/expression + 0.7.6 targeting/variety).
+  complete** (0.7.2 pose + 0.7.3 framing/expression + 0.7.6 targeting/variety + 0.8.12
+  structural posing — the last one is the only part that teaches the *body*, the rest are prompt
+  variety).
 - **Future infra (HARDWARE-GATED, added 2026-07-26):** user is swapping UR1's RTX 3060 → a second
   **RTX 3090 24 GB** (→ 2× 3090). Unlocks a **dedicated training GPU**: a 2nd ComfyUI instance
   pinned to GPU 2 (reuse `lora-train.json`) as the trainer via a PF `TRAIN_COMFYUI_URL`, main

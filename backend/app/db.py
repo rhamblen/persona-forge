@@ -331,6 +331,26 @@ _PROJECT_H3_COLUMNS = [
     ("pose_face_denoise", "REAL NOT NULL DEFAULT 0.6"),
 ]
 
+# ControlNet in the DATASET build (Phase H3c, 0.8.12). Separate dials from the sprite-render
+# ones above, because the two uses want opposite things (docs/pose-control.md §6.1): a sprite
+# render wants the skeleton OBEYED, a dataset build wants posture VARIETY that the checkpoint
+# still finishes naturally. Sharing one strength would force a choice between a rigid dataset
+# and unposed sprites. The controlnet *model* is deliberately NOT duplicated — `pose_controlnet`
+# serves both, since a persona has one checkpoint family and a second model field is just a
+# second thing to get wrong.
+_PROJECT_H3C_COLUMNS = [
+    # Off by default: this changes what a dataset batch renders, and switching it on for
+    # every existing persona at upgrade would silently alter the next build they run.
+    ("dataset_cn_enabled", "INTEGER NOT NULL DEFAULT 0"),
+    # Moderate on purpose. At the sprite path's 1.0 the figure snaps to the skeleton and the
+    # dataset teaches the LoRA a set of stiff mannequins; ~0.6 biases the posture while
+    # leaving the model room to draw a body it believes in.
+    ("dataset_cn_strength", "REAL NOT NULL DEFAULT 0.6"),
+    # Released earlier than the sprite path's 0.9 for the same reason: the last third of the
+    # steps should resolve anatomy and cloth, not the stick figure.
+    ("dataset_cn_end", "REAL NOT NULL DEFAULT 0.7"),
+]
+
 
 def connect() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -413,6 +433,10 @@ def init_db() -> None:
             if col not in pcols:
                 conn.execute(f"ALTER TABLE poses ADD COLUMN {col} {decl}")
         for col, decl in _PROJECT_H3_COLUMNS:
+            if col not in cols:
+                conn.execute(f"ALTER TABLE projects ADD COLUMN {col} {decl}")
+        # pre-0.8.12 — ControlNet in the dataset build.
+        for col, decl in _PROJECT_H3C_COLUMNS:
             if col not in cols:
                 conn.execute(f"ALTER TABLE projects ADD COLUMN {col} {decl}")
 

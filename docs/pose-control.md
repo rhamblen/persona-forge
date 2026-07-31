@@ -425,7 +425,7 @@ Each stage is independently useful; the early ones pay off even if the editor ne
 |---|---|
 | **H3a** | **Prerequisite + render path.** CN registry with `base_model` + pre-flight guard; `pose-with-lora-cn.json`; **per-pose seed fix**; settle **portrait aspect + FaceDetailer** (§5). Prove one pose renders against one hand-made skeleton. |
 | **H3b** | **Pose library.** Table + CRUD + the §3.5 starter set + `prompt_hint`/`prop_slot`; `pose-extract.json` for import-from-image and harvest-from-render. |
-| **H3c** | **ControlNet in the dataset build** (§6.1) — the LoRA learns body structure, not just faces. |
+| **H3c** | **ControlNet in the dataset build** (§6.1) — the LoRA learns body structure, not just faces. **BUILT 0.8.12.** |
 | **H3d** | **Bindings + selection.** Tier → pose-group defaults per axis, recorded choice, 🎲 re-roll, 📌 pin, per-persona override. |
 | **H3e** | **Pose studio page.** The "move from the LoRA to poses" route: review grid grouped by axis, per-pose CN strength, re-roll, compare against the previous render (previous kept, same rollback ethos as prompts). |
 | **H3f** | **Stickman editor** *(later)*. Canvas keypoint editing in the frontend, saved as a derived library entry with lineage. |
@@ -433,7 +433,59 @@ Each stage is independently useful; the early ones pay off even if the editor ne
 **H3a is the one to build first if only one gets built** — the seed fix plus a single
 skeleton will visibly break the sameness before any library exists.
 
-### 6.1 ControlNet in the dataset build — the other half
+### 6.1 ControlNet in the dataset build — the other half (**BUILT 0.8.12**)
+
+> **Status 2026-07-30.** Shipped. Dials live on `projects` as `dataset_cn_enabled` /
+> `dataset_cn_strength` (0.6) / `dataset_cn_end` (0.7), separate from the sprite path's
+> `pose_cn_*`; the *model* is shared (`pose_controlnet`). Off by default. Endpoint
+> `POST /api/projects/{id}/dataset-controlnet`; the Dataset tab carries the toggle.
+> **Not yet verified against a live ComfyUI run** — graph wiring and candidate maths are
+> covered offline (see "What is checked" below), the render itself is not.
+>
+> **What shipped, in one paragraph.** Every *other* full-body candidate is driven by a
+> `pose_library` skeleton; close-ups are never posed. Entries are walked **family-major
+> round-robin** (`_dataset_skeleton_spread`) so a standing-heavy catalogue doesn't yield a
+> standing-heavy dataset, and the rotation continues across batches like the framing one
+> already did. A posed candidate's framing is replaced by the stance-neutral
+> `DATASET_CN_FRAMING` plus the entry's `prompt_hint`.
+>
+> **Four design calls worth not re-deriving:**
+>
+> 1. **Half the body shots, not all of them.** The un-posed half keeps
+>    `DATASET_BODY_FRAMINGS`' spread of views and camera angles, which the largely
+>    front-facing library cannot supply today. Posing everything would trade view variety
+>    for posture variety rather than gaining both. **H3g's camera sweep is what removes
+>    this tradeoff** — when the library carries real angles, this ratio should be revisited.
+> 2. **Stance words are stripped from a posed candidate's prompt.** This does *not*
+>    contradict the 0.8.9 measurement (that stripping stance words didn't improve pose
+>    adherence): 0.8.9 tested an *agreeing* prompt, where the words were redundant. Here
+>    the canned framing actively disagrees — "walking forward, mid-stride" against a
+>    kneeling skeleton — which is a different failure. `prompt_hint` still rides along,
+>    because a skeleton encodes the grip and not the sword (§3.6).
+> 3. **Its own strength, not the sprite path's.** 0.6/0.7 against the sprite path's 1.0/0.9.
+>    The two uses want opposite things: a sprite render wants the skeleton *obeyed*, a
+>    dataset build wants posture *variety* the checkpoint still finishes naturally. At 1.0
+>    the dataset becomes a set of stiff mannequins and the LoRA learns the stick figure's
+>    habits — which is the thing §2.6 of `emotion-depth.md` warns about, arriving by a new
+>    route. The endpoint warns above 0.90 rather than refusing.
+> 4. **A misconfigured posed batch is refused, not silently rendered.** 0.8.8's lesson
+>    (skeleton set, no model → renders fine and ignores the figure) costs one sprite; here
+>    it would cost ~30 renders and an hour of GPU, and the output *looks* correct — it just
+>    teaches the LoRA nothing new. Missing model or empty library → `400`. A faces-only
+>    batch warns instead, since close-ups being CN-free is the design, not a mistake.
+>
+> **What is checked, and what isn't.** Offline: the splice adds exactly three nodes, every
+> consumer of the raw conditioning is repointed (the 0.8.8 silent-ignore class), the dataset
+> strength/end reach the apply node, ControlNet composes with the concept-LoRA chain, union
+> models get `SetUnionControlNetType`, and `controlnet=None` leaves the template byte-identical.
+> Candidate maths: posed shots are always body shots, each posed candidate draws a distinct
+> skeleton, batches continue rather than restart, and no posed prompt carries a stance word.
+> **Unverified:** what the posed images actually look like. The mandatory loop is unchanged —
+> **render a batch and look at the contact sheet.** The specific thing to look for is stiffness:
+> if the bodies read as posed mannequins rather than a character standing that way, drop
+> `dataset_cn_strength` before changing anything else.
+
+### 6.1.0 Why it matters (original argument)
 
 > User, 2026-07-28: *"we can use ControlNet when building the initial poses for the LoRA,
 > where we have different body positions as well as faces. Then when the LoRA is built,

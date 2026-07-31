@@ -1716,24 +1716,121 @@ DATASET_POSE_EXPRESSIONS = [
 ]
 
 
-def _dataset_variation(n: int, mode: str = "both") -> str:
+# The framing used on a skeleton-driven candidate (Phase H3c). Deliberately says nothing
+# about stance or view: the skeleton already fixes both, and a canned "walking forward,
+# mid-stride" against a kneeling skeleton is an outright contradiction rather than the
+# harmless redundancy the 0.8.9 measurement covered (that test found stripping stance words
+# from an *agreeing* prompt didn't help — it says nothing about a disagreeing one).
+DATASET_CN_FRAMING = "full body, full figure visible from head to feet"
+
+
+def _dataset_is_body(n: int, mode: str = "both") -> bool:
+    """Whether candidate `n` is a full-body shot — the half a skeleton may drive (H3c).
+
+    Close-ups are excluded by design: they exist to teach identity at high frequency, and a
+    skeleton over a face crop constrains nothing while costing an upload.
+    """
+    if mode == "faces":
+        return False
+    if mode == "poses":
+        return True
+    return n % 2 == 1  # "both" alternates face/body
+
+
+def _dataset_posed(n: int, mode: str = "both") -> bool:
+    """Whether candidate `n` gets a skeleton — every OTHER body shot (Phase H3c).
+
+    Not every body shot: the un-posed ones keep `DATASET_BODY_FRAMINGS`' spread of views and
+    camera angles, which the (largely front-facing) pose library cannot supply yet. Posing
+    all of them would trade view variety for posture variety instead of gaining both. H3g's
+    camera sweep is what eventually removes that tradeoff.
+    """
+    return _dataset_is_body(n, mode) and (n // 2) % 2 == 1
+
+
+def _dataset_posed_ordinal(n: int, mode: str = "both") -> int:
+    """How many posed candidates precede `n` — its index into the skeleton spread.
+
+    Counted rather than derived from `n` directly because the posed candidates are not
+    evenly spaced: in "both" they fall every 4th, in "poses" in adjacent pairs. Indexing on
+    `n` gave the pair the same skeleton twice running and covered half the library it
+    should have. Both patterns repeat every 4 candidates, so one cycle is enough to count.
+    """
+    per_cycle = sum(1 for k in range(4) if _dataset_posed(k, mode))
+    full, rem = divmod(n, 4)
+    return full * per_cycle + sum(1 for k in range(rem) if _dataset_posed(k, mode))
+
+
+def _dataset_variation(n: int, mode: str = "both", posed: bool = False) -> str:
     """A framing+expression suffix for candidate index `n`, per `mode`:
       - "faces": close-up/bust framings × the full expression spread (top up a weak face).
       - "poses": full-body framings + many views × light expressions (top up weak poses/angles).
       - "both" : alternate a face shot and a body shot (≈50/50), with full expression variety.
-    Framing and expression rotate at different rates so pairs vary and don't repeat quickly."""
+    Framing and expression rotate at different rates so pairs vary and don't repeat quickly.
+
+    `posed` (H3c) means a ControlNet skeleton is driving this candidate, so the canned body
+    framing is replaced by a stance-neutral one — see `DATASET_CN_FRAMING`.
+    """
     if mode == "faces":
         framing = DATASET_FACE_FRAMINGS[n % len(DATASET_FACE_FRAMINGS)]
         return f"{framing}, {DATASET_EXPRESSIONS[n % len(DATASET_EXPRESSIONS)]}"
     if mode == "poses":
-        framing = DATASET_BODY_FRAMINGS[n % len(DATASET_BODY_FRAMINGS)]
+        framing = DATASET_CN_FRAMING if posed else DATASET_BODY_FRAMINGS[n % len(DATASET_BODY_FRAMINGS)]
         return f"{framing}, {DATASET_POSE_EXPRESSIONS[n % len(DATASET_POSE_EXPRESSIONS)]}"
     # both — alternate face/body so every batch keeps a strong share of close-ups
     if n % 2 == 0:
         framing = DATASET_FACE_FRAMINGS[(n // 2) % len(DATASET_FACE_FRAMINGS)]
+    elif posed:
+        framing = DATASET_CN_FRAMING
     else:
         framing = DATASET_BODY_FRAMINGS[(n // 2) % len(DATASET_BODY_FRAMINGS)]
     return f"{framing}, {DATASET_EXPRESSIONS[n % len(DATASET_EXPRESSIONS)]}"
+
+
+def _dataset_skeleton_spread(conn) -> list[Any]:
+    """Library entries ordered so consecutive picks cycle posture FAMILIES, not rows.
+
+    The shipped catalogue is standing-heavy (13 of its 24 entries), so walking it in id or
+    name order hands a 30-image batch mostly standing figures — precisely the gap H3c exists
+    to close. Round-robining the families keeps a batch spread over standing / crouching /
+    kneeling / sitting / lying whatever shape the catalogue grows into.
+    """
+    rows = conn.execute(
+        """SELECT id, name, family, category, keypoints_json, prompt_hint
+           FROM pose_library ORDER BY family, name""").fetchall()
+    by_family: dict[str, list[Any]] = {}
+    for r in rows:
+        by_family.setdefault((r["family"] or "standing"), []).append(r)
+    out: list[Any] = []
+    for i in range(max((len(v) for v in by_family.values()), default=0)):
+        for fam in sorted(by_family):
+            if i < len(by_family[fam]):
+                out.append(by_family[fam][i])
+    return out
+
+
+def _dataset_cn_settings(conn, project_id: int, force: bool = False) -> dict[str, Any] | None:
+    """This persona's dataset-ControlNet dials, or None when it is switched off.
+
+    Reuses `pose_controlnet` for the model (one persona, one checkpoint family) but its own
+    strength/end, because posing a trained character and teaching an untrained one want
+    opposite rigidity — see `_PROJECT_H3C_COLUMNS`.
+
+    `force` serves a per-batch opt-in on a persona that hasn't enabled the setting: the
+    stored strength/end are still read rather than re-stating defaults here, so the two
+    files can't drift apart.
+    """
+    proj = conn.execute(
+        """SELECT pose_controlnet, dataset_cn_enabled, dataset_cn_strength, dataset_cn_end
+           FROM projects WHERE id = ?""", (project_id,)).fetchone()
+    if not proj or not (proj["dataset_cn_enabled"] or force):
+        return None
+    return {
+        "controlnet_name": (proj["pose_controlnet"] or "").strip(),
+        "strength": proj["dataset_cn_strength"],
+        "start_percent": 0.0,
+        "end_percent": proj["dataset_cn_end"],
+    }
 
 
 def _version_prompt_params(version: dict[str, Any]) -> dict[str, Any]:
@@ -1911,6 +2008,9 @@ class DatasetGenerateRequest(BaseModel):
     # Which axis to spread across — "both" (faces + poses), "faces" (close-ups + expressions,
     # to strengthen a weak face) or "poses" (full body + many views, to strengthen weak poses).
     mode: Literal["both", "faces", "poses"] = "both"
+    # Phase H3c: drive the body shots from pose-library skeletons. None = use the persona's
+    # `dataset_cn_enabled` setting; True/False overrides it for this batch only.
+    controlnet: bool | None = None
 
 
 @app.post("/api/projects/{project_id}/dataset/generate")
@@ -1942,31 +2042,94 @@ async def dataset_generate(project_id: int, body: DatasetGenerateRequest) -> dic
     # Continue the variation rotation across successive batches (Generate 30, then +10 more)
     # so coverage stays even instead of restarting at the first framing each time.
     offset = 0
-    if vary:
-        with db.connect() as conn:
+    cn_settings: dict[str, Any] | None = None
+    cn_entries: list[Any] = []
+    with db.connect() as conn:
+        if vary:
             offset = conn.execute(
                 "SELECT COUNT(*) n FROM dataset_jobs WHERE project_id = ?", (project_id,),
             ).fetchone()["n"]
+        # Phase H3c — teach the LoRA what this character's body DOES. A set built only from
+        # standing shots cannot be posed afterwards: render-time ControlNet forces geometry
+        # the LoRA has never seen, the two fight, and it lands as melted anatomy
+        # (docs/pose-control.md §6.3, measured). Skeletons here are what make the sprite
+        # path's skeletons work at all.
+        want_cn = body.controlnet
+        if want_cn is None:
+            want_cn = _dataset_cn_settings(conn, project_id) is not None
+        if want_cn and vary:
+            # Deliberately NOT seed_pose_library() — an emptied library must stay empty
+            # (0.8.5). Re-seeding here would refill a catalogue the user cleared on purpose,
+            # and then quietly pose a batch from the starter set they had just deleted.
+            # An empty library is refused below instead.
+            cn_settings = _dataset_cn_settings(conn, project_id, force=True)
+            cn_entries = _dataset_skeleton_spread(conn)
+
+    if cn_settings:
+        # Refuse rather than quietly render an unposed batch. 0.8.8 taught this on a single
+        # sprite; here the silent version wastes ~30 renders and an hour of GPU, and the
+        # result looks fine — it just teaches the LoRA nothing new about the body.
+        if not cn_settings["controlnet_name"]:
+            raise HTTPException(
+                400, "posed dataset shots need a ControlNet model — pick one under "
+                     "'Pose structure & face pass' on the Poses tab, or turn off posed "
+                     "dataset shots.")
+        if not cn_entries:
+            raise HTTPException(
+                400, "the pose library is empty, so there are no skeletons to build a posed "
+                     "dataset from — add entries on the Poses tab or restore the starter set.")
+        await _check_controlnet_file(cn_settings["controlnet_name"])
+        if body.mode == "faces":
+            # Not an error: the user asked for close-ups, and close-ups are CN-free by design.
+            logs.warn("process",
+                      "posed dataset shots are on but this batch is faces-only — no candidate "
+                      "gets a skeleton. Use 'both' or 'poses' to build body coverage.",
+                      project_id=project_id)
+            cn_settings = None
 
     mode_desc = {"both": "faces + poses", "faces": "close-up faces + expressions",
                  "poses": "full body + many views"}.get(body.mode, body.mode)
     logs.info("process",
               f"dataset: queuing a batch of {count} "
-              + (f"across varied {mode_desc}" if vary else "at fresh seeds (same framing/expression)"),
+              + (f"across varied {mode_desc}" if vary else "at fresh seeds (same framing/expression)")
+              + (f", every other body shot posed from {len(cn_entries)} skeletons"
+                 if cn_settings else ""),
               project_id=project_id, slug=slug)
     queued = 0
+    posed = 0
+    # One upload per distinct skeleton per batch, not per candidate: a batch is a single
+    # burst, so re-uploading the same figure seven times is pure latency. Scoped to this
+    # call rather than cached across batches, which keeps the H3b property that an edited
+    # library entry always re-stages (a cache keyed on entry id would serve the old figure).
+    staged: dict[int, str] = {}
     with db.connect() as conn:
         for i in range(count):
+            n = offset + i
             seed = random.randint(1, 2**31 - 1)
             params = {**base, "seed": seed, "output_prefix": f"{slug}/images/ds"}
             variation = None
+            cn_cfg: dict[str, Any] | None = None
+            entry = None
+            if cn_settings and _dataset_posed(n, body.mode):
+                entry = cn_entries[_dataset_posed_ordinal(n, body.mode) % len(cn_entries)]
+                if entry["id"] not in staged:
+                    staged[entry["id"]] = await _stage_family_skeleton(conn, slug, entry)
+                cn_cfg = {**cn_settings, "skeleton": staged[entry["id"]],
+                          "kind": _controlnet_kind(conn, cn_settings["controlnet_name"])}
             if vary:
-                variation = _dataset_variation(offset + i, body.mode)
+                variation = _dataset_variation(n, body.mode, posed=cn_cfg is not None)
+                # A skeleton fixes the joints but not what the hands hold or the body rests
+                # on; without the hint a "leaning on the wall" figure leans on nothing.
+                hint = (entry["prompt_hint"] if entry is not None else "") or ""
+                if hint and hint.lower() not in variation.lower():
+                    variation = f"{variation}, {hint}"
                 params["expression"] = variation
             try:
-                graph = workflows.build_graph(ds_workflow, params, lora_stack=ds_chain)
+                graph = workflows.build_graph(ds_workflow, params, lora_stack=ds_chain,
+                                              controlnet=cn_cfg)
                 logs.verbose("process", f"queuing dataset image {i + 1}/{count}",
-                             seed=seed, variation=variation)
+                             seed=seed, variation=variation,
+                             skeleton=entry["name"] if entry is not None else None)
                 prompt_id = await comfy.submit(graph)
             except (workflows.WorkflowError, comfy.ComfyError) as exc:
                 # stop the batch but keep whatever already queued
@@ -1980,16 +2143,25 @@ async def dataset_generate(project_id: int, body: DatasetGenerateRequest) -> dic
                 (project_id, prompt_id),
             )
             queued += 1
+            if cn_cfg:
+                posed += 1
 
-    logs.info("process", f"dataset: queued {queued} image(s)", project_id=project_id, slug=slug)
-    return {"queued": queued, "pose_variety": vary, "mode": body.mode if vary else None}
+    logs.info("process",
+              f"dataset: queued {queued} image(s)"
+              + (f", {posed} posed from skeletons" if posed else ""),
+              project_id=project_id, slug=slug)
+    return {"queued": queued, "pose_variety": vary, "mode": body.mode if vary else None,
+            "posed": posed, "skeletons": len(staged)}
 
 
 @app.get("/api/projects/{project_id}/dataset")
 async def dataset_list(project_id: int) -> dict:
     await _reconcile_dataset(project_id)
     with db.connect() as conn:
-        proj = conn.execute("SELECT dataset_target FROM projects WHERE id = ?", (project_id,)).fetchone()
+        proj = conn.execute(
+            """SELECT dataset_target, pose_controlnet, dataset_cn_enabled,
+                      dataset_cn_strength, dataset_cn_end
+               FROM projects WHERE id = ?""", (project_id,)).fetchone()
         if proj is None:
             raise HTTPException(404, "project not found")
         rows = conn.execute(
@@ -2001,6 +2173,7 @@ async def dataset_list(project_id: int) -> dict:
             "SELECT COUNT(*) n FROM dataset_jobs WHERE project_id = ? AND status = 'pending'",
             (project_id,),
         ).fetchone()["n"]
+        library = conn.execute("SELECT COUNT(*) n FROM pose_library").fetchone()["n"]
     images = [dict(r) for r in rows]
     selected = sum(1 for r in images if r["selected"])
     target = proj["dataset_target"]
@@ -2010,7 +2183,56 @@ async def dataset_list(project_id: int) -> dict:
         "counts": {"candidates": len(images), "selected": selected, "pending": pending},
         "reached": selected >= target,
         "images": images,
+        # Phase H3c. `controlnet` + `library` are reported so the toggle can explain itself
+        # rather than failing at Generate — both are preconditions the user sets elsewhere
+        # (the Poses tab), so the Dataset tab has to say when one is missing.
+        "controlnet": {
+            "enabled": bool(proj["dataset_cn_enabled"]),
+            "model": (proj["pose_controlnet"] or "").strip(),
+            "strength": proj["dataset_cn_strength"],
+            "end_percent": proj["dataset_cn_end"],
+            "library": library,
+        },
     }
+
+
+class DatasetControlNetRequest(BaseModel):
+    enabled: bool = False
+    # Defaults mirror _PROJECT_H3C_COLUMNS: moderate, and released before the end of the
+    # schedule so the last steps resolve a real body rather than the stick figure.
+    strength: float = Field(default=0.6, ge=0.0, le=2.0)
+    end_percent: float = Field(default=0.7, ge=0.0, le=1.0)
+
+
+@app.post("/api/projects/{project_id}/dataset-controlnet")
+async def set_dataset_controlnet(project_id: int, body: DatasetControlNetRequest) -> dict:
+    """Set whether dataset body shots are driven by pose-library skeletons (Phase H3c)."""
+    warning = ""
+    if body.enabled and body.strength >= 0.9:
+        # Allowed — but at sprite-render rigidity the dataset becomes a set of mannequins
+        # posed identically to the library, and the LoRA learns the stick figure's habits
+        # rather than the character's body.
+        warning = ("a dataset ControlNet strength at or above 0.90 renders stiff, "
+                   "skeleton-locked bodies — 0.60 is the intended range for teaching "
+                   "posture without dictating it")
+    with db.connect() as conn:
+        cur = conn.execute(
+            """UPDATE projects SET dataset_cn_enabled = ?, dataset_cn_strength = ?,
+                      dataset_cn_end = ? WHERE id = ?""",
+            (1 if body.enabled else 0, body.strength, body.end_percent, project_id))
+        if cur.rowcount == 0:
+            raise HTTPException(404, "project not found")
+        proj = conn.execute("SELECT pose_controlnet FROM projects WHERE id = ?",
+                            (project_id,)).fetchone()
+    model = (proj["pose_controlnet"] or "").strip()
+    if body.enabled and not model:
+        warning = warning or ("no ControlNet model is selected yet — pick one under 'Pose "
+                              "structure & face pass' on the Poses tab or posed batches "
+                              "will be refused")
+    logs.info("process", f"dataset ControlNet {'on' if body.enabled else 'off'}",
+              project_id=project_id, strength=body.strength, end_percent=body.end_percent)
+    return {"enabled": body.enabled, "strength": body.strength,
+            "end_percent": body.end_percent, "model": model, "warning": warning}
 
 
 class DatasetSelectRequest(BaseModel):
@@ -2832,6 +3054,16 @@ def _pose_seed(version_seed: int, pose_id: int) -> int:
     return mixed % 2_147_483_647
 
 
+def _controlnet_kind(conn, filename: str) -> str:
+    """The registry's `kind` for a ControlNet file, defaulting to plain openpose.
+
+    It decides whether `apply_controlnet` inserts `SetUnionControlNetType`, so an
+    unregistered union model renders without ever being told what to control.
+    """
+    reg = conn.execute("SELECT kind FROM controlnets WHERE filename = ?", (filename,)).fetchone()
+    return (reg["kind"] if reg else "openpose")
+
+
 def _pose_cn_cfg(conn, project_id: int, pose_row: Any,
                  skeleton_override: str | None = None) -> dict[str, Any] | None:
     """Resolve the ControlNet config for one pose, or None to render prompt-only.
@@ -2860,12 +3092,11 @@ def _pose_cn_cfg(conn, project_id: int, pose_row: Any,
         return None
     if not cn_name or not skeleton:
         return None
-    reg = conn.execute("SELECT kind FROM controlnets WHERE filename = ?", (cn_name,)).fetchone()
     strength = pose_row["cn_strength"]
     return {
         "controlnet_name": cn_name,
         "skeleton": skeleton,
-        "kind": (reg["kind"] if reg else "openpose"),
+        "kind": _controlnet_kind(conn, cn_name),
         "strength": proj["pose_cn_strength"] if strength is None else strength,
         "start_percent": proj["pose_cn_start"],
         "end_percent": proj["pose_cn_end"],

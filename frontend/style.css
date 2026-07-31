@@ -444,6 +444,16 @@ code { background: var(--bg-raised); padding: 1px 5px; border-radius: 4px; font-
 .ds-variety select { background: var(--bg-raised); color: var(--text);
   border: 1px solid var(--line); border-radius: 8px; padding: 5px 8px; font: inherit;
   font-size: 12px; cursor: pointer; }
+/* Phase H3c — posed dataset shots. Disabled when the ControlNet model or the pose library
+   is missing, so the dimmed state has to read as "not ready yet", not as broken. */
+.ds-posed, .ds-posed-strength { display: flex; align-items: center; gap: 6px;
+  color: var(--text-dim); font-size: 12px; cursor: pointer; }
+.ds-posed input { accent-color: var(--accent); cursor: pointer; }
+.ds-posed-strength input { width: 60px; background: var(--bg-raised); color: var(--text);
+  border: 1px solid var(--line); border-radius: 8px; padding: 5px 8px; font: inherit;
+  font-size: 12px; }
+.ds-posed input:disabled, .ds-posed-strength input:disabled { opacity: 0.45; cursor: not-allowed; }
+#ds-posed-hint { margin: 6px 0 0; }
 .ds-genstate { margin-left: auto; }
 .ds-progress-head { display: flex; justify-content: space-between; align-items: baseline;
   margin-bottom: 5px; }
